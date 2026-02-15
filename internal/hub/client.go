@@ -28,7 +28,7 @@ func newClient(conn *websocket.Conn, hub *Hub) *Client {
 
 func (c *Client) readPump(ctx context.Context) {
 	defer func() {
-		c.hub.unregister <- c
+		c.hub.unregisterClient(c)
 		c.conn.Close(websocket.StatusNormalClosure, "")
 	}()
 

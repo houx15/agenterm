@@ -225,7 +225,24 @@ func TestBroadcastFanOut(t *testing.T) {
 		_, data, err := conn.Read(readCtx)
 		readCancel()
 		if err != nil {
-			t.Fatalf("client %d failed to receive message: %v", i, err)
+			t.Fatalf("client %d failed to receive initial windows message: %v", i, err)
+		}
+
+		var baseMsg struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &baseMsg); err != nil {
+			t.Fatalf("client %d failed to unmarshal base message: %v", i, err)
+		}
+		if baseMsg.Type != "windows" {
+			t.Fatalf("client %d expected initial windows message, got type: %s", i, baseMsg.Type)
+		}
+
+		readCtx, readCancel = context.WithTimeout(context.Background(), 2*time.Second)
+		_, data, err = conn.Read(readCtx)
+		readCancel()
+		if err != nil {
+			t.Fatalf("client %d failed to receive output message: %v", i, err)
 		}
 
 		var msg OutputMessage
@@ -265,6 +282,13 @@ func TestRateLimiting(t *testing.T) {
 
 	waitForClientCount(t, hub, 1, 1*time.Second)
 
+	readCtx, readCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	_, _, err = conn.Read(readCtx)
+	readCancel()
+	if err != nil {
+		t.Fatalf("failed to receive initial windows message: %v", err)
+	}
+
 	hub.SetBatchEnabled(true)
 	for i := 0; i < 5; i++ {
 		hub.BroadcastOutput(OutputMessage{
@@ -278,7 +302,7 @@ func TestRateLimiting(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	readCtx, readCancel = context.WithTimeout(context.Background(), 2*time.Second)
 	_, data, err := conn.Read(readCtx)
 	readCancel()
 	if err != nil {
@@ -325,6 +349,123 @@ func TestRateLimiterDirect(t *testing.T) {
 		t.Errorf("batched message should contain all texts, got: %q", received[0].Text)
 	}
 	mu.Unlock()
+}
+
+func TestConnectionBeforeRun(t *testing.T) {
+	token := "test-token"
+	hub := New(token, nil)
+
+	server := httptest.NewServer(http.HandlerFunc(hub.HandleWebSocket))
+	defer server.Close()
+
+	url := fmt.Sprintf("ws://%s/ws?token=%s", server.URL[7:], token)
+
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, _, err := websocket.Dial(dialCtx, url, nil)
+	dialCancel()
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go hub.Run(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	_, data, err := conn.Read(readCtx)
+	readCancel()
+	if err != nil {
+		t.Fatalf("failed to receive initial message: %v", err)
+	}
+
+	var msg WindowsMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if msg.Type != "windows" {
+		t.Errorf("expected windows message, got type: %s", msg.Type)
+	}
+
+	conn.Close(websocket.StatusNormalClosure, "")
+	cancel()
+}
+
+func TestInitialEmptyWindowsMessage(t *testing.T) {
+	token := "test-token"
+	hub := New(token, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go hub.Run(ctx)
+	defer cancel()
+
+	server := httptest.NewServer(http.HandlerFunc(hub.HandleWebSocket))
+	defer server.Close()
+
+	url := fmt.Sprintf("ws://%s/ws?token=%s", server.URL[7:], token)
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, _, err := websocket.Dial(dialCtx, url, nil)
+	dialCancel()
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	readCtx, readCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	_, data, err := conn.Read(readCtx)
+	readCancel()
+	if err != nil {
+		t.Fatalf("failed to receive initial windows message: %v", err)
+	}
+
+	var msg WindowsMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if msg.Type != "windows" {
+		t.Errorf("expected windows message, got type: %s", msg.Type)
+	}
+	if len(msg.List) != 0 {
+		t.Errorf("expected empty list, got %d items", len(msg.List))
+	}
+}
+
+func TestHighClientCountShutdown(t *testing.T) {
+	token := "test-token"
+	hub := New(token, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go hub.Run(ctx)
+
+	server := httptest.NewServer(http.HandlerFunc(hub.HandleWebSocket))
+	defer server.Close()
+
+	url := fmt.Sprintf("ws://%s/ws?token=%s", server.URL[7:], token)
+
+	numClients := 20
+	var conns []*websocket.Conn
+	for i := 0; i < numClients; i++ {
+		dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		conn, _, err := websocket.Dial(dialCtx, url, nil)
+		dialCancel()
+		if err != nil {
+			t.Fatalf("failed to connect client %d: %v", i, err)
+		}
+		conns = append(conns, conn)
+	}
+
+	waitForClientCount(t, hub, numClients, 2*time.Second)
+
+	cancel()
+	time.Sleep(200 * time.Millisecond)
+
+	if hub.ClientCount() != 0 {
+		t.Errorf("expected 0 clients after shutdown, got %d", hub.ClientCount())
+	}
+
+	for _, conn := range conns {
+		conn.Close(websocket.StatusNormalClosure, "")
+	}
 }
 
 func waitForClientCount(t *testing.T, hub *Hub, expected int, timeout time.Duration) {

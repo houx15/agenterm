@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -26,6 +27,7 @@ type Hub struct {
 	rateLimiter  *RateLimiter
 	batchEnabled bool
 	ctx          context.Context
+	running      atomic.Bool
 }
 
 func New(token string, onInput func(string, string)) *Hub {
@@ -37,6 +39,7 @@ func New(token string, onInput func(string, string)) *Hub {
 		onInput:      onInput,
 		token:        token,
 		batchEnabled: true,
+		ctx:          context.Background(),
 	}
 	h.rateLimiter = NewRateLimiter(defaultBatchInterval, func(windowID string, msg OutputMessage) {
 		h.sendBroadcast(msg)
@@ -46,6 +49,9 @@ func New(token string, onInput func(string, string)) *Hub {
 
 func (h *Hub) Run(ctx context.Context) {
 	h.ctx = ctx
+	h.running.Store(true)
+	defer h.running.Store(false)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -54,6 +60,7 @@ func (h *Hub) Run(ctx context.Context) {
 			for _, c := range h.clients {
 				close(c.send)
 			}
+			h.clients = make(map[string]*Client)
 			h.mu.Unlock()
 			return
 
@@ -102,18 +109,24 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := newClient(conn, h)
-	h.register <- client
+
+	select {
+	case h.register <- client:
+	default:
+		log.Printf("hub not accepting connections")
+		conn.Close(websocket.StatusTryAgainLater, "server busy")
+		return
+	}
 
 	h.windowsMu.RLock()
 	windows := h.windows
 	h.windowsMu.RUnlock()
-	if len(windows) > 0 {
-		msg := WindowsMessage{Type: "windows", List: windows}
-		if data, err := json.Marshal(msg); err == nil {
-			select {
-			case client.send <- data:
-			default:
-			}
+
+	msg := WindowsMessage{Type: "windows", List: windows}
+	if data, err := json.Marshal(msg); err == nil {
+		select {
+		case client.send <- data:
+		default:
 		}
 	}
 
@@ -206,5 +219,22 @@ func (h *Hub) SetBatchEnabled(enabled bool) {
 func (h *Hub) FlushPendingOutput() {
 	if h.rateLimiter != nil {
 		h.rateLimiter.FlushAll()
+	}
+}
+
+func (h *Hub) isRunning() bool {
+	return h.running.Load()
+}
+
+func (h *Hub) unregisterClient(c *Client) {
+	if !h.isRunning() {
+		c.conn.Close(websocket.StatusNormalClosure, "")
+		return
+	}
+	select {
+	case h.unregister <- c:
+	default:
+		log.Printf("unregister channel full for client %s, forcing close", c.id)
+		c.conn.Close(websocket.StatusNormalClosure, "")
 	}
 }
