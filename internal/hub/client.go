@@ -1,0 +1,108 @@
+package hub
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"time"
+
+	"nhooyr.io/websocket"
+)
+
+type Client struct {
+	id   string
+	conn *websocket.Conn
+	send chan []byte
+	hub  *Hub
+}
+
+func newClient(conn *websocket.Conn, hub *Hub) *Client {
+	return &Client{
+		id:   generateID(),
+		conn: conn,
+		send: make(chan []byte, 256),
+		hub:  hub,
+	}
+}
+
+func (c *Client) readPump(ctx context.Context) {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close(websocket.StatusNormalClosure, "")
+	}()
+
+	c.conn.SetReadLimit(32768)
+
+	for {
+		_, data, err := c.conn.Read(ctx)
+		if err != nil {
+			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+				log.Printf("client %s read error: %v", c.id, err)
+			}
+			return
+		}
+
+		var msg ClientMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			log.Printf("client %s invalid message: %v", c.id, err)
+			continue
+		}
+
+		switch msg.Type {
+		case "input":
+			if msg.Window != "" && msg.Keys != "" {
+				c.hub.handleInput(msg.Window, msg.Keys)
+			}
+		case "subscribe":
+			log.Printf("client %s subscribed to window %s", c.id, msg.Window)
+		default:
+			log.Printf("client %s unknown message type: %s", c.id, msg.Type)
+		}
+	}
+}
+
+func (c *Client) writePump(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close(websocket.StatusNormalClosure, "")
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.conn.Close(websocket.StatusNormalClosure, "")
+			return
+		case <-ticker.C:
+			err := c.conn.Ping(ctx)
+			if err != nil {
+				log.Printf("client %s ping failed: %v", c.id, err)
+				return
+			}
+		case msg, ok := <-c.send:
+			if !ok {
+				c.conn.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+
+			err := c.conn.Write(ctx, websocket.MessageText, msg)
+			if err != nil {
+				log.Printf("client %s write error: %v", c.id, err)
+				return
+			}
+		}
+	}
+}
+
+func generateID() string {
+	return time.Now().Format("20060102150405") + "-" + randomString(6)
+}
+
+func randomString(n int) string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+	}
+	return string(b)
+}
