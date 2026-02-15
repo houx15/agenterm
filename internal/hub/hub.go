@@ -14,7 +14,7 @@ import (
 const defaultBatchInterval = 100 * time.Millisecond
 
 type Hub struct {
-	clients      map[*Client]struct{}
+	clients      map[string]*Client
 	register     chan *Client
 	unregister   chan *Client
 	broadcast    chan []byte
@@ -30,7 +30,7 @@ type Hub struct {
 
 func New(token string, onInput func(string, string)) *Hub {
 	h := &Hub{
-		clients:      make(map[*Client]struct{}),
+		clients:      make(map[string]*Client),
 		register:     make(chan *Client, 16),
 		unregister:   make(chan *Client, 16),
 		broadcast:    make(chan []byte, 256),
@@ -51,7 +51,7 @@ func (h *Hub) Run(ctx context.Context) {
 		case <-ctx.Done():
 			h.rateLimiter.FlushAll()
 			h.mu.Lock()
-			for c := range h.clients {
+			for _, c := range h.clients {
 				close(c.send)
 			}
 			h.mu.Unlock()
@@ -59,27 +59,14 @@ func (h *Hub) Run(ctx context.Context) {
 
 		case client := <-h.register:
 			h.mu.Lock()
-			h.clients[client] = struct{}{}
+			h.clients[client.id] = client
 			h.mu.Unlock()
 			log.Printf("client connected: %s (total: %d)", client.id, h.ClientCount())
 
-			h.windowsMu.RLock()
-			windows := h.windows
-			h.windowsMu.RUnlock()
-			if len(windows) > 0 {
-				msg := WindowsMessage{Type: "windows", List: windows}
-				if data, err := json.Marshal(msg); err == nil {
-					select {
-					case client.send <- data:
-					default:
-					}
-				}
-			}
-
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
+			if _, ok := h.clients[client.id]; ok {
+				delete(h.clients, client.id)
 				close(client.send)
 			}
 			h.mu.Unlock()
@@ -87,7 +74,7 @@ func (h *Hub) Run(ctx context.Context) {
 
 		case data := <-h.broadcast:
 			h.mu.RLock()
-			for c := range h.clients {
+			for _, c := range h.clients {
 				select {
 				case c.send <- data:
 				default:
@@ -116,6 +103,19 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	client := newClient(conn, h)
 	h.register <- client
+
+	h.windowsMu.RLock()
+	windows := h.windows
+	h.windowsMu.RUnlock()
+	if len(windows) > 0 {
+		msg := WindowsMessage{Type: "windows", List: windows}
+		if data, err := json.Marshal(msg); err == nil {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
 
 	go client.writePump(h.ctx)
 	go client.readPump(h.ctx)
@@ -171,6 +171,19 @@ func (h *Hub) BroadcastStatus(windowID string, status string) {
 	case h.broadcast <- data:
 	default:
 		log.Printf("broadcast channel full, dropping status message")
+	}
+}
+
+func (h *Hub) SendError(client *Client, message string) {
+	msg := ErrorMessage{Type: "error", Message: message}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("error marshaling error message: %v", err)
+		return
+	}
+	select {
+	case client.send <- data:
+	default:
 	}
 }
 

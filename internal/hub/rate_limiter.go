@@ -7,11 +7,10 @@ import (
 )
 
 type RateLimiter struct {
-	mu         sync.Mutex
-	pending    map[string]*pendingOutput
-	interval   time.Duration
-	onFlush    func(windowID string, msg OutputMessage)
-	flushTimer *time.Timer
+	mu       sync.Mutex
+	pending  map[string]*pendingOutput
+	interval time.Duration
+	onFlush  func(windowID string, msg OutputMessage)
 }
 
 type pendingOutput struct {
@@ -40,6 +39,7 @@ func (r *RateLimiter) Add(msg OutputMessage) {
 	if !exists {
 		p = &pendingOutput{
 			class: msg.Class,
+			ts:    msg.Ts,
 		}
 		r.pending[windowID] = p
 	}
@@ -47,9 +47,6 @@ func (r *RateLimiter) Add(msg OutputMessage) {
 	p.texts = append(p.texts, msg.Text)
 	if msg.ID != "" {
 		p.ids = append(p.ids, msg.ID)
-	}
-	if msg.Ts > p.ts {
-		p.ts = msg.Ts
 	}
 	if len(msg.Actions) > 0 {
 		p.actions = append(p.actions, msg.Actions...)

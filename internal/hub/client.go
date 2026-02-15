@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"log"
 	"time"
@@ -45,6 +46,7 @@ func (c *Client) readPump(ctx context.Context) {
 		var msg ClientMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			log.Printf("client %s invalid message: %v", c.id, err)
+			c.hub.SendError(c, "invalid message format")
 			continue
 		}
 
@@ -57,6 +59,7 @@ func (c *Client) readPump(ctx context.Context) {
 			log.Printf("client %s subscribed to window %s", c.id, msg.Window)
 		default:
 			log.Printf("client %s unknown message type: %s", c.id, msg.Type)
+			c.hub.SendError(c, "unknown message type: "+msg.Type)
 		}
 	}
 }
@@ -101,8 +104,9 @@ func generateID() string {
 func randomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)
+	rand.Read(b)
 	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }
