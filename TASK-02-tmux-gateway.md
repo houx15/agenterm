@@ -20,11 +20,6 @@ Implement a `tmux.Gateway` that connects to a tmux session via Control Mode, par
 ## Dependencies
 - Depends on: feature/01-project-scaffold (needs go.mod, project structure)
 - Branch: feature/02-tmux-gateway
-- Base: main
-
-## Scope
-
-### Files to Create
 - `internal/tmux/types.go` — Data types
 - `internal/tmux/protocol.go` — Control Mode protocol parser
 - `internal/tmux/gateway.go` — Gateway struct, subprocess management, goroutines
