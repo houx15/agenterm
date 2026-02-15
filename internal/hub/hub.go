@@ -16,7 +16,7 @@ const defaultBatchInterval = 100 * time.Millisecond
 
 type Hub struct {
 	clients      map[string]*Client
-	register     chan *Client
+	register     chan *clientRegistration
 	unregister   chan *Client
 	broadcast    chan []byte
 	onInput      func(windowID string, keys string)
@@ -26,20 +26,29 @@ type Hub struct {
 	windowsMu    sync.RWMutex
 	rateLimiter  *RateLimiter
 	batchEnabled bool
-	ctx          context.Context
+	ctxWrap      *ctxWrapper
 	running      atomic.Bool
+}
+
+type ctxWrapper struct {
+	ctx context.Context
+}
+
+type clientRegistration struct {
+	client         *Client
+	initialWindows []byte
 }
 
 func New(token string, onInput func(string, string)) *Hub {
 	h := &Hub{
 		clients:      make(map[string]*Client),
-		register:     make(chan *Client, 16),
+		register:     make(chan *clientRegistration, 16),
 		unregister:   make(chan *Client, 16),
 		broadcast:    make(chan []byte, 256),
 		onInput:      onInput,
 		token:        token,
 		batchEnabled: true,
-		ctx:          context.Background(),
+		ctxWrap:      &ctxWrapper{ctx: context.Background()},
 	}
 	h.rateLimiter = NewRateLimiter(defaultBatchInterval, func(windowID string, msg OutputMessage) {
 		h.sendBroadcast(msg)
@@ -47,8 +56,15 @@ func New(token string, onInput func(string, string)) *Hub {
 	return h
 }
 
+func (h *Hub) getContext() context.Context {
+	if h.ctxWrap != nil {
+		return h.ctxWrap.ctx
+	}
+	return context.Background()
+}
+
 func (h *Hub) Run(ctx context.Context) {
-	h.ctx = ctx
+	h.ctxWrap = &ctxWrapper{ctx: ctx}
 	h.running.Store(true)
 	defer h.running.Store(false)
 
@@ -64,11 +80,19 @@ func (h *Hub) Run(ctx context.Context) {
 			h.mu.Unlock()
 			return
 
-		case client := <-h.register:
+		case reg := <-h.register:
 			h.mu.Lock()
-			h.clients[client.id] = client
+			h.clients[reg.client.id] = reg.client
 			h.mu.Unlock()
-			log.Printf("client connected: %s (total: %d)", client.id, h.ClientCount())
+			if reg.initialWindows != nil {
+				select {
+				case reg.client.send <- reg.initialWindows:
+				default:
+				}
+			}
+			go reg.client.writePump(h.getContext())
+			go reg.client.readPump(h.getContext())
+			log.Printf("client connected: %s (total: %d)", reg.client.id, h.ClientCount())
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -110,28 +134,20 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	client := newClient(conn, h)
 
-	select {
-	case h.register <- client:
-	default:
-		log.Printf("hub not accepting connections")
-		conn.Close(websocket.StatusTryAgainLater, "server busy")
-		return
-	}
-
 	h.windowsMu.RLock()
 	windows := h.windows
 	h.windowsMu.RUnlock()
 
 	msg := WindowsMessage{Type: "windows", List: windows}
-	if data, err := json.Marshal(msg); err == nil {
-		select {
-		case client.send <- data:
-		default:
-		}
-	}
+	initialWindows, _ := json.Marshal(msg)
 
-	go client.writePump(h.ctx)
-	go client.readPump(h.ctx)
+	select {
+	case h.register <- &clientRegistration{client: client, initialWindows: initialWindows}:
+	default:
+		log.Printf("hub not accepting connections")
+		conn.Close(websocket.StatusTryAgainLater, "server busy")
+		return
+	}
 }
 
 func (h *Hub) BroadcastOutput(msg OutputMessage) {
