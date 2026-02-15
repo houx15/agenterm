@@ -18,12 +18,12 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(cfg *config.Config, h *hub.Hub) *Server {
+func New(cfg *config.Config, h *hub.Hub) (*Server, error) {
 	mux := http.NewServeMux()
 
 	subFS, err := fs.Sub(web.Assets, ".")
 	if err != nil {
-		slog.Error("failed to sub filesystem", "error", err)
+		return nil, fmt.Errorf("failed to sub filesystem: %w", err)
 	}
 	fileServer := http.FileServer(http.FS(subFS))
 	mux.Handle("/", fileServer)
@@ -36,7 +36,7 @@ func New(cfg *config.Config, h *hub.Hub) *Server {
 			Addr:    fmt.Sprintf("0.0.0.0:%d", cfg.Port),
 			Handler: mux,
 		},
-	}
+	}, nil
 }
 
 func (s *Server) Start(ctx context.Context) error {

@@ -22,15 +22,15 @@ var version = "0.1.0"
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("agenterm v%s\n", version)
+		os.Exit(0)
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
-	}
-
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("agenterm v%s\n", version)
-		os.Exit(0)
 	}
 
 	gw := tmux.New(cfg.TmuxSession)
@@ -40,7 +40,11 @@ func main() {
 			slog.Error("failed to send keys", "window", windowID, "error", err)
 		}
 	})
-	srv := server.New(cfg, h)
+	srv, err := server.New(cfg, h)
+	if err != nil {
+		slog.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -51,6 +55,7 @@ func main() {
 	}
 
 	go h.Run(ctx)
+	h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	go processEvents(ctx, gw, psr, h)
 
 	printStartupBanner(cfg, gw.ListWindows())
@@ -150,11 +155,12 @@ func gracefulShutdown(gw *tmux.Gateway, psr *parser.Parser, h *hub.Hub) {
 	slog.Info("shutting down...")
 
 	h.FlushPendingOutput()
-	psr.Close()
 
 	if err := gw.Stop(); err != nil {
 		slog.Error("gateway stop error", "error", err)
 	}
+
+	psr.Close()
 
 	slog.Info("agenterm stopped")
 }
