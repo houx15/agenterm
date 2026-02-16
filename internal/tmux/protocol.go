@@ -105,22 +105,26 @@ func parseOutput(line string) (Event, error) {
 
 func parseExtendedOutput(line string) (Event, error) {
 	rest := strings.TrimPrefix(line, "%extended-output ")
-	parts := strings.SplitN(rest, " ", 3)
-	if len(parts) < 3 {
+	parts := strings.SplitN(rest, " : ", 2)
+	if len(parts) < 2 {
 		return Event{}, ErrUnknownLine
 	}
 
-	paneID := parts[0]
+	headerFields := strings.Fields(parts[0])
+	if len(headerFields) < 2 {
+		return Event{}, ErrUnknownLine
+	}
+	paneID := headerFields[0]
 	if len(paneID) == 0 || paneID[0] != '%' {
 		return Event{}, ErrUnknownLine
 	}
 
-	// parts[1] is "age" in milliseconds; we don't currently use it.
-	if _, err := strconv.Atoi(parts[1]); err != nil {
+	// headerFields[1] is "age" in milliseconds; we don't currently use it.
+	if _, err := strconv.Atoi(headerFields[1]); err != nil {
 		return Event{}, ErrUnknownLine
 	}
 
-	data := DecodeOctal(parts[2])
+	data := DecodeOctal(parts[1])
 
 	return Event{
 		Type:   EventOutput,
@@ -132,30 +136,36 @@ func parseExtendedOutput(line string) (Event, error) {
 
 func parseWindowAdd(line string) (Event, error) {
 	rest := strings.TrimPrefix(line, "%window-add ")
-	rest = strings.TrimSpace(rest)
-
-	if len(rest) == 0 || rest[0] != '@' {
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return Event{}, ErrUnknownLine
+	}
+	windowID := strings.TrimSpace(fields[0])
+	if len(windowID) == 0 || windowID[0] != '@' {
 		return Event{}, ErrUnknownLine
 	}
 
 	return Event{
 		Type:     EventWindowAdd,
-		WindowID: rest,
+		WindowID: windowID,
 		Raw:      line,
 	}, nil
 }
 
 func parseWindowClose(line string) (Event, error) {
 	rest := strings.TrimPrefix(line, "%window-close ")
-	rest = strings.TrimSpace(rest)
-
-	if len(rest) == 0 || rest[0] != '@' {
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return Event{}, ErrUnknownLine
+	}
+	windowID := strings.TrimSpace(fields[0])
+	if len(windowID) == 0 || windowID[0] != '@' {
 		return Event{}, ErrUnknownLine
 	}
 
 	return Event{
 		Type:     EventWindowClose,
-		WindowID: rest,
+		WindowID: windowID,
 		Raw:      line,
 	}, nil
 }

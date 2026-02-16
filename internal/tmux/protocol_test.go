@@ -92,7 +92,7 @@ func TestParseLine(t *testing.T) {
 		},
 		{
 			name:        "extended-output event",
-			input:       "%extended-output %0 12 Hello\\012World",
+			input:       "%extended-output %0 12 : Hello\\012World",
 			expectError: false,
 			eventType:   EventOutput,
 			paneID:      "%0",
@@ -106,8 +106,22 @@ func TestParseLine(t *testing.T) {
 			windowID:    "@0",
 		},
 		{
+			name:        "window-add event with extra fields",
+			input:       "%window-add @0 extra",
+			expectError: false,
+			eventType:   EventWindowAdd,
+			windowID:    "@0",
+		},
+		{
 			name:        "window-close event",
 			input:       "%window-close @1",
+			expectError: false,
+			eventType:   EventWindowClose,
+			windowID:    "@1",
+		},
+		{
+			name:        "window-close event with extra fields",
+			input:       "%window-close @1 extra",
 			expectError: false,
 			eventType:   EventWindowClose,
 			windowID:    "@1",
@@ -217,7 +231,7 @@ func TestParseOutputDecoding(t *testing.T) {
 		},
 		{
 			name:     "extended output with ANSI codes",
-			input:    "%extended-output %0 0 \\033[31mred\\033[0m",
+			input:    "%extended-output %0 0 : \\033[31mred\\033[0m",
 			expected: "\x1b[31mred\x1b[0m",
 		},
 	}
