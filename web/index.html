@@ -646,6 +646,16 @@
             </div>
         </div>
     </div>
+    <div id="kill-window-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3>Kill Window</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Are you sure you want to kill this window?</p>
+            <div class="modal-buttons">
+                <button class="btn-cancel" id="kill-modal-cancel">Cancel</button>
+                <button class="btn-create" id="kill-modal-confirm" style="background: var(--error);">Kill</button>
+            </div>
+        </div>
+    </div>
     <script type="module">
         const state = {
             windows: [],
@@ -858,9 +868,7 @@
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const id = btn.dataset.id;
-                    if (confirm('Kill this window?')) {
-                        connection.send({ type: 'kill_window', window: id });
-                    }
+                    showKillModal(id);
                 });
             });
 
@@ -871,6 +879,36 @@
                 });
             });
         }
+
+        let windowToKill = null;
+        const killModal = document.getElementById('kill-window-modal');
+        const killModalCancel = document.getElementById('kill-modal-cancel');
+        const killModalConfirm = document.getElementById('kill-modal-confirm');
+
+        function showKillModal(windowId) {
+            windowToKill = windowId;
+            killModal.style.display = 'flex';
+        }
+
+        function hideKillModal() {
+            killModal.style.display = 'none';
+            windowToKill = null;
+        }
+
+        killModalCancel.addEventListener('click', hideKillModal);
+
+        killModalConfirm.addEventListener('click', () => {
+            if (windowToKill) {
+                connection.send({ type: 'kill_window', window: windowToKill });
+            }
+            hideKillModal();
+        });
+
+        killModal.addEventListener('click', (e) => {
+            if (e.target === killModal) {
+                hideKillModal();
+            }
+        });
 
         function setActiveWindow(id) {
             state.activeWindow = id;
