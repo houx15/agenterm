@@ -62,7 +62,7 @@ func (p *Parser) Feed(windowID string, data string) {
 	var classification MessageClass = ClassNormal
 	var actions []QuickAction
 
-	if PromptConfirmPattern.MatchString(cleanText) || PromptQuestionPattern.MatchString(cleanText) {
+	if PromptConfirmPattern.MatchString(cleanText) || PromptQuestionPattern.MatchString(cleanText) || PromptBracketedChoicePattern.MatchString(cleanText) {
 		immediateFlush = true
 		classification = ClassPrompt
 		actions = generateQuickActions(cleanText)
@@ -123,7 +123,7 @@ func (p *Parser) flushBufferLocked(buf *windowBuffer, forcedClass MessageClass, 
 }
 
 func (p *Parser) classify(text string) (MessageClass, []QuickAction) {
-	if PromptConfirmPattern.MatchString(text) || PromptQuestionPattern.MatchString(text) || hasNumberedChoices(text) {
+	if PromptConfirmPattern.MatchString(text) || PromptQuestionPattern.MatchString(text) || PromptBracketedChoicePattern.MatchString(text) || hasNumberedChoices(text) {
 		actions := generateQuickActions(text)
 		return ClassPrompt, actions
 	}
@@ -225,12 +225,10 @@ func (p *Parser) updateStatuses() {
 		if buf.status == StatusWaiting {
 			continue
 		}
-		if now.Sub(buf.lastOutput) > 30*time.Second {
+		if now.Sub(buf.lastOutput) >= 30*time.Second {
 			buf.status = StatusIdle
-		} else if now.Sub(buf.lastOutput) > 3*time.Second {
-			if buf.status != StatusWaiting {
-				buf.status = StatusIdle
-			}
+		} else if now.Sub(buf.lastOutput) <= 3*time.Second {
+			buf.status = StatusWorking
 		}
 	}
 }

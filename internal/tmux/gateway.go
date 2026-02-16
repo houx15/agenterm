@@ -13,24 +13,27 @@ import (
 )
 
 var windowIDRe = regexp.MustCompile(`^@\d+$`)
+var paneIDRe = regexp.MustCompile(`^%\d+$`)
 
 type Gateway struct {
-	session string
-	process *exec.Cmd
-	stdin   io.WriteCloser
-	events  chan Event
-	done    chan struct{}
-	windows map[string]*Window
-	mu      sync.RWMutex
-	wg      sync.WaitGroup
+	session      string
+	process      *exec.Cmd
+	stdin        io.WriteCloser
+	events       chan Event
+	done         chan struct{}
+	windows      map[string]*Window
+	paneToWindow map[string]string
+	mu           sync.RWMutex
+	wg           sync.WaitGroup
 }
 
 func New(session string) *Gateway {
 	return &Gateway{
-		session: session,
-		events:  make(chan Event, 1000),
-		done:    make(chan struct{}),
-		windows: make(map[string]*Window),
+		session:      session,
+		events:       make(chan Event, 1000),
+		done:         make(chan struct{}),
+		windows:      make(map[string]*Window),
+		paneToWindow: make(map[string]string),
 	}
 }
 
@@ -88,6 +91,10 @@ func (g *Gateway) discoverWindows() error {
 	if err != nil {
 		return err
 	}
+	_, err = g.stdin.Write([]byte("list-panes -a -F '#{pane_id}\t#{window_id}'\n"))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -105,6 +112,14 @@ func (g *Gateway) reader(r io.Reader) {
 		event, err := ParseLine(line)
 		if err != nil {
 			continue
+		}
+
+		if event.Type == EventOutput && event.WindowID == "" && event.PaneID != "" {
+			g.mu.RLock()
+			if windowID, ok := g.paneToWindow[event.PaneID]; ok {
+				event.WindowID = windowID
+			}
+			g.mu.RUnlock()
 		}
 
 		switch event.Type {
@@ -140,6 +155,7 @@ func (g *Gateway) reader(r io.Reader) {
 func (g *Gateway) handleCommandResponse(lines []string) {
 	for _, line := range lines {
 		g.parseWindowLine(line)
+		g.parsePaneLine(line)
 	}
 }
 
@@ -163,6 +179,24 @@ func (g *Gateway) parseWindowLine(line string) {
 		Name:   name,
 		Active: active,
 	}
+	g.mu.Unlock()
+}
+
+func (g *Gateway) parsePaneLine(line string) {
+	parts := strings.Split(line, "\t")
+	if len(parts) < 2 {
+		return
+	}
+
+	paneID := parts[0]
+	windowID := parts[1]
+
+	if !paneIDRe.MatchString(paneID) || !windowIDRe.MatchString(windowID) {
+		return
+	}
+
+	g.mu.Lock()
+	g.paneToWindow[paneID] = windowID
 	g.mu.Unlock()
 }
 
