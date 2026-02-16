@@ -206,3 +206,30 @@ func TestGatewayReaderHandlesWindowEventsInsideCommandBlock(t *testing.T) {
 		t.Error("expected @2 to be present after window-add event")
 	}
 }
+
+func TestParseWindowsOutput(t *testing.T) {
+	output := "@1\tmain\t1\n@2\tprobe-window\t0\ninvalid\tline\n"
+	parsed := parseWindowsOutput(output)
+
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 windows, got %d", len(parsed))
+	}
+	if parsed["@2"] == nil || parsed["@2"].Name != "probe-window" {
+		t.Fatalf("expected @2 name probe-window, got %+v", parsed["@2"])
+	}
+	if !parsed["@1"].Active {
+		t.Fatal("expected @1 active=true")
+	}
+}
+
+func TestParsePanesOutput(t *testing.T) {
+	output := "%10\t@1\n%11\t@2\n%bad\t@3\n"
+	parsed := parsePanesOutput(output)
+
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 pane mappings, got %d", len(parsed))
+	}
+	if parsed["%10"] != "@1" {
+		t.Fatalf("expected %%10 -> @1, got %q", parsed["%10"])
+	}
+}

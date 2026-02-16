@@ -44,6 +44,8 @@ func main() {
 		if err := gw.NewWindow(name, cfg.DefaultDir); err != nil {
 			slog.Error("failed to create window", "error", err)
 		}
+		time.Sleep(100 * time.Millisecond)
+		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetOnKillWindow(func(windowID string) {
 		if err := gw.KillWindow(windowID); err != nil {

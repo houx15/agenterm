@@ -373,6 +373,13 @@ func (g *Gateway) NewWindow(name string, defaultDir string) error {
 		}
 	}
 
+	for i := 0; i < 5; i++ {
+		if err := g.syncStateFromTmux(); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	return nil
 }
 
@@ -385,6 +392,86 @@ func (g *Gateway) KillWindow(windowID string) error {
 		return fmt.Errorf("invalid window ID format: %s", windowID)
 	}
 
-	_, err := g.stdin.Write([]byte(fmt.Sprintf("kill-window -t %s\n", windowID)))
-	return err
+	if _, err := g.stdin.Write([]byte(fmt.Sprintf("kill-window -t %s\n", windowID))); err != nil {
+		return err
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := g.syncStateFromTmux(); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
+func (g *Gateway) syncStateFromTmux() error {
+	windowsCmd := exec.Command("tmux", "list-windows", "-t", g.session, "-F", "#{window_id}\t#{window_name}\t#{window_active}")
+	windowsOut, err := windowsCmd.Output()
+	if err != nil {
+		return fmt.Errorf("list-windows failed: %w", err)
+	}
+
+	panesCmd := exec.Command("tmux", "list-panes", "-a", "-t", g.session, "-F", "#{pane_id}\t#{window_id}")
+	panesOut, err := panesCmd.Output()
+	if err != nil {
+		return fmt.Errorf("list-panes failed: %w", err)
+	}
+
+	windows := parseWindowsOutput(string(windowsOut))
+	paneToWindow := parsePanesOutput(string(panesOut))
+
+	g.mu.Lock()
+	g.windows = windows
+	g.paneToWindow = paneToWindow
+	g.mu.Unlock()
+
+	return nil
+}
+
+func parseWindowsOutput(output string) map[string]*Window {
+	result := make(map[string]*Window)
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		windowID := parts[0]
+		if !windowIDRe.MatchString(windowID) {
+			continue
+		}
+		name := parts[1]
+		active := len(parts) > 2 && strings.TrimSpace(parts[2]) == "1"
+		result[windowID] = &Window{
+			ID:     windowID,
+			Name:   name,
+			Active: active,
+		}
+	}
+	return result
+}
+
+func parsePanesOutput(output string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		paneID := parts[0]
+		windowID := parts[1]
+		if !paneIDRe.MatchString(paneID) || !windowIDRe.MatchString(windowID) {
+			continue
+		}
+		result[paneID] = windowID
+	}
+	return result
 }

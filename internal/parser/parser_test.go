@@ -57,6 +57,26 @@ func TestStripANSI(t *testing.T) {
 			input:    "\x1b(Btext\x1b)0more",
 			expected: "textmore",
 		},
+		{
+			name:     "private mode and keypad mode",
+			input:    "\x1b[?1h\x1b=\x1b[?2004htext\x1b[?2004l\x1b[?1l\x1b>",
+			expected: "text",
+		},
+		{
+			name:     "old title sequence",
+			input:    "\x1bk..ding/agenterm\x1b\\hello",
+			expected: "hello",
+		},
+		{
+			name:     "backspace cleanup",
+			input:    "e\becho",
+			expected: "echo",
+		},
+		{
+			name:     "remove other control bytes",
+			input:    "a\x00b\x1fc",
+			expected: "abc",
+		},
 	}
 
 	for _, tt := range tests {
