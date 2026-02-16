@@ -124,6 +124,20 @@ func (g *Gateway) reader(r io.Reader) {
 				default:
 				}
 			} else {
+				if event, err := ParseLine(line); err == nil {
+					if event.Type == EventOutput && event.WindowID == "" && event.PaneID != "" {
+						g.mu.RLock()
+						if windowID, ok := g.paneToWindow[event.PaneID]; ok {
+							event.WindowID = windowID
+						}
+						g.mu.RUnlock()
+					}
+					g.handleEvent(event)
+					select {
+					case g.events <- event:
+					default:
+					}
+				}
 				commandBuffer = append(commandBuffer, line)
 			}
 			continue
@@ -267,34 +281,61 @@ func (g *Gateway) SendKeys(windowID string, keys string) error {
 		return fmt.Errorf("invalid window ID format: %s", windowID)
 	}
 
-	escaped := g.escapeKeys(keys)
-	cmd := fmt.Sprintf("send-keys -t %s %s\n", windowID, escaped)
-	_, err := g.stdin.Write([]byte(cmd))
-	return err
+	commands := g.buildSendKeysCommands(windowID, keys)
+	for _, cmd := range commands {
+		if _, err := g.stdin.Write([]byte(cmd)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (g *Gateway) escapeKeys(keys string) string {
-	if keys == "\n" || keys == "Enter" {
-		return "Enter"
-	}
-	if keys == "\x03" {
-		return "C-c"
-	}
-	if keys == "\x1b" {
-		return "Escape"
-	}
-
-	result := strings.ReplaceAll(keys, "\n", " Enter ")
-	result = strings.ReplaceAll(result, "\x03", " C-c ")
-	result = strings.ReplaceAll(result, "\x1b", " Escape ")
-
-	needsQuote := strings.ContainsAny(result, " '\"\t")
-	if needsQuote {
-		result = strings.ReplaceAll(result, "'", "'\\''")
-		return "'" + result + "'"
+func (g *Gateway) buildSendKeysCommands(windowID string, keys string) []string {
+	switch keys {
+	case "\n", "Enter":
+		return []string{fmt.Sprintf("send-keys -t %s Enter\n", windowID)}
+	case "\x03", "C-c":
+		return []string{fmt.Sprintf("send-keys -t %s C-c\n", windowID)}
+	case "\x1b", "Escape":
+		return []string{fmt.Sprintf("send-keys -t %s Escape\n", windowID)}
+	case "\t", "Tab":
+		return []string{fmt.Sprintf("send-keys -t %s Tab\n", windowID)}
 	}
 
-	return result
+	var cmds []string
+	var literal strings.Builder
+	flushLiteral := func() {
+		if literal.Len() == 0 {
+			return
+		}
+		cmds = append(cmds, fmt.Sprintf("send-keys -t %s -l -- %s\n", windowID, tmuxQuote(literal.String())))
+		literal.Reset()
+	}
+
+	for i := 0; i < len(keys); i++ {
+		switch keys[i] {
+		case '\n':
+			flushLiteral()
+			cmds = append(cmds, fmt.Sprintf("send-keys -t %s Enter\n", windowID))
+		case '\x03':
+			flushLiteral()
+			cmds = append(cmds, fmt.Sprintf("send-keys -t %s C-c\n", windowID))
+		case '\x1b':
+			flushLiteral()
+			cmds = append(cmds, fmt.Sprintf("send-keys -t %s Escape\n", windowID))
+		case '\t':
+			flushLiteral()
+			cmds = append(cmds, fmt.Sprintf("send-keys -t %s Tab\n", windowID))
+		default:
+			literal.WriteByte(keys[i])
+		}
+	}
+	flushLiteral()
+	return cmds
+}
+
+func tmuxQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func (g *Gateway) ListWindows() []Window {

@@ -113,20 +113,51 @@ func TestGatewayEscapeKeys(t *testing.T) {
 	g := &Gateway{}
 
 	tests := []struct {
+		name     string
 		input    string
-		expected string
+		expected []string
 	}{
-		{"Enter", "Enter"},
-		{"\n", "Enter"},
-		{"\x03", "C-c"},
-		{"hello", "hello"},
-		{"hello\nworld", "'hello Enter world'"},
+		{
+			name:     "single enter",
+			input:    "\n",
+			expected: []string{"send-keys -t @1 Enter\n"},
+		},
+		{
+			name:     "single ctrl-c",
+			input:    "\x03",
+			expected: []string{"send-keys -t @1 C-c\n"},
+		},
+		{
+			name:     "simple text",
+			input:    "hello",
+			expected: []string{"send-keys -t @1 -l -- 'hello'\n"},
+		},
+		{
+			name:     "text plus enter",
+			input:    "hello\n",
+			expected: []string{"send-keys -t @1 -l -- 'hello'\n", "send-keys -t @1 Enter\n"},
+		},
+		{
+			name:     "multiline text",
+			input:    "hello\nworld",
+			expected: []string{"send-keys -t @1 -l -- 'hello'\n", "send-keys -t @1 Enter\n", "send-keys -t @1 -l -- 'world'\n"},
+		},
+		{
+			name:     "escaped quote",
+			input:    "it's",
+			expected: []string{"send-keys -t @1 -l -- 'it'\\''s'\n"},
+		},
 	}
 
 	for _, tt := range tests {
-		result := g.escapeKeys(tt.input)
-		if result != tt.expected {
-			t.Errorf("escapeKeys(%q) = %q, want %q", tt.input, result, tt.expected)
+		result := g.buildSendKeysCommands("@1", tt.input)
+		if len(result) != len(tt.expected) {
+			t.Fatalf("%s: got %d commands, want %d", tt.name, len(result), len(tt.expected))
+		}
+		for i := range result {
+			if result[i] != tt.expected[i] {
+				t.Errorf("%s: command %d = %q, want %q", tt.name, i, result[i], tt.expected[i])
+			}
 		}
 	}
 }
@@ -136,5 +167,42 @@ func TestGatewaySendKeysNotStarted(t *testing.T) {
 	err := g.SendKeys("@0", "hello")
 	if err == nil {
 		t.Error("expected error when SendKeys called before Start")
+	}
+}
+
+func TestGatewayReaderHandlesWindowEventsInsideCommandBlock(t *testing.T) {
+	g := New("test")
+	input := strings.NewReader("%begin 1 1 0\n%window-add @2\n%window-close @1\n%end 1 1 0\n")
+
+	g.mu.Lock()
+	g.windows["@1"] = &Window{ID: "@1", Name: "old"}
+	g.mu.Unlock()
+
+	g.wg.Add(1)
+	go g.reader(input)
+
+	select {
+	case <-g.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reader did not finish")
+	}
+
+	windows := g.ListWindows()
+	hasOld := false
+	hasNew := false
+	for _, w := range windows {
+		if w.ID == "@1" {
+			hasOld = true
+		}
+		if w.ID == "@2" {
+			hasNew = true
+		}
+	}
+
+	if hasOld {
+		t.Error("expected @1 to be removed after window-close event")
+	}
+	if !hasNew {
+		t.Error("expected @2 to be present after window-add event")
 	}
 }

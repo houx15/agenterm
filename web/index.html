@@ -1013,14 +1013,23 @@
         function handleMessage(data) {
             switch (data.type) {
                 case 'windows':
+                    console.log('Received windows:', data.list);
                     state.windows = data.list || [];
-                    if (!state.activeWindow && state.windows.length > 0) {
+                    const activeStillExists = state.activeWindow && state.windows.some(w => w.id === state.activeWindow);
+                    if (!activeStillExists && state.windows.length > 0) {
                         setActiveWindow(state.windows[0].id);
+                        console.log('Set activeWindow to:', state.activeWindow);
+                    } else if (!activeStillExists && state.windows.length === 0) {
+                        state.activeWindow = null;
+                        renderMessages();
+                    } else {
+                        renderMessages();
                     }
                     renderSidebar();
                     break;
 
                 case 'output':
+                    console.log('Received output for window:', data.window, 'activeWindow:', state.activeWindow);
                     const windowId = data.window;
                     if (!state.messages[windowId]) {
                         state.messages[windowId] = [];
@@ -1039,6 +1048,7 @@
 
                     renderSidebar();
                     if (windowId === state.activeWindow) {
+                        console.log('Rendering messages for active window');
                         renderMessages();
                     }
                     break;
