@@ -303,15 +303,29 @@ func (g *Gateway) ListWindows() []Window {
 	return windows
 }
 
-func (g *Gateway) NewWindow(name string) error {
+func (g *Gateway) NewWindow(name string, defaultDir string) error {
 	if g.stdin == nil {
 		return fmt.Errorf("gateway not started")
 	}
 
 	if name != "" {
 		_, err := g.stdin.Write([]byte(fmt.Sprintf("new-window -n %s\n", name)))
-		return err
+		if err != nil {
+			return err
+		}
+	} else {
+		_, err := g.stdin.Write([]byte("new-window\n"))
+		if err != nil {
+			return err
+		}
 	}
-	_, err := g.stdin.Write([]byte("new-window\n"))
-	return err
+
+	if defaultDir != "" {
+		_, err := g.stdin.Write([]byte(fmt.Sprintf("send-keys 'cd %s' Enter\n", defaultDir)))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

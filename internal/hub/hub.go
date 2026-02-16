@@ -22,6 +22,7 @@ type Hub struct {
 	onInput      func(windowID string, keys string)
 	onNewWindow  func(name string)
 	token        string
+	defaultDir   string
 	mu           sync.RWMutex
 	windows      []WindowInfo
 	windowsMu    sync.RWMutex
@@ -237,6 +238,10 @@ func (h *Hub) handleNewWindow(name string) {
 
 func (h *Hub) SetOnNewWindow(fn func(name string)) {
 	h.onNewWindow = fn
+}
+
+func (h *Hub) SetDefaultDir(dir string) {
+	h.defaultDir = dir
 }
 
 func (h *Hub) SetBatchEnabled(enabled bool) {

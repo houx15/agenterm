@@ -474,6 +474,86 @@
             z-index: 100;
         }
 
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+        }
+
+        .modal {
+            background: var(--bg-sidebar);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 300px;
+            max-width: 90%;
+        }
+
+        .modal h3 {
+            margin: 0 0 16px 0;
+            color: var(--text-primary);
+            font-size: 16px;
+        }
+
+        .modal input {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+            margin-bottom: 16px;
+        }
+
+        .modal input:focus {
+            border-color: var(--accent);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .modal-buttons button {
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            min-height: 36px;
+        }
+
+        .modal-buttons .btn-cancel {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .modal-buttons .btn-cancel:hover {
+            border-color: var(--text-secondary);
+        }
+
+        .modal-buttons .btn-create {
+            background: var(--accent);
+            border: none;
+            color: var(--bg-main);
+        }
+
+        .modal-buttons .btn-create:hover {
+            background: var(--accent-hover);
+        }
+
         @media (max-width: 767px) {
             #sidebar {
                 position: absolute;
@@ -531,6 +611,16 @@
             <div id="input-bar">
                 <textarea id="input" placeholder="type a command..." rows="1"></textarea>
                 <button id="send-btn">➤</button>
+            </div>
+        </div>
+    </div>
+    <div id="new-window-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3>New Window</h3>
+            <input type="text" id="new-window-name" placeholder="Window name (optional)">
+            <div class="modal-buttons">
+                <button class="btn-cancel" id="modal-cancel">Cancel</button>
+                <button class="btn-create" id="modal-create">Create</button>
             </div>
         </div>
     </div>
@@ -899,7 +989,17 @@
         const messagesContainer = document.getElementById('messages');
 
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                if (state.activeWindow) {
+                    const message = {
+                        type: 'input',
+                        window: state.activeWindow,
+                        keys: '\t'
+                    };
+                    connection.send(message);
+                }
+            } else if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 const text = input.value;
                 if (text.trim()) {
@@ -929,15 +1029,48 @@
         });
 
         const newSessionBtn = document.getElementById('new-session-btn');
+        const modal = document.getElementById('new-window-modal');
+        const modalInput = document.getElementById('new-window-name');
+        const modalCancel = document.getElementById('modal-cancel');
+        const modalCreate = document.getElementById('modal-create');
 
-        newSessionBtn.addEventListener('click', () => {
-            const name = prompt('Enter window name (optional):');
-            if (name === null) return;
+        function showModal() {
+            modal.style.display = 'flex';
+            modalInput.value = '';
+            modalInput.focus();
+        }
+
+        function hideModal() {
+            modal.style.display = 'none';
+        }
+
+        newSessionBtn.addEventListener('click', showModal);
+
+        modalCancel.addEventListener('click', hideModal);
+
+        modalCreate.addEventListener('click', () => {
+            const name = modalInput.value.trim();
             const message = {
                 type: 'new_window',
                 name: name || ''
             };
             connection.send(message);
+            hideModal();
+        });
+
+        modalInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                modalCreate.click();
+            } else if (e.key === 'Escape') {
+                hideModal();
+            }
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                hideModal();
+            }
         });
 
         scrollBtn.addEventListener('click', () => {

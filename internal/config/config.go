@@ -16,19 +16,21 @@ type Config struct {
 	Token       string
 	ConfigPath  string
 	PrintToken  bool
+	DefaultDir  string
 }
 
 func Load() (*Config, error) {
-	cfg := &Config{
-		Port:        8765,
-		TmuxSession: "ai-coding",
-	}
-
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
-	cfg.ConfigPath = filepath.Join(homeDir, ".config", "agenterm", "config")
+
+	cfg := &Config{
+		Port:        8765,
+		TmuxSession: "ai-coding",
+		DefaultDir:  filepath.Join(homeDir, "08Coding"),
+		ConfigPath:  filepath.Join(homeDir, ".config", "agenterm", "config"),
+	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to load config file: %w", err)
@@ -37,6 +39,7 @@ func Load() (*Config, error) {
 	flag.IntVar(&cfg.Port, "port", cfg.Port, "server port (1-65535)")
 	flag.StringVar(&cfg.TmuxSession, "session", cfg.TmuxSession, "tmux session name")
 	flag.StringVar(&cfg.Token, "token", cfg.Token, "authentication token (auto-generated if empty)")
+	flag.StringVar(&cfg.DefaultDir, "dir", cfg.DefaultDir, "default directory for new windows")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
 
@@ -86,6 +89,8 @@ func (c *Config) loadFromFile() error {
 			c.Port = port
 		case "TmuxSession":
 			c.TmuxSession = value
+		case "DefaultDir":
+			c.DefaultDir = value
 		}
 	}
 	return nil
@@ -96,7 +101,7 @@ func (c *Config) saveToFile() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data := fmt.Sprintf("Port=%d\nTmuxSession=%s\nToken=%s\n", c.Port, c.TmuxSession, c.Token)
+	data := fmt.Sprintf("Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\n", c.Port, c.TmuxSession, c.Token, c.DefaultDir)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }
 
