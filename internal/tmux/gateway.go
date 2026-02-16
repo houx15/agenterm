@@ -87,11 +87,11 @@ func (g *Gateway) checkSessionExists() error {
 }
 
 func (g *Gateway) discoverWindows() error {
-	_, err := g.stdin.Write([]byte("list-windows -F '#{window_id}\t#{window_name}\t#{window_active}'\n"))
+	_, err := g.stdin.Write([]byte(fmt.Sprintf("list-windows -t %s -F '#{window_id}\t#{window_name}\t#{window_active}'\n", g.session)))
 	if err != nil {
 		return err
 	}
-	_, err = g.stdin.Write([]byte("list-panes -a -F '#{pane_id}\t#{window_id}'\n"))
+	_, err = g.stdin.Write([]byte(fmt.Sprintf("list-panes -a -t %s -F '#{pane_id}\t#{window_id}'\n", g.session)))
 	if err != nil {
 		return err
 	}
@@ -109,8 +109,35 @@ func (g *Gateway) reader(r io.Reader) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		if inCommand {
+			if strings.HasPrefix(line, "%end ") || strings.HasPrefix(line, "%error ") {
+				event, _ := ParseLine(line)
+				inCommand = false
+				g.handleCommandResponse(commandBuffer)
+				commandBuffer = nil
+
+				select {
+				case g.events <- event:
+				default:
+				}
+			} else {
+				commandBuffer = append(commandBuffer, line)
+			}
+			continue
+		}
+
 		event, err := ParseLine(line)
 		if err != nil {
+			continue
+		}
+
+		if event.Type == EventBegin {
+			inCommand = true
+			commandBuffer = nil
+			select {
+			case g.events <- event:
+			default:
+			}
 			continue
 		}
 
@@ -122,21 +149,7 @@ func (g *Gateway) reader(r io.Reader) {
 			g.mu.RUnlock()
 		}
 
-		switch event.Type {
-		case EventBegin:
-			inCommand = true
-			commandBuffer = nil
-		case EventEnd, EventError:
-			inCommand = false
-			g.handleCommandResponse(commandBuffer)
-			commandBuffer = nil
-		default:
-			if inCommand {
-				commandBuffer = append(commandBuffer, line)
-			} else {
-				g.handleEvent(event)
-			}
-		}
+		g.handleEvent(event)
 
 		select {
 		case g.events <- event:
