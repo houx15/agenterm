@@ -1,5 +1,5 @@
 ---
-status: resolved
+status: complete
 priority: p2
 issue_id: "004"
 tags: [code-review, architecture, quality]
