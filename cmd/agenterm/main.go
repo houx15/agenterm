@@ -45,6 +45,11 @@ func main() {
 			slog.Error("failed to send raw input", "window", windowID, "error", err)
 		}
 	})
+	h.SetOnTerminalResize(func(windowID string, cols int, rows int) {
+		if err := gw.ResizeWindow(windowID, cols, rows); err != nil {
+			slog.Error("failed to resize terminal", "window", windowID, "cols", cols, "rows", rows, "error", err)
+		}
+	})
 	h.SetOnNewWindow(func(name string) {
 		if err := gw.NewWindow(name, cfg.DefaultDir); err != nil {
 			slog.Error("failed to create window", "error", err)

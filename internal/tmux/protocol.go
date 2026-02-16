@@ -46,6 +46,10 @@ func ParseLine(line string) (Event, error) {
 		return parseOutput(line)
 	}
 
+	if strings.HasPrefix(line, "%extended-output ") {
+		return parseExtendedOutput(line)
+	}
+
 	if strings.HasPrefix(line, "%window-add ") {
 		return parseWindowAdd(line)
 	}
@@ -90,6 +94,33 @@ func parseOutput(line string) (Event, error) {
 	}
 
 	data := DecodeOctal(parts[1])
+
+	return Event{
+		Type:   EventOutput,
+		PaneID: paneID,
+		Data:   data,
+		Raw:    line,
+	}, nil
+}
+
+func parseExtendedOutput(line string) (Event, error) {
+	rest := strings.TrimPrefix(line, "%extended-output ")
+	parts := strings.SplitN(rest, " ", 3)
+	if len(parts) < 3 {
+		return Event{}, ErrUnknownLine
+	}
+
+	paneID := parts[0]
+	if len(paneID) == 0 || paneID[0] != '%' {
+		return Event{}, ErrUnknownLine
+	}
+
+	// parts[1] is "age" in milliseconds; we don't currently use it.
+	if _, err := strconv.Atoi(parts[1]); err != nil {
+		return Event{}, ErrUnknownLine
+	}
+
+	data := DecodeOctal(parts[2])
 
 	return Event{
 		Type:   EventOutput,

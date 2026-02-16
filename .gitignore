@@ -4,3 +4,4 @@ bin/
 TASK.md
 .worktrees
 architecture.md
+web/node_modules/

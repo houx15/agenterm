@@ -298,6 +298,8 @@ func (g *Gateway) SendRaw(windowID string, keys string) error {
 		return fmt.Errorf("invalid window ID format: %s", windowID)
 	}
 
+	// Terminal apps expect CR for Enter; dialog input sends LF.
+	keys = strings.ReplaceAll(keys, "\n", "\r")
 	data := []byte(keys)
 	if len(data) == 0 {
 		return nil
@@ -322,6 +324,21 @@ func (g *Gateway) SendRaw(windowID string, keys string) error {
 	}
 
 	return nil
+}
+
+func (g *Gateway) ResizeWindow(windowID string, cols int, rows int) error {
+	if g.stdin == nil {
+		return fmt.Errorf("gateway not started")
+	}
+	if !windowIDRe.MatchString(windowID) {
+		return fmt.Errorf("invalid window ID format: %s", windowID)
+	}
+	if cols <= 0 || rows <= 0 {
+		return fmt.Errorf("invalid terminal size: %dx%d", cols, rows)
+	}
+
+	_, err := g.stdin.Write([]byte(fmt.Sprintf("refresh-client -C %dx%d\n", cols, rows)))
+	return err
 }
 
 func (g *Gateway) buildSendKeysCommands(windowID string, keys string) []string {

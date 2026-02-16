@@ -91,6 +91,14 @@ func TestParseLine(t *testing.T) {
 			data:        "Hello\nWorld",
 		},
 		{
+			name:        "extended-output event",
+			input:       "%extended-output %0 12 Hello\\012World",
+			expectError: false,
+			eventType:   EventOutput,
+			paneID:      "%0",
+			data:        "Hello\nWorld",
+		},
+		{
 			name:        "window-add event",
 			input:       "%window-add @0",
 			expectError: false,
@@ -205,6 +213,11 @@ func TestParseOutputDecoding(t *testing.T) {
 		{
 			name:     "output with ANSI codes",
 			input:    "%output %0 \\033[31mred\\033[0m",
+			expected: "\x1b[31mred\x1b[0m",
+		},
+		{
+			name:     "extended output with ANSI codes",
+			input:    "%extended-output %0 0 \\033[31mred\\033[0m",
 			expected: "\x1b[31mred\x1b[0m",
 		},
 	}

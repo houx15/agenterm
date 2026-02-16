@@ -47,6 +47,8 @@ type ClientMessage struct {
 	Window string `json:"window"`
 	Keys   string `json:"keys"`
 	Name   string `json:"name,omitempty"`
+	Cols   int    `json:"cols,omitempty"`
+	Rows   int    `json:"rows,omitempty"`
 }
 
 type NewWindowMessage struct {

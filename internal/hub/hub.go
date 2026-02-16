@@ -15,23 +15,24 @@ import (
 const defaultBatchInterval = 100 * time.Millisecond
 
 type Hub struct {
-	clients         map[string]*Client
-	register        chan *clientRegistration
-	unregister      chan *Client
-	broadcast       chan []byte
-	onInput         func(windowID string, keys string)
-	onTerminalInput func(windowID string, keys string)
-	onNewWindow     func(name string)
-	onKillWindow    func(windowID string)
-	token           string
-	defaultDir      string
-	mu              sync.RWMutex
-	windows         []WindowInfo
-	windowsMu       sync.RWMutex
-	rateLimiter     *RateLimiter
-	batchEnabled    bool
-	ctxWrap         *ctxWrapper
-	running         atomic.Bool
+	clients          map[string]*Client
+	register         chan *clientRegistration
+	unregister       chan *Client
+	broadcast        chan []byte
+	onInput          func(windowID string, keys string)
+	onTerminalInput  func(windowID string, keys string)
+	onTerminalResize func(windowID string, cols int, rows int)
+	onNewWindow      func(name string)
+	onKillWindow     func(windowID string)
+	token            string
+	defaultDir       string
+	mu               sync.RWMutex
+	windows          []WindowInfo
+	windowsMu        sync.RWMutex
+	rateLimiter      *RateLimiter
+	batchEnabled     bool
+	ctxWrap          *ctxWrapper
+	running          atomic.Bool
 }
 
 type ctxWrapper struct {
@@ -244,6 +245,12 @@ func (h *Hub) handleTerminalInput(windowID string, keys string) {
 	h.handleInput(windowID, keys)
 }
 
+func (h *Hub) handleTerminalResize(windowID string, cols int, rows int) {
+	if h.onTerminalResize != nil {
+		h.onTerminalResize(windowID, cols, rows)
+	}
+}
+
 func (h *Hub) handleNewWindow(name string) {
 	if h.onNewWindow != nil {
 		h.onNewWindow(name)
@@ -266,6 +273,10 @@ func (h *Hub) SetOnKillWindow(fn func(windowID string)) {
 
 func (h *Hub) SetOnTerminalInput(fn func(windowID string, keys string)) {
 	h.onTerminalInput = fn
+}
+
+func (h *Hub) SetOnTerminalResize(fn func(windowID string, cols int, rows int)) {
+	h.onTerminalResize = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

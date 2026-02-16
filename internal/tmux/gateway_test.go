@@ -178,6 +178,28 @@ func TestGatewaySendRawNotStarted(t *testing.T) {
 	}
 }
 
+func TestGatewayResizeWindowNotStarted(t *testing.T) {
+	g := New("test")
+	err := g.ResizeWindow("@0", 120, 40)
+	if err == nil {
+		t.Error("expected error when ResizeWindow called before Start")
+	}
+}
+
+func TestGatewayResizeWindowInvalidSize(t *testing.T) {
+	g := New("test")
+	g.stdin = nopWriteCloser{}
+	err := g.ResizeWindow("@0", 0, 40)
+	if err == nil {
+		t.Error("expected error for invalid cols")
+	}
+}
+
+type nopWriteCloser struct{}
+
+func (nopWriteCloser) Write(p []byte) (n int, err error) { return len(p), nil }
+func (nopWriteCloser) Close() error                      { return nil }
+
 func TestGatewayReaderHandlesWindowEventsInsideCommandBlock(t *testing.T) {
 	g := New("test")
 	input := strings.NewReader("%begin 1 1 0\n%window-add @2\n%window-close @1\n%end 1 1 0\n")

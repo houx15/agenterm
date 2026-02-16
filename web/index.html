@@ -4,8 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>agenterm</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <link rel="stylesheet" href="/vendor/xterm-bundle.css">
+    <script src="/vendor/xterm-bundle.js"></script>
+    <script>
+        // Fallback to CDN when local bundle hasn't been built yet.
+        if (!window.Terminal) {
+            document.write('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.min.css">');
+            document.write('<script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"><\\/script>');
+            document.write('<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"><\\/script>');
+        }
+    </script>
     <style>
         *, *::before, *::after {
             box-sizing: border-box;
@@ -707,7 +715,9 @@
         let ws = null;
         let messageHandler = null;
         let terminal = null;
+        let fitAddon = null;
         let terminalWindow = null;
+        let resizeTimer = null;
 
         class Connection {
             constructor(token) {
@@ -949,12 +959,18 @@
         });
 
         function getViewMode(windowId) {
-            if (!windowId) return 'raw';
+            if (!windowId) return 'stream';
             return state.viewMode[windowId] || 'raw';
         }
 
         function setViewMode(mode) {
             if (!state.activeWindow) return;
+            if (mode === 'raw' && !window.Terminal) {
+                state.viewMode[state.activeWindow] = 'stream';
+                renderViewMode();
+                renderMessages();
+                return;
+            }
             state.viewMode[state.activeWindow] = mode;
             renderViewMode();
             renderMessages();
@@ -973,6 +989,11 @@
                     },
                 });
                 terminal.open(document.getElementById('terminal'));
+                if (window.FitAddon && window.FitAddon.FitAddon) {
+                    fitAddon = new window.FitAddon.FitAddon();
+                    terminal.loadAddon(fitAddon);
+                    fitAddon.fit();
+                }
                 terminal.onData((data) => {
                     if (!state.activeWindow) return;
                     connection.send({
@@ -989,6 +1010,7 @@
                 const history = state.rawBuffers[windowId] || '';
                 if (history) terminal.write(history);
             }
+            queueTerminalResize();
         }
 
         function appendRawOutput(windowId, text) {
@@ -1000,6 +1022,30 @@
             if (terminal && state.activeWindow === windowId && getViewMode(windowId) === 'raw') {
                 terminal.write(text);
             }
+        }
+
+        function queueTerminalResize() {
+            if (!terminal || !state.activeWindow || getViewMode(state.activeWindow) !== 'raw') return;
+            if (fitAddon) {
+                fitAddon.fit();
+            }
+            if (resizeTimer) {
+                clearTimeout(resizeTimer);
+            }
+            resizeTimer = setTimeout(() => {
+                sendTerminalResize();
+            }, 40);
+        }
+
+        function sendTerminalResize() {
+            if (!terminal || !state.activeWindow || getViewMode(state.activeWindow) !== 'raw') return;
+            if (!terminal.cols || !terminal.rows) return;
+            connection.send({
+                type: 'terminal_resize',
+                window: state.activeWindow,
+                cols: terminal.cols,
+                rows: terminal.rows,
+            });
         }
 
         function renderViewMode() {
@@ -1015,7 +1061,7 @@
             const promptActions = document.getElementById('prompt-actions');
 
             toggle.textContent = mode;
-            toggle.disabled = !state.activeWindow || !hasTerminalLib;
+            toggle.disabled = !state.activeWindow;
             toggle.title = hasTerminalLib ? 'toggle stream/raw mode' : 'raw mode unavailable (xterm failed to load)';
             terminalWrap.style.display = mode === 'raw' ? 'block' : 'none';
             messages.style.display = mode === 'stream' ? 'block' : 'none';
@@ -1023,6 +1069,7 @@
                 promptActions.classList.remove('active');
                 promptActions.innerHTML = '';
                 ensureTerminal(state.activeWindow);
+                queueTerminalResize();
             }
         }
 
@@ -1233,12 +1280,7 @@
             if (e.key === 'Tab') {
                 e.preventDefault();
                 if (state.activeWindow) {
-                    const message = {
-                        type: 'input',
-                        window: state.activeWindow,
-                        keys: '\t'
-                    };
-                    connection.send(message);
+                    sendInput('\t', false);
                 }
             } else if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -1327,6 +1369,17 @@
             const isNearBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
             scrollBtn.style.display = isNearBottom ? 'none' : 'block';
         });
+
+        window.addEventListener('resize', () => {
+            queueTerminalResize();
+        });
+
+        if (window.ResizeObserver) {
+            const observer = new ResizeObserver(() => {
+                queueTerminalResize();
+            });
+            observer.observe(document.getElementById('terminal-wrap'));
+        }
 
         setInterval(() => {
             renderSidebar();

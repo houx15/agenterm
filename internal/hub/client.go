@@ -59,6 +59,10 @@ func (c *Client) readPump(ctx context.Context) {
 			if msg.Window != "" && msg.Keys != "" {
 				c.hub.handleTerminalInput(msg.Window, msg.Keys)
 			}
+		case "terminal_resize":
+			if msg.Window != "" && msg.Cols > 0 && msg.Rows > 0 {
+				c.hub.handleTerminalResize(msg.Window, msg.Cols, msg.Rows)
+			}
 		case "subscribe":
 		case "new_window":
 			c.hub.handleNewWindow(msg.Name)

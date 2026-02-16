@@ -1,0 +1,16 @@
+{
+  "name": "agenterm-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Frontend vendor build for agenterm",
+  "scripts": {
+    "build": "esbuild vendor-entry.js --bundle --format=iife --global-name=AgentermXterm --outfile=vendor/xterm-bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0"
+  }
+}

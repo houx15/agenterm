@@ -188,6 +188,7 @@ When agenterm detects prompts like `[Y/n]` or `Do you want to continue?`, it aut
 ```bash
 make build   # Build binary to bin/agenterm
 make run     # Run directly with go run
+make web-build # Build local xterm frontend vendor bundle
 make clean   # Remove bin/
 ```
 
