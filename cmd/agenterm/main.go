@@ -40,6 +40,11 @@ func main() {
 			slog.Error("failed to send keys", "window", windowID, "error", err)
 		}
 	})
+	h.SetOnNewWindow(func(name string) {
+		if err := gw.NewWindow(name); err != nil {
+			slog.Error("failed to create window", "error", err)
+		}
+	})
 	srv, err := server.New(cfg, h)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

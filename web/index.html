@@ -928,6 +928,18 @@
             document.getElementById('sidebar').classList.add('open');
         });
 
+        const newSessionBtn = document.getElementById('new-session-btn');
+
+        newSessionBtn.addEventListener('click', () => {
+            const name = prompt('Enter window name (optional):');
+            if (name === null) return;
+            const message = {
+                type: 'new_window',
+                name: name || ''
+            };
+            connection.send(message);
+        });
+
         scrollBtn.addEventListener('click', () => {
             scrollToBottom(true);
         });

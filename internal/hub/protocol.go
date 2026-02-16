@@ -40,6 +40,12 @@ type ClientMessage struct {
 	Type   string `json:"type"`
 	Window string `json:"window"`
 	Keys   string `json:"keys"`
+	Name   string `json:"name,omitempty"`
+}
+
+type NewWindowMessage struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
 }
 
 type ErrorMessage struct {

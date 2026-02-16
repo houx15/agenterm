@@ -289,3 +289,16 @@ func (g *Gateway) ListWindows() []Window {
 	}
 	return windows
 }
+
+func (g *Gateway) NewWindow(name string) error {
+	if g.stdin == nil {
+		return fmt.Errorf("gateway not started")
+	}
+
+	if name != "" {
+		_, err := g.stdin.Write([]byte(fmt.Sprintf("new-window -n %s\n", name)))
+		return err
+	}
+	_, err := g.stdin.Write([]byte("new-window\n"))
+	return err
+}

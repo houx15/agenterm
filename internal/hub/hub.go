@@ -20,6 +20,7 @@ type Hub struct {
 	unregister   chan *Client
 	broadcast    chan []byte
 	onInput      func(windowID string, keys string)
+	onNewWindow  func(name string)
 	token        string
 	mu           sync.RWMutex
 	windows      []WindowInfo
@@ -226,6 +227,16 @@ func (h *Hub) handleInput(windowID string, keys string) {
 	if h.onInput != nil {
 		h.onInput(windowID, keys)
 	}
+}
+
+func (h *Hub) handleNewWindow(name string) {
+	if h.onNewWindow != nil {
+		h.onNewWindow(name)
+	}
+}
+
+func (h *Hub) SetOnNewWindow(fn func(name string)) {
+	h.onNewWindow = fn
 }
 
 func (h *Hub) SetBatchEnabled(enabled bool) {
