@@ -93,9 +93,9 @@ func (h *Hub) Run(ctx context.Context) {
 				default:
 				}
 			}
+			log.Printf("client connected: %s (total: %d)", reg.client.id, h.ClientCount())
 			go reg.client.writePump(h.getContext())
 			go reg.client.readPump(h.getContext())
-			log.Printf("client connected: %s (total: %d)", reg.client.id, h.ClientCount())
 
 		case client := <-h.unregister:
 			h.mu.Lock()

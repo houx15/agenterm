@@ -56,15 +56,11 @@ func (c *Client) readPump(ctx context.Context) {
 				c.hub.handleInput(msg.Window, msg.Keys)
 			}
 		case "subscribe":
-			log.Printf("client %s subscribed to window %s", c.id, msg.Window)
 		case "new_window":
 			c.hub.handleNewWindow(msg.Name)
 		case "kill_window":
-			if msg.Window != "" {
-				c.hub.handleKillWindow(msg.Window)
-			}
+			c.hub.handleKillWindow(msg.Window)
 		default:
-			log.Printf("client %s unknown message type: %s", c.id, msg.Type)
 			c.hub.SendError(c, "unknown message type: "+msg.Type)
 		}
 	}
@@ -85,7 +81,6 @@ func (c *Client) writePump(ctx context.Context) {
 		case <-ticker.C:
 			err := c.conn.Ping(ctx)
 			if err != nil {
-				log.Printf("client %s ping failed: %v", c.id, err)
 				return
 			}
 		case msg, ok := <-c.send:
@@ -96,7 +91,6 @@ func (c *Client) writePump(ctx context.Context) {
 
 			err := c.conn.Write(ctx, websocket.MessageText, msg)
 			if err != nil {
-				log.Printf("client %s write error: %v", c.id, err)
 				return
 			}
 		}

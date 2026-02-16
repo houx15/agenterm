@@ -49,6 +49,8 @@ func main() {
 		if err := gw.KillWindow(windowID); err != nil {
 			slog.Error("failed to kill window", "error", err)
 		}
+		time.Sleep(100 * time.Millisecond)
+		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
 	srv, err := server.New(cfg, h)
