@@ -81,7 +81,12 @@ func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
 	fmt.Printf("\nagenterm v%s\n", version)
 	fmt.Printf("  tmux session: %s\n", cfg.TmuxSession)
 	fmt.Printf("  listening on: http://0.0.0.0:%d\n", cfg.Port)
-	fmt.Printf("  access URL:   http://localhost:%d?token=%s\n", cfg.Port, cfg.Token)
+	if cfg.PrintToken {
+		fmt.Printf("  access URL:   http://localhost:%d?token=%s\n", cfg.Port, cfg.Token)
+	} else {
+		fmt.Printf("  access URL:   http://localhost:%d?token=<token>\n", cfg.Port)
+		fmt.Printf("  (use --print-token to reveal token)\n")
+	}
 	fmt.Printf("  windows:      %s\n", windowsStr)
 	fmt.Println("\nCtrl+C to stop")
 }

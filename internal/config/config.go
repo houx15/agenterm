@@ -15,6 +15,7 @@ type Config struct {
 	TmuxSession string
 	Token       string
 	ConfigPath  string
+	PrintToken  bool
 }
 
 func Load() (*Config, error) {
@@ -33,10 +34,15 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load config file: %w", err)
 	}
 
-	flag.IntVar(&cfg.Port, "port", cfg.Port, "server port")
+	flag.IntVar(&cfg.Port, "port", cfg.Port, "server port (1-65535)")
 	flag.StringVar(&cfg.TmuxSession, "session", cfg.TmuxSession, "tmux session name")
 	flag.StringVar(&cfg.Token, "token", cfg.Token, "authentication token (auto-generated if empty)")
+	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
+
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", cfg.Port)
+	}
 
 	if cfg.Token == "" {
 		token, err := generateToken()
@@ -47,7 +53,6 @@ func Load() (*Config, error) {
 		if err := cfg.saveToFile(); err != nil {
 			return nil, fmt.Errorf("failed to save config file: %w", err)
 		}
-		fmt.Printf("Generated token: %s\n", cfg.Token)
 	}
 
 	return cfg, nil
@@ -74,7 +79,11 @@ func (c *Config) loadFromFile() error {
 		case "Token":
 			c.Token = value
 		case "Port":
-			fmt.Sscanf(value, "%d", &c.Port)
+			var port int
+			if _, err := fmt.Sscanf(value, "%d", &port); err != nil {
+				return fmt.Errorf("invalid Port value %q: %w", value, err)
+			}
+			c.Port = port
 		case "TmuxSession":
 			c.TmuxSession = value
 		}

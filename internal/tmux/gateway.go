@@ -5,10 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 )
+
+var windowIDRe = regexp.MustCompile(`^@\d+$`)
 
 type Gateway struct {
 	session string
@@ -31,6 +35,10 @@ func New(session string) *Gateway {
 }
 
 func (g *Gateway) Start(ctx context.Context) error {
+	if err := g.checkSessionExists(); err != nil {
+		return err
+	}
+
 	g.process = exec.CommandContext(ctx, "tmux", "-C", "attach-session", "-t", g.session)
 
 	stdout, err := g.process.StdoutPipe()
@@ -44,9 +52,6 @@ func (g *Gateway) Start(ctx context.Context) error {
 	}
 
 	if err := g.process.Start(); err != nil {
-		if strings.Contains(err.Error(), "exit status") || strings.Contains(err.Error(), "no session") {
-			return fmt.Errorf("tmux session '%s' not found. Create it with: tmux new-session -s %s", g.session, g.session)
-		}
 		return fmt.Errorf("failed to start tmux: %w", err)
 	}
 
@@ -61,8 +66,16 @@ func (g *Gateway) Start(ctx context.Context) error {
 	return nil
 }
 
+func (g *Gateway) checkSessionExists() error {
+	cmd := exec.Command("tmux", "has-session", "-t", g.session)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("tmux session '%s' not found. Create it with: tmux new-session -s %s", g.session, g.session)
+	}
+	return nil
+}
+
 func (g *Gateway) discoverWindows() error {
-	_, err := g.stdin.Write([]byte("list-windows -F '#{window_id} #{window_name} #{window_active}'\n"))
+	_, err := g.stdin.Write([]byte("list-windows -F '#{window_id}\t#{window_name}\t#{window_active}'\n"))
 	if err != nil {
 		return err
 	}
@@ -73,6 +86,7 @@ func (g *Gateway) reader(r io.Reader) {
 	defer g.wg.Done()
 
 	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	var inCommand bool
 	var commandBuffer []string
 
@@ -106,6 +120,10 @@ func (g *Gateway) reader(r io.Reader) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		slog.Error("tmux reader error", "error", err)
+	}
+
 	close(g.events)
 	close(g.done)
 }
@@ -117,18 +135,18 @@ func (g *Gateway) handleCommandResponse(lines []string) {
 }
 
 func (g *Gateway) parseWindowLine(line string) {
-	parts := strings.Fields(line)
+	parts := strings.Split(line, "\t")
 	if len(parts) < 2 {
 		return
 	}
 
 	windowID := parts[0]
-	if len(windowID) == 0 || windowID[0] != '@' {
+	if !windowIDRe.MatchString(windowID) {
 		return
 	}
 
 	name := parts[1]
-	active := len(parts) > 2 && parts[2] == "1"
+	active := len(parts) > 2 && strings.TrimSpace(parts[2]) == "1"
 
 	g.mu.Lock()
 	g.windows[windowID] = &Window{
@@ -184,29 +202,30 @@ func (g *Gateway) SendKeys(windowID string, keys string) error {
 		return fmt.Errorf("gateway not started")
 	}
 
+	if !windowIDRe.MatchString(windowID) {
+		return fmt.Errorf("invalid window ID format: %s", windowID)
+	}
+
 	escaped := g.escapeKeys(keys)
-	cmd := fmt.Sprintf("send-keys -t %s %s\n", windowID, escaped)
+	cmd := fmt.Sprintf("send-keys -t %s -l %s\n", windowID, escaped)
 	_, err := g.stdin.Write([]byte(cmd))
 	return err
 }
 
 func (g *Gateway) escapeKeys(keys string) string {
 	if keys == "\n" || keys == "Enter" {
-		return "Enter"
+		return ""
 	}
 	if keys == "\x03" {
 		return "C-c"
+	}
+	if keys == "\x1b" {
+		return "Escape"
 	}
 
 	result := strings.ReplaceAll(keys, "\n", " Enter ")
 	result = strings.ReplaceAll(result, "\x03", " C-c ")
 	result = strings.ReplaceAll(result, "\x1b", " Escape ")
-
-	needsQuote := strings.ContainsAny(result, " '\"\t")
-	if needsQuote {
-		result = strings.ReplaceAll(result, "'", "'\\''")
-		return "'" + result + "'"
-	}
 
 	return result
 }
