@@ -293,7 +293,8 @@
             font-family: inherit;
         }
 
-        .message.output {
+        .message.output,
+        .message.normal {
             background: var(--bg-bubble-output);
             align-self: flex-start;
             border-bottom-left-radius: 2px;
@@ -560,6 +561,7 @@
                 if (this.status === 'connecting' || this.status === 'connected') return;
 
                 this.status = 'connecting';
+                state.connectionStatus = 'connecting';
                 updateConnectionIndicator();
 
                 const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -571,6 +573,7 @@
                     ws.onopen = () => {
                         this.status = 'connected';
                         state.connected = true;
+                        state.connectionStatus = 'connected';
                         state.reconnectAttempts = 0;
                         this.reconnectDelay = 1000;
                         updateConnectionIndicator();
@@ -580,6 +583,7 @@
                     ws.onclose = () => {
                         this.status = 'disconnected';
                         state.connected = false;
+                        state.connectionStatus = 'disconnected';
                         updateConnectionIndicator();
                         this.scheduleReconnect();
                     };
@@ -587,6 +591,7 @@
                     ws.onerror = () => {
                         this.status = 'disconnected';
                         state.connected = false;
+                        state.connectionStatus = 'disconnected';
                         updateConnectionIndicator();
                     };
 
@@ -602,6 +607,7 @@
                     };
                 } catch (e) {
                     this.status = 'disconnected';
+                    state.connectionStatus = 'disconnected';
                     updateConnectionIndicator();
                     this.scheduleReconnect();
                 }
@@ -809,7 +815,7 @@
             }
         }
 
-        function sendInput(text) {
+        function sendInput(text, showBubble = true) {
             if (!state.activeWindow || !text) return;
 
             const message = {
@@ -819,8 +825,9 @@
             };
 
             if (connection.send(message)) {
-                if (!text.endsWith('\n') && text !== '\x03') {
-                    addLocalUserMessage(text);
+                const displayText = text.replace(/\n$/, '');
+                if (showBubble && displayText && text !== '\x03') {
+                    addLocalUserMessage(displayText);
                 }
             }
         }
@@ -845,7 +852,7 @@
         function handleMessage(data) {
             switch (data.type) {
                 case 'windows':
-                    state.windows = data.windows || [];
+                    state.windows = data.list || [];
                     if (!state.activeWindow && state.windows.length > 0) {
                         setActiveWindow(state.windows[0].id);
                     }
