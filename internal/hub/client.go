@@ -55,6 +55,10 @@ func (c *Client) readPump(ctx context.Context) {
 			if msg.Window != "" && msg.Keys != "" {
 				c.hub.handleInput(msg.Window, msg.Keys)
 			}
+		case "terminal_input":
+			if msg.Window != "" && msg.Keys != "" {
+				c.hub.handleTerminalInput(msg.Window, msg.Keys)
+			}
 		case "subscribe":
 		case "new_window":
 			c.hub.handleNewWindow(msg.Name)

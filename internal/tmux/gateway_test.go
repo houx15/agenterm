@@ -170,6 +170,14 @@ func TestGatewaySendKeysNotStarted(t *testing.T) {
 	}
 }
 
+func TestGatewaySendRawNotStarted(t *testing.T) {
+	g := New("test")
+	err := g.SendRaw("@0", "hello")
+	if err == nil {
+		t.Error("expected error when SendRaw called before Start")
+	}
+}
+
 func TestGatewayReaderHandlesWindowEventsInsideCommandBlock(t *testing.T) {
 	g := New("test")
 	input := strings.NewReader("%begin 1 1 0\n%window-add @2\n%window-close @1\n%end 1 1 0\n")

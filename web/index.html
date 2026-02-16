@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>agenterm</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"></script>
     <style>
         *, *::before, *::after {
             box-sizing: border-box;
@@ -294,6 +296,45 @@
 
         #connection-indicator.disconnected {
             background: var(--error);
+        }
+
+        #mode-toggle {
+            background: #111827;
+            border: 1px solid #334155;
+            color: #cbd5e1;
+            font-family: inherit;
+            font-size: 12px;
+            border-radius: 4px;
+            padding: 6px 10px;
+            cursor: pointer;
+            text-transform: lowercase;
+        }
+
+        #mode-toggle:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        #mode-toggle:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #terminal-wrap {
+            flex: 1;
+            background: #090d18;
+            border-bottom: 1px solid var(--border);
+            display: none;
+            min-height: 0;
+            padding: 8px;
+        }
+
+        #terminal {
+            width: 100%;
+            height: 100%;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #1f2937;
         }
 
         #messages {
@@ -614,7 +655,11 @@
                 <div id="header-status">
                     <span class="session-name" id="active-session-name">select a session</span>
                 </div>
+                <button id="mode-toggle" title="toggle stream/raw mode">raw</button>
                 <div id="connection-indicator" title="connected"></div>
+            </div>
+            <div id="terminal-wrap">
+                <div id="terminal"></div>
             </div>
             <div id="messages"></div>
             <button id="scroll-btn">↓ new messages</button>
@@ -650,6 +695,8 @@
             windows: [],
             activeWindow: null,
             messages: {},
+            rawBuffers: {},
+            viewMode: {},
             unread: {},
             connected: false,
             connectionStatus: 'disconnected',
@@ -659,6 +706,8 @@
 
         let ws = null;
         let messageHandler = null;
+        let terminal = null;
+        let terminalWindow = null;
 
         class Connection {
             constructor(token) {
@@ -899,6 +948,84 @@
             }
         });
 
+        function getViewMode(windowId) {
+            if (!windowId) return 'raw';
+            return state.viewMode[windowId] || 'raw';
+        }
+
+        function setViewMode(mode) {
+            if (!state.activeWindow) return;
+            state.viewMode[state.activeWindow] = mode;
+            renderViewMode();
+            renderMessages();
+        }
+
+        function ensureTerminal(windowId) {
+            if (!window.Terminal) return;
+            if (!terminal) {
+                terminal = new window.Terminal({
+                    convertEol: false,
+                    cursorBlink: true,
+                    fontSize: 13,
+                    theme: {
+                        background: '#0a0f1a',
+                        foreground: '#d1d5db',
+                    },
+                });
+                terminal.open(document.getElementById('terminal'));
+                terminal.onData((data) => {
+                    if (!state.activeWindow) return;
+                    connection.send({
+                        type: 'terminal_input',
+                        window: state.activeWindow,
+                        keys: data,
+                    });
+                });
+            }
+
+            if (terminalWindow !== windowId) {
+                terminalWindow = windowId;
+                terminal.reset();
+                const history = state.rawBuffers[windowId] || '';
+                if (history) terminal.write(history);
+            }
+        }
+
+        function appendRawOutput(windowId, text) {
+            if (!windowId || !text) return;
+            const current = state.rawBuffers[windowId] || '';
+            const next = current + text;
+            const maxLen = 300000;
+            state.rawBuffers[windowId] = next.length > maxLen ? next.slice(next.length - maxLen) : next;
+            if (terminal && state.activeWindow === windowId && getViewMode(windowId) === 'raw') {
+                terminal.write(text);
+            }
+        }
+
+        function renderViewMode() {
+            let mode = getViewMode(state.activeWindow);
+            const hasTerminalLib = !!window.Terminal;
+            if (mode === 'raw' && !hasTerminalLib && state.activeWindow) {
+                state.viewMode[state.activeWindow] = 'stream';
+                mode = 'stream';
+            }
+            const toggle = document.getElementById('mode-toggle');
+            const terminalWrap = document.getElementById('terminal-wrap');
+            const messages = document.getElementById('messages');
+            const promptActions = document.getElementById('prompt-actions');
+
+            toggle.textContent = mode;
+            toggle.disabled = !state.activeWindow || !hasTerminalLib;
+            toggle.title = hasTerminalLib ? 'toggle stream/raw mode' : 'raw mode unavailable (xterm failed to load)';
+            terminalWrap.style.display = mode === 'raw' ? 'block' : 'none';
+            messages.style.display = mode === 'stream' ? 'block' : 'none';
+            if (mode === 'raw') {
+                promptActions.classList.remove('active');
+                promptActions.innerHTML = '';
+                ensureTerminal(state.activeWindow);
+            }
+        }
+
         function setActiveWindow(id) {
             state.activeWindow = id;
             state.unread[id] = 0;
@@ -914,12 +1041,18 @@
             }
 
             renderSidebar();
+            renderViewMode();
             renderMessages();
         }
 
         function renderMessages() {
             const container = document.getElementById('messages');
             const actionBar = document.getElementById('prompt-actions');
+            if (getViewMode(state.activeWindow) !== 'stream') {
+                actionBar.classList.remove('active');
+                actionBar.innerHTML = '';
+                return;
+            }
             const messages = state.messages[state.activeWindow] || [];
 
             if (!state.activeWindow) {
@@ -991,6 +1124,15 @@
         function sendInput(text, showBubble = true) {
             if (!state.activeWindow || !text) return;
 
+            if (getViewMode(state.activeWindow) === 'raw') {
+                connection.send({
+                    type: 'terminal_input',
+                    window: state.activeWindow,
+                    keys: text
+                });
+                return;
+            }
+
             const message = {
                 type: 'input',
                 window: state.activeWindow,
@@ -1038,6 +1180,12 @@
                     renderSidebar();
                     break;
 
+                case 'terminal_data':
+                    if (data.window) {
+                        appendRawOutput(data.window, data.text || '');
+                    }
+                    break;
+
                 case 'output':
                     const windowId = data.window || state.activeWindow;
                     if (!windowId) {
@@ -1059,7 +1207,7 @@
                     }
 
                     renderSidebar();
-                    if (windowId === state.activeWindow) {
+                    if (windowId === state.activeWindow && getViewMode(windowId) === 'stream') {
                         renderMessages();
                     }
                     break;
@@ -1077,6 +1225,7 @@
         const input = document.getElementById('input');
         const sendBtn = document.getElementById('send-btn');
         const backBtn = document.getElementById('back-btn');
+        const modeToggle = document.getElementById('mode-toggle');
         const scrollBtn = document.getElementById('scroll-btn');
         const messagesContainer = document.getElementById('messages');
 
@@ -1118,6 +1267,11 @@
 
         backBtn.addEventListener('click', () => {
             document.getElementById('sidebar').classList.add('open');
+        });
+
+        modeToggle.addEventListener('click', () => {
+            const current = getViewMode(state.activeWindow);
+            setViewMode(current === 'raw' ? 'stream' : 'raw');
         });
 
         const newSessionBtn = document.getElementById('new-session-btn');
@@ -1182,6 +1336,8 @@
         const connection = new Connection(token);
         connection.onMessage(handleMessage);
         connection.connect();
+        renderViewMode();
+        renderMessages();
 
         if (window.innerWidth < 768) {
             document.getElementById('sidebar').classList.add('open');

@@ -40,6 +40,11 @@ func main() {
 			slog.Error("failed to send keys", "window", windowID, "error", err)
 		}
 	})
+	h.SetOnTerminalInput(func(windowID, keys string) {
+		if err := gw.SendRaw(windowID, keys); err != nil {
+			slog.Error("failed to send raw input", "window", windowID, "error", err)
+		}
+	})
 	h.SetOnNewWindow(func(name string) {
 		if err := gw.NewWindow(name, cfg.DefaultDir); err != nil {
 			slog.Error("failed to create window", "error", err)
@@ -111,6 +116,13 @@ func processEvents(ctx context.Context, gw *tmux.Gateway, psr *parser.Parser, h 
 		for event := range gw.Events() {
 			switch event.Type {
 			case tmux.EventOutput:
+				if event.WindowID != "" {
+					h.BroadcastTerminal(hub.TerminalDataMessage{
+						Type:   "terminal_data",
+						Window: event.WindowID,
+						Text:   event.Data,
+					})
+				}
 				psr.Feed(event.WindowID, event.Data)
 			case tmux.EventWindowAdd, tmux.EventWindowClose, tmux.EventWindowRenamed:
 				h.BroadcastWindows(convertWindows(gw.ListWindows()))

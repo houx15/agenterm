@@ -290,6 +290,40 @@ func (g *Gateway) SendKeys(windowID string, keys string) error {
 	return nil
 }
 
+func (g *Gateway) SendRaw(windowID string, keys string) error {
+	if g.stdin == nil {
+		return fmt.Errorf("gateway not started")
+	}
+	if !windowIDRe.MatchString(windowID) {
+		return fmt.Errorf("invalid window ID format: %s", windowID)
+	}
+
+	data := []byte(keys)
+	if len(data) == 0 {
+		return nil
+	}
+
+	const chunkSize = 64
+	for start := 0; start < len(data); start += chunkSize {
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		var b strings.Builder
+		b.WriteString("send-keys -t ")
+		b.WriteString(windowID)
+		for _, ch := range data[start:end] {
+			b.WriteString(fmt.Sprintf(" -H %02x", ch))
+		}
+		b.WriteByte('\n')
+		if _, err := g.stdin.Write([]byte(b.String())); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (g *Gateway) buildSendKeysCommands(windowID string, keys string) []string {
 	switch keys {
 	case "\n", "Enter":

@@ -14,6 +14,12 @@ type OutputMessage struct {
 	Ts      int64           `json:"ts"`
 }
 
+type TerminalDataMessage struct {
+	Type   string `json:"type"`
+	Window string `json:"window"`
+	Text   string `json:"text"`
+}
+
 type ActionMessage struct {
 	Label string `json:"label"`
 	Keys  string `json:"keys"`

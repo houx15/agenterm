@@ -15,22 +15,23 @@ import (
 const defaultBatchInterval = 100 * time.Millisecond
 
 type Hub struct {
-	clients      map[string]*Client
-	register     chan *clientRegistration
-	unregister   chan *Client
-	broadcast    chan []byte
-	onInput      func(windowID string, keys string)
-	onNewWindow  func(name string)
-	onKillWindow func(windowID string)
-	token        string
-	defaultDir   string
-	mu           sync.RWMutex
-	windows      []WindowInfo
-	windowsMu    sync.RWMutex
-	rateLimiter  *RateLimiter
-	batchEnabled bool
-	ctxWrap      *ctxWrapper
-	running      atomic.Bool
+	clients         map[string]*Client
+	register        chan *clientRegistration
+	unregister      chan *Client
+	broadcast       chan []byte
+	onInput         func(windowID string, keys string)
+	onTerminalInput func(windowID string, keys string)
+	onNewWindow     func(name string)
+	onKillWindow    func(windowID string)
+	token           string
+	defaultDir      string
+	mu              sync.RWMutex
+	windows         []WindowInfo
+	windowsMu       sync.RWMutex
+	rateLimiter     *RateLimiter
+	batchEnabled    bool
+	ctxWrap         *ctxWrapper
+	running         atomic.Bool
 }
 
 type ctxWrapper struct {
@@ -161,10 +162,10 @@ func (h *Hub) BroadcastOutput(msg OutputMessage) {
 	}
 }
 
-func (h *Hub) sendBroadcast(msg OutputMessage) {
+func (h *Hub) sendBroadcast(msg any) {
 	data, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("error marshaling output message: %v", err)
+		log.Printf("error marshaling broadcast message: %v", err)
 		return
 	}
 	select {
@@ -190,6 +191,10 @@ func (h *Hub) BroadcastWindows(windows []WindowInfo) {
 	default:
 		log.Printf("broadcast channel full, dropping windows message")
 	}
+}
+
+func (h *Hub) BroadcastTerminal(msg TerminalDataMessage) {
+	h.sendBroadcast(msg)
 }
 
 func (h *Hub) BroadcastStatus(windowID string, status string) {
@@ -231,6 +236,14 @@ func (h *Hub) handleInput(windowID string, keys string) {
 	}
 }
 
+func (h *Hub) handleTerminalInput(windowID string, keys string) {
+	if h.onTerminalInput != nil {
+		h.onTerminalInput(windowID, keys)
+		return
+	}
+	h.handleInput(windowID, keys)
+}
+
 func (h *Hub) handleNewWindow(name string) {
 	if h.onNewWindow != nil {
 		h.onNewWindow(name)
@@ -249,6 +262,10 @@ func (h *Hub) SetOnNewWindow(fn func(name string)) {
 
 func (h *Hub) SetOnKillWindow(fn func(windowID string)) {
 	h.onKillWindow = fn
+}
+
+func (h *Hub) SetOnTerminalInput(fn func(windowID string, keys string)) {
+	h.onTerminalInput = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {
