@@ -228,6 +228,7 @@ func (g *Gateway) handleEvent(event Event) {
 	case EventWindowClose:
 		g.mu.Lock()
 		delete(g.windows, event.WindowID)
+		delete(g.paneToWindow, event.PaneID)
 		g.mu.Unlock()
 	case EventWindowRenamed:
 		g.mu.Lock()
@@ -235,6 +236,7 @@ func (g *Gateway) handleEvent(event Event) {
 			w.Name = event.Data
 		}
 		g.mu.Unlock()
+	case EventLayoutChange:
 	}
 }
 
