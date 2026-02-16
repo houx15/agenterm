@@ -68,8 +68,17 @@ func (g *Gateway) Start(ctx context.Context) error {
 
 func (g *Gateway) checkSessionExists() error {
 	cmd := exec.Command("tmux", "has-session", "-t", g.session)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tmux session '%s' not found. Create it with: tmux new-session -s %s", g.session, g.session)
+	err := cmd.Run()
+	if err != nil {
+		if execErr, ok := err.(*exec.Error); ok && execErr.Err == exec.ErrNotFound {
+			return fmt.Errorf("tmux binary not found. Please install tmux")
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 1 {
+				return fmt.Errorf("tmux session '%s' not found. Create it with: tmux new-session -s %s", g.session, g.session)
+			}
+		}
+		return fmt.Errorf("failed to check tmux session: %w", err)
 	}
 	return nil
 }
@@ -207,14 +216,14 @@ func (g *Gateway) SendKeys(windowID string, keys string) error {
 	}
 
 	escaped := g.escapeKeys(keys)
-	cmd := fmt.Sprintf("send-keys -t %s -l %s\n", windowID, escaped)
+	cmd := fmt.Sprintf("send-keys -t %s %s\n", windowID, escaped)
 	_, err := g.stdin.Write([]byte(cmd))
 	return err
 }
 
 func (g *Gateway) escapeKeys(keys string) string {
 	if keys == "\n" || keys == "Enter" {
-		return ""
+		return "Enter"
 	}
 	if keys == "\x03" {
 		return "C-c"
@@ -226,6 +235,12 @@ func (g *Gateway) escapeKeys(keys string) string {
 	result := strings.ReplaceAll(keys, "\n", " Enter ")
 	result = strings.ReplaceAll(result, "\x03", " C-c ")
 	result = strings.ReplaceAll(result, "\x1b", " Escape ")
+
+	needsQuote := strings.ContainsAny(result, " '\"\t")
+	if needsQuote {
+		result = strings.ReplaceAll(result, "'", "'\\''")
+		return "'" + result + "'"
+	}
 
 	return result
 }
