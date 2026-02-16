@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 var windowIDRe = regexp.MustCompile(`^@\d+$`)
@@ -58,13 +59,15 @@ func (g *Gateway) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start tmux: %w", err)
 	}
 
+	g.wg.Add(1)
+	go g.reader(stdout)
+
 	if err := g.discoverWindows(); err != nil {
 		g.process.Process.Kill()
 		return fmt.Errorf("failed to discover windows: %w", err)
 	}
 
-	g.wg.Add(1)
-	go g.reader(stdout)
+	time.Sleep(100 * time.Millisecond)
 
 	return nil
 }
@@ -328,4 +331,17 @@ func (g *Gateway) NewWindow(name string, defaultDir string) error {
 	}
 
 	return nil
+}
+
+func (g *Gateway) KillWindow(windowID string) error {
+	if g.stdin == nil {
+		return fmt.Errorf("gateway not started")
+	}
+
+	if !windowIDRe.MatchString(windowID) {
+		return fmt.Errorf("invalid window ID format: %s", windowID)
+	}
+
+	_, err := g.stdin.Write([]byte(fmt.Sprintf("kill-window -t %s\n", windowID)))
+	return err
 }

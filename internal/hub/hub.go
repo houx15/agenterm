@@ -21,6 +21,7 @@ type Hub struct {
 	broadcast    chan []byte
 	onInput      func(windowID string, keys string)
 	onNewWindow  func(name string)
+	onKillWindow func(windowID string)
 	token        string
 	defaultDir   string
 	mu           sync.RWMutex
@@ -236,8 +237,18 @@ func (h *Hub) handleNewWindow(name string) {
 	}
 }
 
+func (h *Hub) handleKillWindow(windowID string) {
+	if h.onKillWindow != nil {
+		h.onKillWindow(windowID)
+	}
+}
+
 func (h *Hub) SetOnNewWindow(fn func(name string)) {
 	h.onNewWindow = fn
+}
+
+func (h *Hub) SetOnKillWindow(fn func(windowID string)) {
+	h.onKillWindow = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

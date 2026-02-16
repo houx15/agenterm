@@ -116,6 +116,28 @@
             border-color: var(--accent);
         }
 
+        .session-card .kill-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px;
+            opacity: 0;
+            transition: opacity 0.2s, color 0.2s;
+        }
+
+        .session-card:hover .kill-btn {
+            opacity: 1;
+        }
+
+        .session-card .kill-btn:hover {
+            color: var(--error);
+        }
+
         .session-header {
             display: flex;
             align-items: center;
@@ -818,6 +840,7 @@
 
                 return `
                     <div class="session-card ${isActive ? 'active' : ''}" data-id="${win.id}">
+                        <button class="kill-btn" data-id="${win.id}" title="Kill window">×</button>
                         <div class="session-header">
                             <span class="status-dot ${win.status || 'idle'}"></span>
                             <span class="session-name">${parseSessionName(win.name)}</span>
@@ -830,6 +853,16 @@
                     </div>
                 `;
             }).join('');
+
+            list.querySelectorAll('.kill-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.dataset.id;
+                    if (confirm('Kill this window?')) {
+                        connection.send({ type: 'kill_window', window: id });
+                    }
+                });
+            });
 
             list.querySelectorAll('.session-card').forEach(card => {
                 card.addEventListener('click', () => {

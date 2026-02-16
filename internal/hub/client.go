@@ -59,6 +59,10 @@ func (c *Client) readPump(ctx context.Context) {
 			log.Printf("client %s subscribed to window %s", c.id, msg.Window)
 		case "new_window":
 			c.hub.handleNewWindow(msg.Name)
+		case "kill_window":
+			if msg.Window != "" {
+				c.hub.handleKillWindow(msg.Window)
+			}
 		default:
 			log.Printf("client %s unknown message type: %s", c.id, msg.Type)
 			c.hub.SendError(c, "unknown message type: "+msg.Type)

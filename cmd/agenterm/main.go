@@ -45,6 +45,11 @@ func main() {
 			slog.Error("failed to create window", "error", err)
 		}
 	})
+	h.SetOnKillWindow(func(windowID string) {
+		if err := gw.KillWindow(windowID); err != nil {
+			slog.Error("failed to kill window", "error", err)
+		}
+	})
 	h.SetDefaultDir(cfg.DefaultDir)
 	srv, err := server.New(cfg, h)
 	if err != nil {
