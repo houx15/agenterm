@@ -19,6 +19,7 @@ import (
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
+	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -33,16 +34,18 @@ type runtimeState struct {
 	cfg            *config.Config
 	manager        *tmux.Manager
 	hub            *hub.Hub
+	lifecycle      *session.Manager
 	mu             sync.RWMutex
 	sessions       map[string]*sessionRuntime
 	windowToSessID map[string]string
 }
 
-func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub) *runtimeState {
+func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub, lifecycle *session.Manager) *runtimeState {
 	return &runtimeState{
 		cfg:            cfg,
 		manager:        manager,
 		hub:            h,
+		lifecycle:      lifecycle,
 		sessions:       make(map[string]*sessionRuntime),
 		windowToSessID: make(map[string]string),
 	}
@@ -123,6 +126,9 @@ func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, 
 
 	go func() {
 		for msg := range rt.parser.Messages() {
+			if s.lifecycle != nil {
+				s.lifecycle.ObserveParsedOutput(sessionID, msg.WindowID, msg.Text, string(msg.Class), msg.Timestamp)
+			}
 			s.hub.BroadcastOutput(hub.OutputMessage{
 				Type:      "output",
 				SessionID: sessionID,
@@ -308,7 +314,8 @@ func main() {
 
 	manager := tmux.NewManager(cfg.DefaultDir)
 	h := hub.New(cfg.Token, nil)
-	state := newRuntimeState(cfg, manager, h)
+	lifecycleManager := session.NewManager(appDB.SQL(), manager, agentRegistry, h)
+	state := newRuntimeState(cfg, manager, h, lifecycleManager)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -370,7 +377,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
+	if lifecycleManager != nil {
+		if err := lifecycleManager.Start(ctx); err != nil {
+			slog.Error("failed to start session lifecycle manager", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
@@ -388,7 +402,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gracefulShutdown(state, h)
+	gracefulShutdown(state, h, lifecycleManager)
 }
 
 func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
@@ -438,10 +452,13 @@ func convertActions(actions []parser.QuickAction) []hub.ActionMessage {
 	return result
 }
 
-func gracefulShutdown(state *runtimeState, h *hub.Hub) {
+func gracefulShutdown(state *runtimeState, h *hub.Hub, lifecycle *session.Manager) {
 	slog.Info("shutting down...")
 
 	h.FlushPendingOutput()
+	if lifecycle != nil {
+		lifecycle.Close()
+	}
 	state.close()
 
 	slog.Info("agenterm stopped")

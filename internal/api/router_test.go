@@ -68,7 +68,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, nil, nil, "test-token", "configured-session", agentRegistry), database
+	return NewRouter(database.SQL(), gw, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
@@ -82,7 +82,7 @@ func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, manager, nil, "test-token", "configured-session", agentRegistry), database
+	return NewRouter(database.SQL(), gw, manager, nil, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -394,6 +394,101 @@ func TestSessionCreateRollsBackWhenTmuxWindowFails(t *testing.T) {
 	decodeBody(t, list, &sessions)
 	if len(sessions) != 0 {
 		t.Fatalf("expected no persisted sessions after failure, got %d", len(sessions))
+	}
+}
+
+func TestSessionCreateRejectsUnknownAgentType(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "missing-agent", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+}
+
+func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusCreated {
+		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+	sessionID := session["id"].(string)
+
+	send := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/send", map[string]any{
+		"text": "echo hello\\n",
+	}, true)
+	if send.Code != http.StatusOK {
+		t.Fatalf("send status=%d body=%s", send.Code, send.Body.String())
+	}
+	if len(gw.sentRaw) == 0 {
+		t.Fatalf("expected command to be sent to gateway")
+	}
+
+	take := apiRequest(t, h, http.MethodPatch, "/api/sessions/"+sessionID+"/takeover", map[string]any{
+		"human_takeover": true,
+	}, true)
+	if take.Code != http.StatusOK {
+		t.Fatalf("takeover status=%d body=%s", take.Code, take.Body.String())
+	}
+	var takeoverSession map[string]any
+	decodeBody(t, take, &takeoverSession)
+	if takeoverSession["status"] != "human_takeover" {
+		t.Fatalf("status=%v want human_takeover", takeoverSession["status"])
+	}
+
+	idle := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/idle", nil, true)
+	if idle.Code != http.StatusOK {
+		t.Fatalf("idle status=%d body=%s", idle.Code, idle.Body.String())
+	}
+	var idleResp map[string]any
+	decodeBody(t, idle, &idleResp)
+	if v, ok := idleResp["idle"].(bool); !ok || !v {
+		t.Fatalf("expected idle=true, got=%v", idleResp["idle"])
+	}
+}
+
+func TestSessionDeleteWithoutLifecycleManager(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	resp := apiRequest(t, h, http.MethodDelete, "/api/sessions/missing", nil, true)
+	if resp.Code != http.StatusNotImplemented {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
 	}
 }
 

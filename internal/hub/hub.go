@@ -245,6 +245,10 @@ func (h *Hub) BroadcastStatusForSession(sessionID string, windowID string, statu
 	}
 }
 
+func (h *Hub) BroadcastSessionStatus(sessionID string, status string) {
+	h.BroadcastStatusForSession(sessionID, "", status)
+}
+
 func (h *Hub) SendError(client *Client, message string) {
 	msg := ErrorMessage{Type: "error", Message: message}
 	data, err := json.Marshal(msg)

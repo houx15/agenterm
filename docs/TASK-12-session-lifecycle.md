@@ -123,13 +123,13 @@ When `SetTakeover(false)`:
 - Test human takeover flag propagation
 
 ## Acceptance Criteria
-- [ ] Creating a session spawns a real tmux session with the agent command running
-- [ ] Session status updates in real-time (working/idle/waiting)
-- [ ] Commands sent via API appear in the tmux session
-- [ ] Recent output retrievable via API
-- [ ] Idle detection works (30s timeout)
-- [ ] Human takeover flag prevents orchestrator interference
-- [ ] Session destruction kills tmux session and updates DB
+- [x] Creating a session spawns a real tmux session with the agent command running
+- [x] Session status updates in real-time (working/idle/waiting)
+- [x] Commands sent via API appear in the tmux session
+- [x] Recent output retrievable via API
+- [x] Idle detection works (30s timeout)
+- [x] Human takeover flag prevents orchestrator interference
+- [x] Session destruction kills tmux session and updates DB
 
 ## Notes
 - Session names must be unique within tmux (use UUID suffix if needed)
