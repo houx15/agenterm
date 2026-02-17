@@ -16,6 +16,12 @@ import (
 
 var playbookIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+var (
+	ErrInvalidPlaybook  = errors.New("invalid playbook")
+	ErrPlaybookStorage  = errors.New("playbook storage error")
+	ErrPlaybookNotFound = errors.New("playbook not found")
+)
+
 var languageByExt = map[string]string{
 	".go":    "go",
 	".rs":    "rust",
@@ -98,7 +104,7 @@ func (r *Registry) Reload() error {
 
 func (r *Registry) Save(pb *Playbook) error {
 	if pb == nil {
-		return errors.New("playbook is required")
+		return fmt.Errorf("%w: playbook is required", ErrInvalidPlaybook)
 	}
 	clean := clone(pb)
 	if err := normalizeAndValidate(clean); err != nil {
@@ -107,11 +113,11 @@ func (r *Registry) Save(pb *Playbook) error {
 
 	data, err := yaml.Marshal(clean)
 	if err != nil {
-		return fmt.Errorf("marshal playbook: %w", err)
+		return fmt.Errorf("%w: marshal playbook: %v", ErrPlaybookStorage, err)
 	}
 	path := filepath.Join(r.dir, clean.ID+".yaml")
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write playbook %q: %w", path, err)
+		return fmt.Errorf("%w: write playbook %q: %v", ErrPlaybookStorage, path, err)
 	}
 
 	r.mu.Lock()
@@ -136,10 +142,10 @@ func (r *Registry) Delete(id string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		return fmt.Errorf("delete playbook %q: %w", path, err)
+		return fmt.Errorf("%w: delete playbook %q: %v", ErrPlaybookStorage, path, err)
 	}
 	if !deleted {
-		return fmt.Errorf("delete playbook %q: %w", filepath.Join(r.dir, id+".yaml"), os.ErrNotExist)
+		return fmt.Errorf("%w: %s", ErrPlaybookNotFound, id)
 	}
 
 	r.mu.Lock()
@@ -150,17 +156,21 @@ func (r *Registry) Delete(id string) error {
 
 func (r *Registry) MatchProject(repoPath string) *Playbook {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	if len(r.playbooks) == 0 {
+		r.mu.RUnlock()
 		return nil
 	}
+	snapshot := make(map[string]*Playbook, len(r.playbooks))
+	for id, pb := range r.playbooks {
+		snapshot[id] = clone(pb)
+	}
+	r.mu.RUnlock()
 
 	langSet, patternSet := inspectProject(repoPath)
 	var best *Playbook
 	bestScore := -1
 
-	for _, pb := range r.playbooks {
+	for _, pb := range snapshot {
 		score, ok := matchScore(pb, langSet, patternSet)
 		if !ok {
 			continue
@@ -180,18 +190,18 @@ func (r *Registry) MatchProject(repoPath string) *Playbook {
 	if best != nil {
 		return clone(best)
 	}
-	if fallback, ok := r.playbooks["default"]; ok {
+	if fallback, ok := snapshot["default"]; ok {
 		return clone(fallback)
 	}
-	ids := make([]string, 0, len(r.playbooks))
-	for id := range r.playbooks {
+	ids := make([]string, 0, len(snapshot))
+	for id := range snapshot {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	if len(ids) == 0 {
 		return nil
 	}
-	return clone(r.playbooks[ids[0]])
+	return clone(snapshot[ids[0]])
 }
 
 func matchScore(pb *Playbook, languages map[string]struct{}, projectPatterns map[string]struct{}) (int, bool) {
@@ -375,7 +385,7 @@ func loadFile(path string) (*Playbook, error) {
 
 func normalizeAndValidate(pb *Playbook) error {
 	if pb == nil {
-		return errors.New("playbook is required")
+		return fmt.Errorf("%w: playbook is required", ErrInvalidPlaybook)
 	}
 	pb.ID = strings.TrimSpace(strings.ToLower(pb.ID))
 	if err := validateID(pb.ID); err != nil {
@@ -383,7 +393,7 @@ func normalizeAndValidate(pb *Playbook) error {
 	}
 	pb.Name = strings.TrimSpace(pb.Name)
 	if pb.Name == "" {
-		return errors.New("name is required")
+		return fmt.Errorf("%w: name is required", ErrInvalidPlaybook)
 	}
 	pb.Description = strings.TrimSpace(pb.Description)
 	pb.ParallelismStrategy = strings.TrimSpace(pb.ParallelismStrategy)
@@ -413,13 +423,13 @@ func normalizeAndValidate(pb *Playbook) error {
 		pb.Phases[i].Role = strings.TrimSpace(pb.Phases[i].Role)
 		pb.Phases[i].Description = strings.TrimSpace(pb.Phases[i].Description)
 		if pb.Phases[i].Name == "" {
-			return fmt.Errorf("phase[%d].name is required", i)
+			return fmt.Errorf("%w: phase[%d].name is required", ErrInvalidPlaybook, i)
 		}
 		if pb.Phases[i].Agent == "" {
-			return fmt.Errorf("phase[%d].agent is required", i)
+			return fmt.Errorf("%w: phase[%d].agent is required", ErrInvalidPlaybook, i)
 		}
 		if pb.Phases[i].Role == "" {
-			return fmt.Errorf("phase[%d].role is required", i)
+			return fmt.Errorf("%w: phase[%d].role is required", ErrInvalidPlaybook, i)
 		}
 	}
 
@@ -428,10 +438,10 @@ func normalizeAndValidate(pb *Playbook) error {
 
 func validateID(id string) error {
 	if strings.TrimSpace(id) == "" {
-		return errors.New("id is required")
+		return fmt.Errorf("%w: id is required", ErrInvalidPlaybook)
 	}
 	if !playbookIDPattern.MatchString(id) {
-		return errors.New("id must be lowercase alphanumeric with hyphens")
+		return fmt.Errorf("%w: id must be lowercase alphanumeric with hyphens", ErrInvalidPlaybook)
 	}
 	return nil
 }

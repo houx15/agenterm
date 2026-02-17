@@ -1,8 +1,8 @@
 package api
 
 import (
+	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/user/agenterm/internal/playbook"
 )
@@ -43,11 +43,7 @@ func (h *handler) createPlaybook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.playbookRegistry.Save(&req); err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "write playbook") {
-			status = http.StatusInternalServerError
-		}
-		jsonError(w, status, err.Error())
+		jsonError(w, playbookStatusCode(err), err.Error())
 		return
 	}
 	jsonResponse(w, http.StatusCreated, h.playbookRegistry.Get(req.ID))
@@ -74,11 +70,7 @@ func (h *handler) updatePlaybook(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ID = id
 	if err := h.playbookRegistry.Save(&req); err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "write playbook") {
-			status = http.StatusInternalServerError
-		}
-		jsonError(w, status, err.Error())
+		jsonError(w, playbookStatusCode(err), err.Error())
 		return
 	}
 	jsonResponse(w, http.StatusOK, h.playbookRegistry.Get(id))
@@ -95,8 +87,21 @@ func (h *handler) deletePlaybook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.playbookRegistry.Delete(id); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
+		jsonError(w, playbookStatusCode(err), err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func playbookStatusCode(err error) int {
+	switch {
+	case errors.Is(err, playbook.ErrInvalidPlaybook):
+		return http.StatusBadRequest
+	case errors.Is(err, playbook.ErrPlaybookNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, playbook.ErrPlaybookStorage):
+		return http.StatusInternalServerError
+	default:
+		return http.StatusInternalServerError
+	}
 }

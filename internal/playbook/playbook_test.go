@@ -1,6 +1,7 @@
 package playbook
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,5 +76,20 @@ func TestSaveDeleteReload(t *testing.T) {
 	}
 	if got := r.Get("custom-playbook"); got != nil {
 		t.Fatalf("expected deleted playbook, got %#v", got)
+	}
+}
+
+func TestDeleteMissingReturnsNotFound(t *testing.T) {
+	r, err := NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	err = r.Delete("missing-playbook")
+	if err == nil {
+		t.Fatalf("Delete() error = nil, want not found")
+	}
+	if !errors.Is(err, ErrPlaybookNotFound) {
+		t.Fatalf("Delete() error = %v, want ErrPlaybookNotFound", err)
 	}
 }
