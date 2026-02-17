@@ -15,6 +15,16 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const currentSessionRef = useRef<string>('')
+  const onInputRef = useRef(onInput)
+  const onResizeRef = useRef(onResize)
+
+  useEffect(() => {
+    onInputRef.current = onInput
+  }, [onInput])
+
+  useEffect(() => {
+    onResizeRef.current = onResize
+  }, [onResize])
 
   useEffect(() => {
     if (!rootRef.current || terminalRef.current) {
@@ -37,7 +47,7 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
     fit.fit()
 
     term.onData((data) => {
-      onInput(data)
+      onInputRef.current(data)
     })
 
     terminalRef.current = term
@@ -45,11 +55,11 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
 
     const observer = new ResizeObserver(() => {
       fit.fit()
-      onResize(term.cols, term.rows)
+      onResizeRef.current(term.cols, term.rows)
     })
     observer.observe(rootRef.current)
 
-    onResize(term.cols, term.rows)
+    onResizeRef.current(term.cols, term.rows)
 
     return () => {
       observer.disconnect()
@@ -57,7 +67,7 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
       terminalRef.current = null
       fitAddonRef.current = null
     }
-  }, [onInput, onResize])
+  }, [])
 
   useEffect(() => {
     const term = terminalRef.current
@@ -75,7 +85,7 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
     }
 
     fit.fit()
-    onResize(term.cols, term.rows)
+    onResizeRef.current(term.cols, term.rows)
   }, [history, onResize, sessionId])
 
   return <div className="terminal" ref={rootRef} />
