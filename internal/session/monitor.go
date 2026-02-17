@@ -17,6 +17,9 @@ import (
 	"github.com/user/agenterm/internal/parser"
 )
 
+var capturePaneFn = capturePane
+var tmuxSessionExistsFn = tmuxSessionExists
+
 type MonitorConfig struct {
 	SessionID      string
 	TmuxSession    string
@@ -96,14 +99,15 @@ func (m *Monitor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !tmuxSessionExists(m.tmuxSession) {
+			if !tmuxSessionExistsFn(m.tmuxSession) {
 				m.persistStatus(context.Background(), "completed")
 				return
 			}
-			captured, err := capturePane(m.windowID, m.captureLines)
+			captured, err := capturePaneFn(m.windowID, m.captureLines)
 			if err == nil {
 				m.recordOutput(captured)
 			}
+			m.touchActivity(context.Background())
 
 			status := m.detectStatus()
 			if status != m.currentStatus() {
@@ -143,14 +147,14 @@ func (m *Monitor) recordOutput(captured []string) {
 }
 
 func (m *Monitor) detectStatus() string {
-	if m.isMarkerDone() {
-		return "completed"
-	}
 	if m.hasPrompt() {
 		return "waiting_review"
 	}
 	if m.isIdle() {
 		return "idle"
+	}
+	if m.isMarkerDone() {
+		return "completed"
 	}
 	if m.hasReadyForReviewCommit() {
 		return "waiting_review"
@@ -230,6 +234,17 @@ func (m *Monitor) persistStatus(ctx context.Context, status string) {
 	if m.hub != nil {
 		m.hub.BroadcastSessionStatus(m.sessionID, status)
 	}
+}
+
+func (m *Monitor) touchActivity(ctx context.Context) {
+	if m.sessionRepo == nil {
+		return
+	}
+	sess, err := m.sessionRepo.Get(ctx, m.sessionID)
+	if err != nil || sess == nil {
+		return
+	}
+	_ = m.sessionRepo.Update(ctx, sess)
 }
 
 func capturePane(windowID string, lines int) ([]string, error) {

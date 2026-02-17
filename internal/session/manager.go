@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,15 +211,13 @@ func (sm *Manager) CreateSession(ctx context.Context, req CreateSessionRequest) 
 		return nil, err
 	}
 
-	if strings.TrimSpace(agent.AutoAcceptMode) != "" {
+	if seq, ok := autoAcceptSequence(agent.AutoAcceptMode); ok {
 		go func(windowID string, mode string) {
 			time.Sleep(600 * time.Millisecond)
-			if mode == "supported" {
-				if err := gw.SendRaw(windowID, "\n"); err != nil {
-					slog.Debug("auto-accept send failed", "session", session.ID, "error", err)
-				}
+			if err := gw.SendRaw(windowID, mode); err != nil {
+				slog.Debug("auto-accept send failed", "session", session.ID, "error", err)
 			}
-		}(session.TmuxWindowID, strings.TrimSpace(agent.AutoAcceptMode))
+		}(session.TmuxWindowID, seq)
 	}
 
 	if err := sm.ensureMonitorForSession(ctx, session); err != nil {
@@ -512,4 +511,32 @@ func IsNotFound(err error) bool {
 		return false
 	}
 	return strings.HasSuffix(strings.ToLower(err.Error()), "not found") || errors.Is(err, sql.ErrNoRows)
+}
+
+func autoAcceptSequence(mode string) (string, bool) {
+	raw := strings.TrimSpace(mode)
+	if raw == "" {
+		return "", false
+	}
+
+	switch strings.ToLower(raw) {
+	case "none", "optional", "disabled":
+		return "", false
+	case "supported", "enter", "return":
+		return "\n", true
+	case "tab":
+		return "\t", true
+	case "shift+tab", "shift-tab", "backtab":
+		return "\x1b[Z", true
+	case "ctrl+c", "ctrl-c":
+		return "\x03", true
+	}
+
+	if strings.Contains(raw, `\`) {
+		if decoded, err := strconv.Unquote(`"` + strings.ReplaceAll(raw, `"`, `\"`) + `"`); err == nil {
+			return decoded, true
+		}
+	}
+
+	return raw, true
 }
