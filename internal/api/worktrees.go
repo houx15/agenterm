@@ -201,6 +201,20 @@ func (h *handler) deleteWorktree(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if worktree.TaskID != "" {
+		task, err := h.taskRepo.Get(r.Context(), worktree.TaskID)
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if task != nil && task.WorktreeID == worktree.ID {
+			task.WorktreeID = ""
+			if err := h.taskRepo.Update(r.Context(), task); err != nil {
+				jsonError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
 	if err := h.worktreeRepo.Delete(r.Context(), worktree.ID); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

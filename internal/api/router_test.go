@@ -221,10 +221,21 @@ func TestWorktreeGitEndpoints(t *testing.T) {
 	decodeBody(t, createProject, &project)
 	projectID := project["id"].(string)
 
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "Task for worktree", "description": "D",
+	}, true)
+	if createTask.Code != http.StatusCreated {
+		t.Fatalf("create task status=%d body=%s", createTask.Code, createTask.Body.String())
+	}
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
 	wtPath := filepath.Join(repo, ".worktrees", "t1")
 	createWT := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/worktrees", map[string]any{
 		"branch_name": "feature/t1",
 		"path":        wtPath,
+		"task_id":     taskID,
 	}, true)
 	if createWT.Code != http.StatusCreated {
 		t.Fatalf("create worktree status=%d body=%s", createWT.Code, createWT.Body.String())
@@ -245,6 +256,16 @@ func TestWorktreeGitEndpoints(t *testing.T) {
 	del := apiRequest(t, h, http.MethodDelete, "/api/worktrees/"+worktreeID, nil, true)
 	if del.Code != http.StatusNoContent {
 		t.Fatalf("delete worktree code=%d body=%s", del.Code, del.Body.String())
+	}
+
+	taskAfterDelete := apiRequest(t, h, http.MethodGet, "/api/tasks/"+taskID, nil, true)
+	if taskAfterDelete.Code != http.StatusOK {
+		t.Fatalf("get task after delete status=%d body=%s", taskAfterDelete.Code, taskAfterDelete.Body.String())
+	}
+	var updatedTask map[string]any
+	decodeBody(t, taskAfterDelete, &updatedTask)
+	if v, ok := updatedTask["worktree_id"]; ok && v != "" {
+		t.Fatalf("expected empty worktree_id after worktree delete, got=%v", v)
 	}
 }
 
