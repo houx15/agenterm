@@ -20,7 +20,7 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(cfg *config.Config, h *hub.Hub, db *sql.DB) (*Server, error) {
+func New(cfg *config.Config, h *hub.Hub, db *sql.DB, apiHandler http.Handler) (*Server, error) {
 	mux := http.NewServeMux()
 
 	subFS, err := fs.Sub(web.Assets, ".")
@@ -31,6 +31,9 @@ func New(cfg *config.Config, h *hub.Hub, db *sql.DB) (*Server, error) {
 	mux.Handle("/", fileServer)
 
 	mux.HandleFunc("/ws", h.HandleWebSocket)
+	if apiHandler != nil {
+		mux.Handle("/api/", apiHandler)
+	}
 
 	return &Server{
 		cfg: cfg,

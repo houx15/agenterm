@@ -128,13 +128,13 @@ func NewRouter(db *db.DB, gw *tmux.Gateway, hub *hub.Hub, token string) http.Han
 - Test error responses (404 for missing resources, 400 for bad input)
 
 ## Acceptance Criteria
-- [ ] All SPEC Section 8.1 endpoints implemented
-- [ ] Token auth on all API routes
-- [ ] Proper HTTP status codes (201 for create, 200 for get/update, 204 for delete)
-- [ ] JSON error responses with meaningful messages
-- [ ] Worktree operations execute real git commands
-- [ ] Session creation creates real tmux windows
-- [ ] Existing WebSocket endpoint still works alongside new API
+- [x] All SPEC Section 8.1 endpoints implemented
+- [x] Token auth on all API routes
+- [x] Proper HTTP status codes (201 for create, 200 for get/update, 204 for delete)
+- [x] JSON error responses with meaningful messages
+- [x] Worktree operations execute real git commands
+- [x] Session creation creates real tmux windows
+- [x] Existing WebSocket endpoint still works alongside new API
 
 ## Notes
 - Go 1.22 ServeMux supports `"GET /api/projects/{id}"` pattern matching natively

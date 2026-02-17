@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/user/agenterm/internal/api"
 	"github.com/user/agenterm/internal/config"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
@@ -77,7 +78,8 @@ func main() {
 		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
-	srv, err := server.New(cfg, h, appDB.SQL())
+	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token)
+	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
