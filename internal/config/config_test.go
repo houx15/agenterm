@@ -10,7 +10,7 @@ func TestLoadFromFileParsesDBPath(t *testing.T) {
 	cfg := &Config{}
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "config")
 
-	content := "Port=9999\nTmuxSession=ai\nToken=test-token\nDefaultDir=/tmp/work\nDBPath=/tmp/custom/agenterm.db\nAgentsDir=/tmp/custom/agents\n"
+	content := "Port=9999\nTmuxSession=ai\nToken=test-token\nDefaultDir=/tmp/work\nDBPath=/tmp/custom/agenterm.db\nAgentsDir=/tmp/custom/agents\nLLMAPIKey=test-llm-key\nLLMModel=claude-sonnet-test\nLLMBaseURL=https://example.invalid/v1/messages\n"
 	if err := os.WriteFile(cfg.ConfigPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config file error = %v", err)
 	}
@@ -24,5 +24,14 @@ func TestLoadFromFileParsesDBPath(t *testing.T) {
 	}
 	if cfg.AgentsDir != "/tmp/custom/agents" {
 		t.Fatalf("AgentsDir = %q, want /tmp/custom/agents", cfg.AgentsDir)
+	}
+	if cfg.LLMAPIKey != "test-llm-key" {
+		t.Fatalf("LLMAPIKey = %q, want test-llm-key", cfg.LLMAPIKey)
+	}
+	if cfg.LLMModel != "claude-sonnet-test" {
+		t.Fatalf("LLMModel = %q, want claude-sonnet-test", cfg.LLMModel)
+	}
+	if cfg.LLMBaseURL != "https://example.invalid/v1/messages" {
+		t.Fatalf("LLMBaseURL = %q, want https://example.invalid/v1/messages", cfg.LLMBaseURL)
 	}
 }

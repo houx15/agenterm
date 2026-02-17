@@ -19,6 +19,9 @@ type Config struct {
 	DefaultDir  string
 	DBPath      string
 	AgentsDir   string
+	LLMAPIKey   string
+	LLMModel    string
+	LLMBaseURL  string
 }
 
 func Load() (*Config, error) {
@@ -34,6 +37,8 @@ func Load() (*Config, error) {
 		ConfigPath:  filepath.Join(homeDir, ".config", "agenterm", "config"),
 		DBPath:      filepath.Join(homeDir, ".config", "agenterm", "agenterm.db"),
 		AgentsDir:   filepath.Join(homeDir, ".config", "agenterm", "agents"),
+		LLMModel:    "claude-sonnet-4-5",
+		LLMBaseURL:  "https://api.anthropic.com/v1/messages",
 	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
@@ -46,8 +51,15 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.DefaultDir, "dir", cfg.DefaultDir, "default directory for new windows")
 	flag.StringVar(&cfg.DBPath, "db-path", cfg.DBPath, "path to SQLite database")
 	flag.StringVar(&cfg.AgentsDir, "agents-dir", cfg.AgentsDir, "directory for agent YAML configs")
+	flag.StringVar(&cfg.LLMAPIKey, "llm-api-key", cfg.LLMAPIKey, "LLM API key (defaults to ANTHROPIC_API_KEY env var)")
+	flag.StringVar(&cfg.LLMModel, "llm-model", cfg.LLMModel, "LLM model name for orchestrator")
+	flag.StringVar(&cfg.LLMBaseURL, "llm-base-url", cfg.LLMBaseURL, "LLM API URL for orchestrator")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
+
+	if strings.TrimSpace(cfg.LLMAPIKey) == "" {
+		cfg.LLMAPIKey = strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	}
 
 	if cfg.Port < 1 || cfg.Port > 65535 {
 		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", cfg.Port)
@@ -101,6 +113,12 @@ func (c *Config) loadFromFile() error {
 			c.DBPath = value
 		case "AgentsDir":
 			c.AgentsDir = value
+		case "LLMAPIKey":
+			c.LLMAPIKey = value
+		case "LLMModel":
+			c.LLMModel = value
+		case "LLMBaseURL":
+			c.LLMBaseURL = value
 		}
 	}
 	return nil
@@ -112,8 +130,8 @@ func (c *Config) saveToFile() error {
 		return err
 	}
 	data := fmt.Sprintf(
-		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\n",
-		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir,
+		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\n",
+		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL,
 	)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }

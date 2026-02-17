@@ -140,13 +140,13 @@ For non-WebSocket clients (like curl or the orchestrator calling itself).
 - Test conversation history persistence
 
 ## Acceptance Criteria
-- [ ] Orchestrator can receive natural language and decompose into tasks
-- [ ] Tool calls execute against real API and affect system state
-- [ ] Streaming responses visible in PM Chat UI
-- [ ] Tool call visibility (user can see what the PM is doing)
-- [ ] Event-driven triggers work (session idle → orchestrator reacts)
-- [ ] Conversation history persisted per project
-- [ ] Configurable LLM model and API key
+- [x] Orchestrator can receive natural language and decompose into tasks
+- [x] Tool calls execute against real API and affect system state
+- [x] Streaming responses visible in PM Chat UI
+- [x] Tool call visibility (user can see what the PM is doing)
+- [x] Event-driven triggers work (session idle → orchestrator reacts)
+- [x] Conversation history persisted per project
+- [x] Configurable LLM model and API key
 
 ## Notes
 - Start with Claude API (Anthropic). Can add OpenAI/Gemini later.

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/tmux"
 )
@@ -68,7 +69,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
+	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
@@ -82,7 +83,7 @@ func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, manager, nil, nil, "test-token", "configured-session", agentRegistry), database
+	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -596,6 +597,75 @@ func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	getMissing := apiRequest(t, h, http.MethodGet, "/api/agents/custom-agent", nil, true)
 	if getMissing.Code != http.StatusNotFound {
 		t.Fatalf("get deleted status=%d body=%s", getMissing.Code, getMissing.Body.String())
+	}
+}
+
+func TestOrchestratorEndpoints(t *testing.T) {
+	gw := &fakeGateway{}
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	agentRegistry, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+
+	projectRepo := db.NewProjectRepo(database.SQL())
+	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/projects/"+project.ID && r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
+				"tasks":     []any{},
+				"worktrees": []any{},
+				"sessions":  []any{},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer apiSrv.Close()
+
+	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []any{map[string]any{"type": "text", "text": "ok"}},
+		})
+	}))
+	defer llmSrv.Close()
+
+	orchestratorInst := orchestrator.New(orchestrator.Options{
+		APIKey:           "test-key",
+		AnthropicBaseURL: llmSrv.URL,
+		APIToolBaseURL:   apiSrv.URL,
+		HTTPClient:       apiSrv.Client(),
+		ProjectRepo:      projectRepo,
+		TaskRepo:         db.NewTaskRepo(database.SQL()),
+		WorktreeRepo:     db.NewWorktreeRepo(database.SQL()),
+		SessionRepo:      db.NewSessionRepo(database.SQL()),
+		HistoryRepo:      db.NewOrchestratorHistoryRepo(database.SQL()),
+		Registry:         agentRegistry,
+	})
+
+	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, "test-token", "configured-session", agentRegistry)
+
+	chat := apiRequest(t, h, http.MethodPost, "/api/orchestrator/chat", map[string]any{
+		"project_id": project.ID,
+		"message":    "hello",
+	}, true)
+	if chat.Code != http.StatusOK {
+		t.Fatalf("chat status=%d body=%s", chat.Code, chat.Body.String())
+	}
+
+	report := apiRequest(t, h, http.MethodGet, "/api/orchestrator/report?project_id="+project.ID, nil, true)
+	if report.Code != http.StatusOK {
+		t.Fatalf("report status=%d body=%s", report.Code, report.Body.String())
 	}
 }
 

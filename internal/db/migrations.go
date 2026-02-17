@@ -91,6 +91,23 @@ CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 `,
 	},
+	{
+		version: 2,
+		name:    "create orchestrator history",
+		sql: `
+CREATE TABLE IF NOT EXISTS orchestrator_messages (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_orchestrator_messages_project_created
+ON orchestrator_messages(project_id, created_at);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

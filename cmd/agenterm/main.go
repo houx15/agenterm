@@ -16,6 +16,7 @@ import (
 	"github.com/user/agenterm/internal/config"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
+	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
@@ -384,7 +385,70 @@ func main() {
 		}
 	}
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
+	projectRepo := db.NewProjectRepo(appDB.SQL())
+	taskRepo := db.NewTaskRepo(appDB.SQL())
+	worktreeRepo := db.NewWorktreeRepo(appDB.SQL())
+	sessionRepo := db.NewSessionRepo(appDB.SQL())
+	historyRepo := db.NewOrchestratorHistoryRepo(appDB.SQL())
+
+	orchestratorInst := orchestrator.New(orchestrator.Options{
+		APIKey:           cfg.LLMAPIKey,
+		Model:            cfg.LLMModel,
+		AnthropicBaseURL: cfg.LLMBaseURL,
+		APIToolBaseURL:   fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
+		APIToken:         cfg.Token,
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		WorktreeRepo:     worktreeRepo,
+		SessionRepo:      sessionRepo,
+		HistoryRepo:      historyRepo,
+		Registry:         agentRegistry,
+	})
+
+	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan hub.OrchestratorServerMessage, error) {
+		stream, err := orchestratorInst.Chat(ctx, projectID, message)
+		if err != nil {
+			return nil, err
+		}
+		out := make(chan hub.OrchestratorServerMessage, 32)
+		go func() {
+			defer close(out)
+			for evt := range stream {
+				out <- hub.OrchestratorServerMessage{
+					Type:   evt.Type,
+					Text:   evt.Text,
+					Name:   evt.Name,
+					Args:   evt.Args,
+					Result: evt.Result,
+					Error:  evt.Error,
+				}
+			}
+		}()
+		return out, nil
+	})
+
+	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo)
+	go eventTrigger.Start(ctx, 15*time.Second)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				projects, err := projectRepo.List(ctx, db.ProjectFilter{Status: "active"})
+				if err != nil {
+					continue
+				}
+				for _, project := range projects {
+					eventTrigger.OnTimer(project.ID)
+				}
+			}
+		}
+	}()
+
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

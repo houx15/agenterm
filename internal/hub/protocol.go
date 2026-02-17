@@ -56,6 +56,21 @@ type ClientMessage struct {
 	Rows      int    `json:"rows,omitempty"`
 }
 
+type OrchestratorClientMessage struct {
+	Type      string `json:"type"`
+	ProjectID string `json:"project_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
+type OrchestratorServerMessage struct {
+	Type   string         `json:"type"`
+	Text   string         `json:"text,omitempty"`
+	Name   string         `json:"name,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
+	Result any            `json:"result,omitempty"`
+	Error  string         `json:"error,omitempty"`
+}
+
 type NewWindowMessage struct {
 	Type string `json:"type"`
 	Name string `json:"name"`

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,7 @@ type Hub struct {
 	onNewSessionByID func(sessionID string, name string)
 	onKillWindow     func(windowID string)
 	onKillBySession  func(sessionID string, windowID string)
+	onOrchestrator   func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)
 	token            string
 	defaultDir       string
 	mu               sync.RWMutex
@@ -169,6 +171,62 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Hub) HandleOrchestratorWebSocket(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" || token != h.token {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.onOrchestrator == nil {
+		http.Error(w, "orchestrator unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{"*"},
+	})
+	if err != nil {
+		log.Printf("orchestrator websocket accept error: %v", err)
+		return
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	for {
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+				log.Printf("orchestrator websocket read error: %v", err)
+			}
+			return
+		}
+
+		var msg OrchestratorClientMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			_ = conn.Write(r.Context(), websocket.MessageText, mustJSON(OrchestratorServerMessage{Type: "error", Error: "invalid message format"}))
+			continue
+		}
+		if msg.Type != "chat" {
+			_ = conn.Write(r.Context(), websocket.MessageText, mustJSON(OrchestratorServerMessage{Type: "error", Error: "unknown message type"}))
+			continue
+		}
+		if strings.TrimSpace(msg.ProjectID) == "" || strings.TrimSpace(msg.Message) == "" {
+			_ = conn.Write(r.Context(), websocket.MessageText, mustJSON(OrchestratorServerMessage{Type: "error", Error: "project_id and message are required"}))
+			continue
+		}
+
+		stream, err := h.onOrchestrator(r.Context(), msg.ProjectID, msg.Message)
+		if err != nil {
+			_ = conn.Write(r.Context(), websocket.MessageText, mustJSON(OrchestratorServerMessage{Type: "error", Error: err.Error()}))
+			continue
+		}
+		for evt := range stream {
+			if err := conn.Write(r.Context(), websocket.MessageText, mustJSON(evt)); err != nil {
+				return
+			}
+		}
+	}
+}
+
 func (h *Hub) BroadcastOutput(msg OutputMessage) {
 	if h.batchEnabled && h.rateLimiter != nil {
 		h.rateLimiter.Add(msg)
@@ -198,6 +256,11 @@ func (h *Hub) sendBroadcast(msg any) {
 	default:
 		log.Printf("broadcast channel full, dropping message")
 	}
+}
+
+func mustJSON(v any) []byte {
+	data, _ := json.Marshal(v)
+	return data
 }
 
 func (h *Hub) BroadcastWindows(windows []WindowInfo) {
@@ -372,6 +435,10 @@ func (h *Hub) SetOnNewWindowWithSession(fn func(sessionID string, name string)) 
 
 func (h *Hub) SetOnKillWindowWithSession(fn func(sessionID string, windowID string)) {
 	h.onKillBySession = fn
+}
+
+func (h *Hub) SetOnOrchestratorChat(fn func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)) {
+	h.onOrchestrator = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

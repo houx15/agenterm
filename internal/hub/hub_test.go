@@ -198,6 +198,66 @@ func TestTokenAuthentication(t *testing.T) {
 	}
 }
 
+func TestOrchestratorWebSocketChatFlow(t *testing.T) {
+	token := "test-token"
+	h := New(token, nil)
+	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error) {
+		out := make(chan OrchestratorServerMessage, 3)
+		go func() {
+			defer close(out)
+			out <- OrchestratorServerMessage{Type: "token", Text: "hello"}
+			out <- OrchestratorServerMessage{Type: "tool_call", Name: "get_project_status", Args: map[string]any{"project_id": projectID}}
+			out <- OrchestratorServerMessage{Type: "done"}
+		}()
+		return out, nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(h.HandleOrchestratorWebSocket))
+	defer server.Close()
+
+	url := fmt.Sprintf("ws://%s/ws/orchestrator?token=%s", server.URL[7:], token)
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	conn, _, err := websocket.Dial(dialCtx, url, nil)
+	dialCancel()
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	req := OrchestratorClientMessage{
+		Type:      "chat",
+		ProjectID: "p1",
+		Message:   "status?",
+	}
+	data, _ := json.Marshal(req)
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), time.Second)
+	if err := conn.Write(writeCtx, websocket.MessageText, data); err != nil {
+		writeCancel()
+		t.Fatalf("write chat: %v", err)
+	}
+	writeCancel()
+
+	seenDone := false
+	for i := 0; i < 3; i++ {
+		readCtx, readCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, msgData, err := conn.Read(readCtx)
+		readCancel()
+		if err != nil {
+			t.Fatalf("read ws message: %v", err)
+		}
+		var msg OrchestratorServerMessage
+		if err := json.Unmarshal(msgData, &msg); err != nil {
+			t.Fatalf("decode ws message: %v", err)
+		}
+		if msg.Type == "done" {
+			seenDone = true
+		}
+	}
+	if !seenDone {
+		t.Fatalf("expected done event")
+	}
+}
+
 func TestClientLifecycle(t *testing.T) {
 	token := "test-token"
 	var inputReceived []string

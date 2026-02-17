@@ -10,6 +10,7 @@ import (
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
+	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
@@ -46,13 +47,14 @@ type handler struct {
 	manager      sessionManager
 	lifecycle    *session.Manager
 	hub          *hub.Hub
+	orchestrator *orchestrator.Orchestrator
 	tmuxSession  string
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
 	if lifecycle == nil {
 		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
 	}
@@ -66,6 +68,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		manager:      manager,
 		lifecycle:    lifecycle,
 		hub:          hubInst,
+		orchestrator: orchestratorInst,
 		tmuxSession:  tmuxSession,
 		outputState:  make(map[string]*windowOutputState),
 	}
@@ -101,6 +104,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/agents", handler.createAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
+
+	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
+	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
 
 	wrapped := authMiddleware(token)(jsonMiddleware(corsMiddleware(mux)))
 	return wrapped

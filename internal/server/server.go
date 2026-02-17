@@ -31,7 +31,7 @@ func New(cfg *config.Config, h *hub.Hub, db *sql.DB, apiHandler http.Handler) (*
 	}
 	fileServer := http.FileServer(http.FS(subFS))
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" || r.URL.Path == "/ws" {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" || r.URL.Path == "/ws" || r.URL.Path == "/ws/orchestrator" {
 			http.NotFound(w, r)
 			return
 		}
@@ -59,6 +59,7 @@ func New(cfg *config.Config, h *hub.Hub, db *sql.DB, apiHandler http.Handler) (*
 	}))
 
 	mux.HandleFunc("/ws", h.HandleWebSocket)
+	mux.HandleFunc("/ws/orchestrator", h.HandleOrchestratorWebSocket)
 	if apiHandler != nil {
 		mux.Handle("/api/", apiHandler)
 	}
