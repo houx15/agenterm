@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createProject, listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { Project, Session, Task } from '../api/types'
+import type { OutputMessage, Project, ServerMessage, Session, Task, WindowsMessage } from '../api/types'
 import { useAppContext } from '../App'
 import ActivityFeed, { type DashboardActivity } from '../components/ActivityFeed'
 import ProjectCard from '../components/ProjectCard'
@@ -22,8 +22,12 @@ function isDoneTask(status: string): boolean {
   return ['done', 'completed', 'success'].includes(normalizeStatus(status))
 }
 
+function isActiveProject(status: string): boolean {
+  return !['inactive', 'archived', 'completed', 'done', 'paused', 'closed'].includes(normalizeStatus(status))
+}
+
 function isActiveSession(status: string): boolean {
-  return normalizeStatus(status) !== 'completed'
+  return !['completed', 'stopped', 'terminated'].includes(normalizeStatus(status))
 }
 
 function isSessionStoppedStatus(status: string): boolean {
@@ -63,7 +67,7 @@ function buildActivityFromData(projects: Project[], tasksByProject: Record<strin
     .slice(0, 12)
 }
 
-function buildLiveActivityFromMessage(lastMessage: { type: string; [key: string]: unknown } | null): DashboardActivity | null {
+function buildLiveActivityFromMessage(lastMessage: ServerMessage | null): DashboardActivity | null {
   if (!lastMessage) {
     return null
   }
@@ -112,7 +116,6 @@ function buildLiveActivityFromMessage(lastMessage: { type: string; [key: string]
 export default function Dashboard() {
   const app = useAppContext()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
 
   const [projects, setProjects] = useState<Project[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
@@ -120,8 +123,9 @@ export default function Dashboard() {
   const [activity, setActivity] = useState<DashboardActivity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showInactiveProjects, setShowInactiveProjects] = useState(false)
 
-  const selectedProjectID = searchParams.get('project')
+  const syncTimerRef = useRef<number | null>(null)
 
   const loadDashboard = useCallback(async () => {
     setError('')
@@ -152,6 +156,25 @@ export default function Dashboard() {
     }
   }, [])
 
+  const scheduleSync = useCallback(() => {
+    if (syncTimerRef.current !== null) {
+      window.clearTimeout(syncTimerRef.current)
+    }
+
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = null
+      void loadDashboard()
+    }, 800)
+  }, [loadDashboard])
+
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     void loadDashboard()
   }, [loadDashboard])
@@ -164,13 +187,84 @@ export default function Dashboard() {
   }, [loadDashboard])
 
   useEffect(() => {
-    const live = buildLiveActivityFromMessage(app.lastMessage as { type: string; [key: string]: unknown } | null)
-    if (!live) {
+    const live = buildLiveActivityFromMessage(app.lastMessage)
+    if (live) {
+      setActivity((prev) => [live, ...prev].slice(0, 12))
+    }
+
+    if (!app.lastMessage) {
       return
     }
 
-    setActivity((prev) => [live, ...prev].slice(0, 12))
-  }, [app.lastMessage])
+    if (app.lastMessage.type === 'status') {
+      const nextStatus = app.lastMessage.status
+      const windowID = app.lastMessage.window
+      const now = new Date().toISOString()
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.tmux_window_id !== windowID) {
+            return session
+          }
+          return {
+            ...session,
+            status: nextStatus,
+            last_activity_at: now,
+          }
+        }),
+      )
+      scheduleSync()
+      return
+    }
+
+    if (app.lastMessage.type === 'windows') {
+      const windowsMessage = app.lastMessage as WindowsMessage
+      const statusByWindow: Record<string, string> = {}
+      for (const item of windowsMessage.list) {
+        statusByWindow[item.id] = item.status
+      }
+
+      const now = new Date().toISOString()
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (!session.tmux_window_id) {
+            return session
+          }
+          const nextStatus = statusByWindow[session.tmux_window_id]
+          if (!nextStatus || nextStatus === session.status) {
+            return session
+          }
+          return {
+            ...session,
+            status: nextStatus,
+            last_activity_at: now,
+          }
+        }),
+      )
+
+      scheduleSync()
+      return
+    }
+
+    if (app.lastMessage.type === 'output') {
+      const message = app.lastMessage as OutputMessage
+      if (!message.window) {
+        return
+      }
+
+      const now = new Date().toISOString()
+      setSessions((prev) =>
+        prev.map((session) => {
+          if (session.tmux_window_id !== message.window) {
+            return session
+          }
+          return {
+            ...session,
+            last_activity_at: now,
+          }
+        }),
+      )
+    }
+  }, [app.lastMessage, scheduleSync])
 
   const activeSessions = useMemo(() => sessions.filter((session) => isActiveSession(session.status)), [sessions])
 
@@ -205,6 +299,16 @@ export default function Dashboard() {
     })
   }, [activeSessions, projects, tasksByProject])
 
+  const activeProjectSummaries = useMemo(
+    () => projectSummaries.filter((summary) => isActiveProject(summary.project.status)),
+    [projectSummaries],
+  )
+
+  const inactiveProjectSummaries = useMemo(
+    () => projectSummaries.filter((summary) => !isActiveProject(summary.project.status)),
+    [projectSummaries],
+  )
+
   const groupedSessions = useMemo(() => {
     const grouped: Record<string, { session: Session; projectName: string }[]> = {}
 
@@ -235,8 +339,6 @@ export default function Dashboard() {
       taskCompletionRate,
     }
   }, [activeSessions, tasksByProject])
-
-  const selectedSummary = projectSummaries.find((summary) => summary.project.id === selectedProjectID)
 
   const handleCreateProject = async () => {
     const name = window.prompt('Project name')?.trim()
@@ -286,21 +388,44 @@ export default function Dashboard() {
         <>
           <section className="dashboard-section">
             <div className="dashboard-section-title">
-              <h3>Projects ({projectSummaries.length} active)</h3>
+              <h3>Projects ({activeProjectSummaries.length} active)</h3>
             </div>
             <div className="dashboard-project-grid">
-              {projectSummaries.map((summary) => (
+              {activeProjectSummaries.map((summary) => (
                 <ProjectCard
                   activeAgents={summary.activeAgents}
                   doneTasks={summary.doneTasks}
                   key={summary.project.id}
-                  onClick={() => setSearchParams({ project: summary.project.id })}
+                  onClick={() => navigate(`/projects/${summary.project.id}`)}
                   project={summary.project}
                   totalTasks={summary.tasks.length}
                 />
               ))}
               <ProjectCard isNewCard onClick={handleCreateProject} />
             </div>
+
+            {inactiveProjectSummaries.length > 0 && (
+              <div className="dashboard-inactive-projects">
+                <button className="secondary-btn" onClick={() => setShowInactiveProjects((prev) => !prev)} type="button">
+                  {showInactiveProjects ? 'Hide' : 'Show'} inactive projects ({inactiveProjectSummaries.length})
+                </button>
+
+                {showInactiveProjects && (
+                  <div className="dashboard-project-grid dashboard-project-grid-inactive">
+                    {inactiveProjectSummaries.map((summary) => (
+                      <ProjectCard
+                        activeAgents={summary.activeAgents}
+                        doneTasks={summary.doneTasks}
+                        key={summary.project.id}
+                        onClick={() => navigate(`/projects/${summary.project.id}`)}
+                        project={summary.project}
+                        totalTasks={summary.tasks.length}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="dashboard-section">
@@ -358,25 +483,6 @@ export default function Dashboard() {
             </div>
             <ActivityFeed items={activity} />
           </section>
-
-          {selectedSummary && (
-            <section className="dashboard-section">
-              <div className="dashboard-section-title">
-                <h3>{selectedSummary.project.name} details</h3>
-              </div>
-              <div className="dashboard-project-detail">
-                <p>Status: {selectedSummary.project.status}</p>
-                <p>
-                  Tasks: {selectedSummary.doneTasks}/{selectedSummary.tasks.length} done
-                </p>
-                <ul>
-                  {selectedSummary.tasks.slice(0, 6).map((task) => (
-                    <li key={task.id}>{task.title}</li>
-                  ))}
-                </ul>
-              </div>
-            </section>
-          )}
         </>
       )}
     </section>

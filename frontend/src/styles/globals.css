@@ -240,6 +240,10 @@ textarea {
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 
+.dashboard-project-grid-inactive {
+  margin-top: 0.6rem;
+}
+
 .project-card {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -276,6 +280,10 @@ textarea {
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.dashboard-inactive-projects {
+  margin-top: 0.85rem;
 }
 
 .dashboard-session-groups {
@@ -382,6 +390,42 @@ textarea {
 .dashboard-project-detail ul {
   margin: 0.6rem 0 0;
   padding-left: 1rem;
+  color: var(--text-secondary);
+}
+
+.project-detail-page {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.project-detail-header {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.project-detail-meta p {
+  margin: 0.35rem 0;
+}
+
+.project-detail-task-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.project-detail-task-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #10172a;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.project-detail-task-list small {
   color: var(--text-secondary);
 }
 

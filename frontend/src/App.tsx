@@ -5,6 +5,7 @@ import type { ClientMessage, ServerMessage, WindowInfo } from './api/types'
 import { useWebSocket } from './hooks/useWebSocket'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
+import ProjectDetail from './pages/ProjectDetail'
 import Sessions from './pages/Sessions'
 import Settings from './pages/Settings'
 
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'projects/:projectId', element: <ProjectDetail /> },
       { path: 'sessions', element: <Sessions /> },
       { path: 'settings', element: <Settings /> },
     ],
