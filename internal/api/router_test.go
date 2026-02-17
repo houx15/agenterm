@@ -190,6 +190,33 @@ func TestProjectAndTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestCreateProjectRollsBackWhenDefaultOrchestratorInitFails(t *testing.T) {
+	h, database := openAPI(t, &fakeGateway{})
+	ctx := context.Background()
+
+	if _, err := database.SQL().ExecContext(ctx, `DELETE FROM workflow_phases`); err != nil {
+		t.Fatalf("delete workflow_phases: %v", err)
+	}
+	if _, err := database.SQL().ExecContext(ctx, `DELETE FROM workflows`); err != nil {
+		t.Fatalf("delete workflows: %v", err)
+	}
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusInternalServerError {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+
+	var count int
+	if err := database.SQL().QueryRowContext(ctx, `SELECT count(1) FROM projects`).Scan(&count); err != nil {
+		t.Fatalf("count projects: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("project should be rolled back, count=%d", count)
+	}
+}
+
 func TestSessionCreationCreatesTmuxWindow(t *testing.T) {
 	gw := &fakeGateway{}
 	h, _ := openAPI(t, gw)

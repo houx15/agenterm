@@ -20,6 +20,7 @@ const (
 	defaultAnthropicURL  = "https://api.anthropic.com/v1/messages"
 	defaultMaxToolRounds = 10
 	defaultMaxHistory    = 50
+	defaultGlobalMaxParallel = 32
 )
 
 type StreamEvent struct {
@@ -53,6 +54,7 @@ type Options struct {
 
 	MaxToolRounds int
 	MaxHistory    int
+	GlobalMaxParallel int
 }
 
 type Orchestrator struct {
@@ -75,6 +77,7 @@ type Orchestrator struct {
 
 	maxToolRounds int
 	maxHistory    int
+	globalMaxParallel int
 }
 
 func New(opts Options) *Orchestrator {
@@ -106,6 +109,10 @@ func New(opts Options) *Orchestrator {
 	if maxHistory <= 0 {
 		maxHistory = defaultMaxHistory
 	}
+	globalMaxParallel := opts.GlobalMaxParallel
+	if globalMaxParallel <= 0 {
+		globalMaxParallel = defaultGlobalMaxParallel
+	}
 
 	return &Orchestrator{
 		apiKey:                  strings.TrimSpace(opts.APIKey),
@@ -125,6 +132,7 @@ func New(opts Options) *Orchestrator {
 		toolset:                 toolset,
 		maxToolRounds:           maxRounds,
 		maxHistory:              maxHistory,
+		globalMaxParallel:       globalMaxParallel,
 	}
 }
 

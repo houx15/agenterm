@@ -22,6 +22,7 @@ type Config struct {
 	LLMAPIKey   string
 	LLMModel    string
 	LLMBaseURL  string
+	OrchestratorGlobalMaxParallel int
 }
 
 func Load() (*Config, error) {
@@ -39,6 +40,7 @@ func Load() (*Config, error) {
 		AgentsDir:   filepath.Join(homeDir, ".config", "agenterm", "agents"),
 		LLMModel:    "claude-sonnet-4-5",
 		LLMBaseURL:  "https://api.anthropic.com/v1/messages",
+		OrchestratorGlobalMaxParallel: 32,
 	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
@@ -54,6 +56,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.LLMAPIKey, "llm-api-key", cfg.LLMAPIKey, "LLM API key (defaults to ANTHROPIC_API_KEY env var)")
 	flag.StringVar(&cfg.LLMModel, "llm-model", cfg.LLMModel, "LLM model name for orchestrator")
 	flag.StringVar(&cfg.LLMBaseURL, "llm-base-url", cfg.LLMBaseURL, "LLM API URL for orchestrator")
+	flag.IntVar(&cfg.OrchestratorGlobalMaxParallel, "orchestrator-global-max-parallel", cfg.OrchestratorGlobalMaxParallel, "global max parallel sessions for orchestrator scheduling")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
 
@@ -119,6 +122,12 @@ func (c *Config) loadFromFile() error {
 			c.LLMModel = value
 		case "LLMBaseURL":
 			c.LLMBaseURL = value
+		case "OrchestratorGlobalMaxParallel":
+			var v int
+			if _, err := fmt.Sscanf(value, "%d", &v); err != nil {
+				return fmt.Errorf("invalid OrchestratorGlobalMaxParallel value %q: %w", value, err)
+			}
+			c.OrchestratorGlobalMaxParallel = v
 		}
 	}
 	return nil
@@ -130,8 +139,8 @@ func (c *Config) saveToFile() error {
 		return err
 	}
 	data := fmt.Sprintf(
-		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\n",
-		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL,
+		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\nOrchestratorGlobalMaxParallel=%d\n",
+		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL, c.OrchestratorGlobalMaxParallel,
 	)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }

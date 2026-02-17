@@ -419,6 +419,7 @@ func main() {
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
 		Registry:                agentRegistry,
+		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
 	})
 
 	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan hub.OrchestratorServerMessage, error) {

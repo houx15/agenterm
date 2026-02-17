@@ -40,6 +40,59 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 	return nil
 }
 
+func (r *ProjectRepo) CreateWithDefaultOrchestrator(ctx context.Context, project *Project) error {
+	if project.ID == "" {
+		id, err := NewID()
+		if err != nil {
+			return err
+		}
+		project.ID = id
+	}
+	if project.CreatedAt.IsZero() {
+		project.CreatedAt = nowUTC()
+	}
+	if project.UpdatedAt.IsZero() {
+		project.UpdatedAt = project.CreatedAt
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin create project tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO projects (id, name, repo_path, status, playbook, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, project.ID, project.Name, project.RepoPath, project.Status, project.Playbook, formatTimestamp(project.CreatedAt), formatTimestamp(project.UpdatedAt)); err != nil {
+		return fmt.Errorf("failed to create project: %w", err)
+	}
+
+	workflowID := "workflow-balanced"
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT count(1) FROM workflows WHERE id = ?`, workflowID).Scan(&exists); err != nil {
+		return fmt.Errorf("check default workflow: %w", err)
+	}
+	if exists == 0 {
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM workflows ORDER BY is_builtin DESC, name ASC LIMIT 1`).Scan(&workflowID); err != nil {
+			return fmt.Errorf("resolve fallback workflow: %w", err)
+		}
+	}
+	nowRaw := formatTimestamp(nowUTC())
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO project_orchestrators (
+	project_id, workflow_id, default_provider, default_model, max_parallel, review_policy, notify_on_blocked, created_at, updated_at
+) VALUES (?, ?, 'anthropic', 'claude-sonnet-4-5', 4, 'strict', 1, ?, ?)
+`, project.ID, workflowID, nowRaw, nowRaw); err != nil {
+		return fmt.Errorf("failed to initialize project orchestrator: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit create project tx: %w", err)
+	}
+	return nil
+}
+
 func (r *ProjectRepo) Get(ctx context.Context, id string) (*Project, error) {
 	var p Project
 	var createdAtRaw, updatedAtRaw string

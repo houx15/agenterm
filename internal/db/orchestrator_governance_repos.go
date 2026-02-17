@@ -286,7 +286,13 @@ func (r *WorkflowRepo) Update(ctx context.Context, w *Workflow) error {
 		return fmt.Errorf("workflow is required")
 	}
 	w.UpdatedAt = nowUTC()
-	res, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin workflow update tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx, `
 UPDATE workflows
 SET name = ?, description = ?, scope = ?, version = ?, updated_at = ?
 WHERE id = ?
@@ -301,7 +307,7 @@ WHERE id = ?
 	if rows == 0 {
 		return fmt.Errorf("workflow not found")
 	}
-	_, err = r.db.ExecContext(ctx, `DELETE FROM workflow_phases WHERE workflow_id = ?`, w.ID)
+	_, err = tx.ExecContext(ctx, `DELETE FROM workflow_phases WHERE workflow_id = ?`, w.ID)
 	if err != nil {
 		return fmt.Errorf("replace workflow phases: %w", err)
 	}
@@ -310,9 +316,31 @@ WHERE id = ?
 			continue
 		}
 		phase.WorkflowID = w.ID
-		if err := r.CreatePhase(ctx, phase); err != nil {
-			return err
+		if phase.ID == "" {
+			id, err := NewID()
+			if err != nil {
+				return err
+			}
+			phase.ID = id
 		}
+		if phase.CreatedAt.IsZero() {
+			phase.CreatedAt = nowUTC()
+		}
+		if phase.UpdatedAt.IsZero() {
+			phase.UpdatedAt = phase.CreatedAt
+		}
+		if phase.MaxParallel <= 0 {
+			phase.MaxParallel = 1
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO workflow_phases (id, workflow_id, ordinal, phase_type, role, entry_rule, exit_rule, max_parallel, agent_selector, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, phase.ID, phase.WorkflowID, phase.Ordinal, phase.PhaseType, phase.Role, phase.EntryRule, phase.ExitRule, phase.MaxParallel, phase.AgentSelector, formatTimestamp(phase.CreatedAt), formatTimestamp(phase.UpdatedAt)); err != nil {
+			return fmt.Errorf("create workflow phase: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit workflow update tx: %w", err)
 	}
 	return nil
 }

@@ -45,10 +45,15 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	if err != nil {
 		return scheduleDecision{Allowed: false, Reason: err.Error()}
 	}
+	allSessions, err := o.sessionRepo.List(ctx, db.SessionFilter{})
+	if err != nil {
+		return scheduleDecision{Allowed: false, Reason: err.Error()}
+	}
 
 	activeProject := 0
 	activeRole := 0
 	activeModel := 0
+	activeGlobal := 0
 	model := o.resolveModelForSession(agentType)
 	for _, sess := range projectSessions {
 		if !isActiveSessionStatus(sess.Status) {
@@ -65,7 +70,16 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 			}
 		}
 	}
+	for _, sess := range allSessions {
+		if !isActiveSessionStatus(sess.Status) {
+			continue
+		}
+		activeGlobal++
+	}
 
+	if o.globalMaxParallel > 0 && activeGlobal >= o.globalMaxParallel {
+		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("global max_parallel limit reached (%d)", o.globalMaxParallel)}
+	}
 	if profile.MaxParallel > 0 && activeProject >= profile.MaxParallel {
 		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("project max_parallel limit reached (%d)", profile.MaxParallel)}
 	}
@@ -93,7 +107,7 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 		agent := o.registry.Get(agentType)
 		if agent != nil && agent.MaxParallelAgents > 0 {
 			activeAgentType := 0
-			for _, sess := range projectSessions {
+			for _, sess := range allSessions {
 				if isActiveSessionStatus(sess.Status) && strings.EqualFold(strings.TrimSpace(sess.AgentType), strings.TrimSpace(agentType)) {
 					activeAgentType++
 				}
@@ -137,7 +151,7 @@ func (o *Orchestrator) listSessionsByProject(ctx context.Context, projectID stri
 func isActiveSessionStatus(status string) bool {
 	status = strings.TrimSpace(strings.ToLower(status))
 	switch status {
-	case "completed", "failed", "human_takeover":
+	case "completed", "failed":
 		return false
 	default:
 		return status != ""
