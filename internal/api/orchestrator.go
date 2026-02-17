@@ -72,5 +72,43 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if h.projectOrchestratorRepo != nil {
+		profile, err := h.projectOrchestratorRepo.Get(r.Context(), projectID)
+		if err == nil && profile != nil {
+			report["orchestrator_profile"] = profile
+			if h.workflowRepo != nil && profile.WorkflowID != "" {
+				workflow, err := h.workflowRepo.Get(r.Context(), profile.WorkflowID)
+				if err == nil && workflow != nil {
+					report["workflow"] = workflow
+				}
+			}
+		}
+	}
+	if h.knowledgeRepo != nil {
+		entries, err := h.knowledgeRepo.ListByProject(r.Context(), projectID)
+		if err == nil {
+			report["knowledge_entries"] = len(entries)
+		}
+	}
+	if h.reviewRepo != nil && h.taskRepo != nil {
+		tasks, err := h.taskRepo.ListByProject(r.Context(), projectID)
+		if err == nil {
+			totalCycles := 0
+			openIssues := 0
+			for _, t := range tasks {
+				cycles, err := h.reviewRepo.ListCyclesByTask(r.Context(), t.ID)
+				if err != nil {
+					continue
+				}
+				totalCycles += len(cycles)
+				count, err := h.reviewRepo.CountOpenIssuesByTask(r.Context(), t.ID)
+				if err == nil {
+					openIssues += count
+				}
+			}
+			report["review_cycles_total"] = totalCycles
+			report["open_review_issues_total"] = openIssues
+		}
+	}
 	jsonResponse(w, http.StatusOK, report)
 }

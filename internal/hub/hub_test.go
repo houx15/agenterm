@@ -446,6 +446,30 @@ func TestRateLimiting(t *testing.T) {
 	}
 }
 
+func TestBroadcastProjectEventEnqueuesMessage(t *testing.T) {
+	h := New("token", nil)
+	h.BroadcastProjectEvent("p1", "project_phase_changed", map[string]any{"phase": "review"})
+
+	select {
+	case msg := <-h.broadcast:
+		var decoded ProjectEventMessage
+		if err := json.Unmarshal(msg.data, &decoded); err != nil {
+			t.Fatalf("unmarshal project event: %v", err)
+		}
+		if decoded.Type != "project_event" {
+			t.Fatalf("type=%q want project_event", decoded.Type)
+		}
+		if decoded.ProjectID != "p1" {
+			t.Fatalf("project_id=%q want p1", decoded.ProjectID)
+		}
+		if decoded.Event != "project_phase_changed" {
+			t.Fatalf("event=%q want project_phase_changed", decoded.Event)
+		}
+	default:
+		t.Fatalf("expected project event message in broadcast queue")
+	}
+}
+
 func TestRateLimiterDirect(t *testing.T) {
 	var received []OutputMessage
 	var mu sync.Mutex

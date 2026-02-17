@@ -390,19 +390,35 @@ func main() {
 	worktreeRepo := db.NewWorktreeRepo(appDB.SQL())
 	sessionRepo := db.NewSessionRepo(appDB.SQL())
 	historyRepo := db.NewOrchestratorHistoryRepo(appDB.SQL())
+	projectOrchestratorRepo := db.NewProjectOrchestratorRepo(appDB.SQL())
+	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
+	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
+	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
+	if projects, err := projectRepo.List(ctx, db.ProjectFilter{}); err == nil {
+		for _, p := range projects {
+			if p == nil {
+				continue
+			}
+			_ = projectOrchestratorRepo.EnsureDefaultForProject(ctx, p.ID)
+		}
+	}
 
 	orchestratorInst := orchestrator.New(orchestrator.Options{
-		APIKey:           cfg.LLMAPIKey,
-		Model:            cfg.LLMModel,
-		AnthropicBaseURL: cfg.LLMBaseURL,
-		APIToolBaseURL:   fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
-		APIToken:         cfg.Token,
-		ProjectRepo:      projectRepo,
-		TaskRepo:         taskRepo,
-		WorktreeRepo:     worktreeRepo,
-		SessionRepo:      sessionRepo,
-		HistoryRepo:      historyRepo,
-		Registry:         agentRegistry,
+		APIKey:                  cfg.LLMAPIKey,
+		Model:                   cfg.LLMModel,
+		AnthropicBaseURL:        cfg.LLMBaseURL,
+		APIToolBaseURL:          fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
+		APIToken:                cfg.Token,
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		WorktreeRepo:            worktreeRepo,
+		SessionRepo:             sessionRepo,
+		HistoryRepo:             historyRepo,
+		ProjectOrchestratorRepo: projectOrchestratorRepo,
+		WorkflowRepo:            workflowRepo,
+		KnowledgeRepo:           knowledgeRepo,
+		RoleBindingRepo:         roleBindingRepo,
+		Registry:                agentRegistry,
 	})
 
 	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan hub.OrchestratorServerMessage, error) {
@@ -428,6 +444,9 @@ func main() {
 	})
 
 	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo)
+	eventTrigger.SetOnEvent(func(projectID string, event string, data map[string]any) {
+		h.BroadcastProjectEvent(projectID, event, data)
+	})
 	go eventTrigger.Start(ctx, 15*time.Second)
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)

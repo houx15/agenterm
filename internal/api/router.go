@@ -38,17 +38,22 @@ type sessionManager interface {
 }
 
 type handler struct {
-	projectRepo  *db.ProjectRepo
-	taskRepo     *db.TaskRepo
-	worktreeRepo *db.WorktreeRepo
-	sessionRepo  *db.SessionRepo
-	registry     *registry.Registry
-	gw           gateway
-	manager      sessionManager
-	lifecycle    *session.Manager
-	hub          *hub.Hub
-	orchestrator *orchestrator.Orchestrator
-	tmuxSession  string
+	projectRepo             *db.ProjectRepo
+	taskRepo                *db.TaskRepo
+	worktreeRepo            *db.WorktreeRepo
+	sessionRepo             *db.SessionRepo
+	projectOrchestratorRepo *db.ProjectOrchestratorRepo
+	workflowRepo            *db.WorkflowRepo
+	roleBindingRepo         *db.RoleBindingRepo
+	knowledgeRepo           *db.ProjectKnowledgeRepo
+	reviewRepo              *db.ReviewRepo
+	registry                *registry.Registry
+	gw                      gateway
+	manager                 sessionManager
+	lifecycle               *session.Manager
+	hub                     *hub.Hub
+	orchestrator            *orchestrator.Orchestrator
+	tmuxSession             string
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
@@ -59,18 +64,23 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
 	}
 	handler := &handler{
-		projectRepo:  db.NewProjectRepo(conn),
-		taskRepo:     db.NewTaskRepo(conn),
-		worktreeRepo: db.NewWorktreeRepo(conn),
-		sessionRepo:  db.NewSessionRepo(conn),
-		registry:     agentRegistry,
-		gw:           gw,
-		manager:      manager,
-		lifecycle:    lifecycle,
-		hub:          hubInst,
-		orchestrator: orchestratorInst,
-		tmuxSession:  tmuxSession,
-		outputState:  make(map[string]*windowOutputState),
+		projectRepo:             db.NewProjectRepo(conn),
+		taskRepo:                db.NewTaskRepo(conn),
+		worktreeRepo:            db.NewWorktreeRepo(conn),
+		sessionRepo:             db.NewSessionRepo(conn),
+		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
+		workflowRepo:            db.NewWorkflowRepo(conn),
+		roleBindingRepo:         db.NewRoleBindingRepo(conn),
+		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
+		reviewRepo:              db.NewReviewRepo(conn),
+		registry:                agentRegistry,
+		gw:                      gw,
+		manager:                 manager,
+		lifecycle:               lifecycle,
+		hub:                     hubInst,
+		orchestrator:            orchestratorInst,
+		tmuxSession:             tmuxSession,
+		outputState:             make(map[string]*windowOutputState),
 	}
 
 	mux := http.NewServeMux()
@@ -107,6 +117,22 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
+	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
+	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
+	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)
+	mux.HandleFunc("POST /api/workflows", handler.createWorkflow)
+	mux.HandleFunc("PUT /api/workflows/{id}", handler.updateWorkflow)
+	mux.HandleFunc("DELETE /api/workflows/{id}", handler.deleteWorkflow)
+	mux.HandleFunc("GET /api/projects/{id}/knowledge", handler.listProjectKnowledge)
+	mux.HandleFunc("POST /api/projects/{id}/knowledge", handler.createProjectKnowledge)
+	mux.HandleFunc("GET /api/projects/{id}/role-bindings", handler.listProjectRoleBindings)
+	mux.HandleFunc("PUT /api/projects/{id}/role-bindings", handler.replaceProjectRoleBindings)
+	mux.HandleFunc("GET /api/tasks/{id}/review-cycles", handler.listTaskReviewCycles)
+	mux.HandleFunc("POST /api/tasks/{id}/review-cycles", handler.createTaskReviewCycle)
+	mux.HandleFunc("PATCH /api/review-cycles/{id}", handler.updateReviewCycle)
+	mux.HandleFunc("GET /api/review-cycles/{id}/issues", handler.listReviewCycleIssues)
+	mux.HandleFunc("POST /api/review-cycles/{id}/issues", handler.createReviewCycleIssue)
+	mux.HandleFunc("PATCH /api/review-issues/{id}", handler.updateReviewIssue)
 
 	wrapped := authMiddleware(token)(jsonMiddleware(corsMiddleware(mux)))
 	return wrapped

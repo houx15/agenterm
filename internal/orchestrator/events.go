@@ -16,6 +16,7 @@ type EventTrigger struct {
 	sessionRepo  *db.SessionRepo
 	taskRepo     *db.TaskRepo
 	projectRepo  *db.ProjectRepo
+	onEvent      func(projectID string, event string, data map[string]any)
 
 	mu         sync.Mutex
 	lastStatus map[string]string
@@ -29,6 +30,10 @@ func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.
 		projectRepo:  projectRepo,
 		lastStatus:   make(map[string]string),
 	}
+}
+
+func (et *EventTrigger) SetOnEvent(fn func(projectID string, event string, data map[string]any)) {
+	et.onEvent = fn
 }
 
 func (et *EventTrigger) OnSessionIdle(sessionID string) {
@@ -46,7 +51,9 @@ func (et *EventTrigger) OnTimer(projectID string) {
 		slog.Debug("orchestrator timer trigger failed", "project_id", projectID, "error", err)
 		return
 	}
+	et.emitEvent(projectID, "project_status_check_started", map[string]any{"source": "timer"})
 	drain(ch)
+	et.emitEvent(projectID, "project_status_check_completed", map[string]any{"source": "timer"})
 }
 
 func (et *EventTrigger) OnReviewReady(sessionID string, commitHash string) {
@@ -133,10 +140,19 @@ func (et *EventTrigger) emitForSession(sessionID string, syntheticMessage string
 		slog.Debug("event trigger chat failed", "session_id", sessionID, "error", err)
 		return
 	}
+	et.emitEvent(task.ProjectID, "orchestrator_trigger_started", map[string]any{"session_id": sessionID, "message": syntheticMessage})
 	drain(ch)
+	et.emitEvent(task.ProjectID, "orchestrator_trigger_completed", map[string]any{"session_id": sessionID})
 }
 
 func drain(ch <-chan StreamEvent) {
 	for range ch {
 	}
+}
+
+func (et *EventTrigger) emitEvent(projectID string, event string, data map[string]any) {
+	if et == nil || et.onEvent == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(event) == "" {
+		return
+	}
+	et.onEvent(projectID, event, data)
 }

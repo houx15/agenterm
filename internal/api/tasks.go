@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/user/agenterm/internal/db"
 )
@@ -129,6 +130,18 @@ func (h *handler) updateTask(w http.ResponseWriter, r *http.Request) {
 		task.Description = *req.Description
 	}
 	if req.Status != nil {
+		nextStatus := strings.ToLower(strings.TrimSpace(*req.Status))
+		if h.reviewRepo != nil && (nextStatus == "done" || nextStatus == "completed") {
+			openIssues, err := h.reviewRepo.CountOpenIssuesByTask(r.Context(), task.ID)
+			if err != nil {
+				jsonError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if openIssues > 0 {
+				jsonError(w, http.StatusConflict, "cannot complete task while review issues are open")
+				return
+			}
+		}
 		task.Status = *req.Status
 	}
 	if task.Title == "" {

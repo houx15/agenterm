@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -72,53 +72,49 @@ func TestChatToolExecutionLoop(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/projects/"+project.ID && r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
-				"tasks":     []any{},
-				"worktrees": []any{},
-				"sessions":  []any{},
-			})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer apiSrv.Close()
-
 	var llmCalls atomic.Int32
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		call := llmCalls.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		if call == 1 {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"content": []any{map[string]any{
-					"type":  "tool_use",
-					"id":    "tool-1",
-					"name":  "get_project_status",
-					"input": map[string]any{"project_id": project.ID},
-				}},
-			})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"content": []any{map[string]any{"type": "text", "text": "Plan created."}},
-		})
-	}))
-	defer llmSrv.Close()
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/v1/messages" && req.Method == http.MethodPost {
+				call := llmCalls.Add(1)
+				if call == 1 {
+					return jsonResponse(map[string]any{
+						"content": []any{map[string]any{
+							"type":  "tool_use",
+							"id":    "tool-1",
+							"name":  "get_project_status",
+							"input": map[string]any{"project_id": project.ID},
+						}},
+					}), nil
+				}
+				return jsonResponse(map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Plan created."}},
+				}), nil
+			}
+			if req.URL.Path == "/api/projects/"+project.ID && req.Method == http.MethodGet {
+				return jsonResponse(map[string]any{
+					"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
+					"tasks":     []any{},
+					"worktrees": []any{},
+					"sessions":  []any{},
+				}), nil
+			}
+			return notFoundResponse(), nil
+		}),
+	}
 
 	o := New(Options{
 		APIKey:           "test-key",
 		Model:            "test-model",
-		AnthropicBaseURL: llmSrv.URL,
-		APIToolBaseURL:   apiSrv.URL,
+		AnthropicBaseURL: "http://mock/v1/messages",
+		APIToolBaseURL:   "http://mock",
 		ProjectRepo:      projectRepo,
 		TaskRepo:         taskRepo,
 		WorktreeRepo:     worktreeRepo,
 		SessionRepo:      sessionRepo,
 		HistoryRepo:      historyRepo,
 		Registry:         nil,
-		HTTPClient:       apiSrv.Client(),
+		HTTPClient:       httpClient,
 	})
 
 	stream, err := o.Chat(context.Background(), project.ID, "create a plan")
@@ -177,38 +173,35 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/projects/"+project.ID {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
-				"tasks":     []any{},
-				"worktrees": []any{},
-				"sessions":  []any{},
-			})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer apiSrv.Close()
-
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"content": []any{map[string]any{"type": "text", "text": "Checked."}},
-		})
-	}))
-	defer llmSrv.Close()
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/v1/messages" && req.Method == http.MethodPost {
+				return jsonResponse(map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "Checked."}},
+				}), nil
+			}
+			if req.URL.Path == "/api/projects/"+project.ID {
+				return jsonResponse(map[string]any{
+					"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
+					"tasks":     []any{},
+					"worktrees": []any{},
+					"sessions":  []any{},
+				}), nil
+			}
+			return notFoundResponse(), nil
+		}),
+	}
 
 	o := New(Options{
 		APIKey:           "test-key",
-		AnthropicBaseURL: llmSrv.URL,
-		APIToolBaseURL:   apiSrv.URL,
+		AnthropicBaseURL: "http://mock/v1/messages",
+		APIToolBaseURL:   "http://mock",
 		ProjectRepo:      projectRepo,
 		TaskRepo:         taskRepo,
 		WorktreeRepo:     worktreeRepo,
 		SessionRepo:      sessionRepo,
 		HistoryRepo:      historyRepo,
-		HTTPClient:       apiSrv.Client(),
+		HTTPClient:       httpClient,
 	})
 	trigger := NewEventTrigger(o, sessionRepo, taskRepo, projectRepo)
 	trigger.OnSessionIdle(sess.ID)
@@ -226,4 +219,27 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 
 func contains(haystack string, needle string) bool {
 	return strings.Contains(haystack, needle)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func jsonResponse(v any) *http.Response {
+	buf, _ := json.Marshal(v)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(string(buf))),
+	}
+}
+
+func notFoundResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+	}
 }

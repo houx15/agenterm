@@ -312,6 +312,17 @@ func (h *Hub) BroadcastSessionStatus(sessionID string, status string) {
 	h.BroadcastStatusForSession(sessionID, "", status)
 }
 
+func (h *Hub) BroadcastProjectEvent(projectID string, event string, data any) {
+	msg := ProjectEventMessage{
+		Type:      "project_event",
+		ProjectID: projectID,
+		Event:     event,
+		Data:      data,
+		Ts:        time.Now().Unix(),
+	}
+	h.sendBroadcast(msg)
+}
+
 func (h *Hub) SendError(client *Client, message string) {
 	msg := ErrorMessage{Type: "error", Message: message}
 	data, err := json.Marshal(msg)

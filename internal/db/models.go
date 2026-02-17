@@ -69,6 +69,87 @@ type AgentConfig struct {
 	AutoAcceptMode        string   `json:"auto_accept_mode,omitempty" yaml:"auto_accept_mode,omitempty"`
 }
 
+type ProjectOrchestrator struct {
+	ProjectID       string    `json:"project_id"`
+	WorkflowID      string    `json:"workflow_id"`
+	DefaultProvider string    `json:"default_provider"`
+	DefaultModel    string    `json:"default_model"`
+	MaxParallel     int       `json:"max_parallel"`
+	ReviewPolicy    string    `json:"review_policy"`
+	NotifyOnBlocked bool      `json:"notify_on_blocked"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type Workflow struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Scope       string           `json:"scope"`
+	IsBuiltin   bool             `json:"is_builtin"`
+	Version     int              `json:"version"`
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
+	Phases      []*WorkflowPhase `json:"phases,omitempty"`
+}
+
+type WorkflowPhase struct {
+	ID            string    `json:"id"`
+	WorkflowID    string    `json:"workflow_id"`
+	Ordinal       int       `json:"ordinal"`
+	PhaseType     string    `json:"phase_type"`
+	Role          string    `json:"role"`
+	EntryRule     string    `json:"entry_rule"`
+	ExitRule      string    `json:"exit_rule"`
+	MaxParallel   int       `json:"max_parallel"`
+	AgentSelector string    `json:"agent_selector"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type RoleBinding struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Role        string    `json:"role"`
+	Provider    string    `json:"provider"`
+	Model       string    `json:"model"`
+	MaxParallel int       `json:"max_parallel"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ProjectKnowledgeEntry struct {
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	Kind      string    `json:"kind"`
+	Title     string    `json:"title"`
+	Content   string    `json:"content"`
+	SourceURI string    `json:"source_uri,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ReviewCycle struct {
+	ID         string    `json:"id"`
+	TaskID     string    `json:"task_id"`
+	Iteration  int       `json:"iteration"`
+	Status     string    `json:"status"`
+	CommitHash string    `json:"commit_hash,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type ReviewIssue struct {
+	ID         string    `json:"id"`
+	CycleID    string    `json:"cycle_id"`
+	Severity   string    `json:"severity"`
+	Summary    string    `json:"summary"`
+	Status     string    `json:"status"`
+	Resolution string    `json:"resolution,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 type ProjectFilter struct {
 	Status string
 }

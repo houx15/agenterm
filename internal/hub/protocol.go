@@ -71,6 +71,14 @@ type OrchestratorServerMessage struct {
 	Error  string         `json:"error,omitempty"`
 }
 
+type ProjectEventMessage struct {
+	Type      string `json:"type"`
+	ProjectID string `json:"project_id"`
+	Event     string `json:"event"`
+	Data      any    `json:"data,omitempty"`
+	Ts        int64  `json:"ts"`
+}
+
 type NewWindowMessage struct {
 	Type string `json:"type"`
 	Name string `json:"name"`

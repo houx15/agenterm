@@ -52,6 +52,12 @@ func (h *handler) createProject(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if h.projectOrchestratorRepo != nil {
+		if err := h.projectOrchestratorRepo.EnsureDefaultForProject(r.Context(), project.ID); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 
 	jsonResponse(w, http.StatusCreated, project)
 }

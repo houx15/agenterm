@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -618,33 +619,34 @@ func TestOrchestratorEndpoints(t *testing.T) {
 		t.Fatalf("create project: %v", err)
 	}
 
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/projects/"+project.ID && r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
-				"tasks":     []any{},
-				"worktrees": []any{},
-				"sessions":  []any{},
-			})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer apiSrv.Close()
-
-	llmSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"content": []any{map[string]any{"type": "text", "text": "ok"}},
-		})
-	}))
-	defer llmSrv.Close()
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/v1/messages" && req.Method == http.MethodPost {
+				return mockJSONResponse(map[string]any{
+					"content": []any{map[string]any{"type": "text", "text": "ok"}},
+				}), nil
+			}
+			if req.URL.Path == "/api/projects/"+project.ID && req.Method == http.MethodGet {
+				return mockJSONResponse(map[string]any{
+					"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
+					"tasks":     []any{},
+					"worktrees": []any{},
+					"sessions":  []any{},
+				}), nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":"not found"}`)),
+			}, nil
+		}),
+	}
 
 	orchestratorInst := orchestrator.New(orchestrator.Options{
 		APIKey:           "test-key",
-		AnthropicBaseURL: llmSrv.URL,
-		APIToolBaseURL:   apiSrv.URL,
-		HTTPClient:       apiSrv.Client(),
+		AnthropicBaseURL: "http://mock/v1/messages",
+		APIToolBaseURL:   "http://mock",
+		HTTPClient:       httpClient,
 		ProjectRepo:      projectRepo,
 		TaskRepo:         db.NewTaskRepo(database.SQL()),
 		WorktreeRepo:     db.NewWorktreeRepo(database.SQL()),
@@ -666,6 +668,152 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	report := apiRequest(t, h, http.MethodGet, "/api/orchestrator/report?project_id="+project.ID, nil, true)
 	if report.Code != http.StatusOK {
 		t.Fatalf("report status=%d body=%s", report.Code, report.Body.String())
+	}
+}
+
+func TestOrchestratorGovernanceEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "Governance", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	getProfile := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/orchestrator", nil, true)
+	if getProfile.Code != http.StatusOK {
+		t.Fatalf("get profile status=%d body=%s", getProfile.Code, getProfile.Body.String())
+	}
+
+	updateProfile := apiRequest(t, h, http.MethodPatch, "/api/projects/"+projectID+"/orchestrator", map[string]any{
+		"workflow_id":   "workflow-fast",
+		"max_parallel":  2,
+		"review_policy": "strict",
+	}, true)
+	if updateProfile.Code != http.StatusOK {
+		t.Fatalf("update profile status=%d body=%s", updateProfile.Code, updateProfile.Body.String())
+	}
+
+	workflows := apiRequest(t, h, http.MethodGet, "/api/workflows", nil, true)
+	if workflows.Code != http.StatusOK {
+		t.Fatalf("list workflows status=%d body=%s", workflows.Code, workflows.Body.String())
+	}
+
+	createWorkflow := apiRequest(t, h, http.MethodPost, "/api/workflows", map[string]any{
+		"id":          "workflow-test-custom",
+		"name":        "Custom",
+		"description": "custom flow",
+		"scope":       "project",
+		"phases": []map[string]any{
+			{"ordinal": 1, "phase_type": "scan", "role": "planner", "max_parallel": 1},
+		},
+	}, true)
+	if createWorkflow.Code != http.StatusCreated {
+		t.Fatalf("create workflow status=%d body=%s", createWorkflow.Code, createWorkflow.Body.String())
+	}
+
+	updateWorkflow := apiRequest(t, h, http.MethodPut, "/api/workflows/workflow-test-custom", map[string]any{
+		"name":        "Custom V2",
+		"description": "updated",
+		"scope":       "project",
+		"version":     2,
+		"phases": []map[string]any{
+			{"ordinal": 1, "phase_type": "planning", "role": "planner", "max_parallel": 1},
+		},
+	}, true)
+	if updateWorkflow.Code != http.StatusOK {
+		t.Fatalf("update workflow status=%d body=%s", updateWorkflow.Code, updateWorkflow.Body.String())
+	}
+
+	deleteWorkflow := apiRequest(t, h, http.MethodDelete, "/api/workflows/workflow-test-custom", nil, true)
+	if deleteWorkflow.Code != http.StatusNoContent {
+		t.Fatalf("delete workflow status=%d body=%s", deleteWorkflow.Code, deleteWorkflow.Body.String())
+	}
+
+	createKnowledge := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/knowledge", map[string]any{
+		"kind":       "design",
+		"title":      "Project Design",
+		"content":    "requirements and UX",
+		"source_uri": "https://example.com/design",
+	}, true)
+	if createKnowledge.Code != http.StatusCreated {
+		t.Fatalf("create knowledge status=%d body=%s", createKnowledge.Code, createKnowledge.Body.String())
+	}
+
+	listKnowledge := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/knowledge", nil, true)
+	if listKnowledge.Code != http.StatusOK {
+		t.Fatalf("list knowledge status=%d body=%s", listKnowledge.Code, listKnowledge.Body.String())
+	}
+
+	replaceBindings := apiRequest(t, h, http.MethodPut, "/api/projects/"+projectID+"/role-bindings", map[string]any{
+		"bindings": []map[string]any{
+			{"role": "planner", "provider": "anthropic", "model": "claude-sonnet-4-5", "max_parallel": 1},
+			{"role": "coder", "provider": "openai", "model": "gpt-5-codex", "max_parallel": 4},
+		},
+	}, true)
+	if replaceBindings.Code != http.StatusOK {
+		t.Fatalf("replace role bindings status=%d body=%s", replaceBindings.Code, replaceBindings.Body.String())
+	}
+
+	listBindings := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/role-bindings", nil, true)
+	if listBindings.Code != http.StatusOK {
+		t.Fatalf("list role bindings status=%d body=%s", listBindings.Code, listBindings.Body.String())
+	}
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "Needs review", "description": "loop",
+	}, true)
+	if createTask.Code != http.StatusCreated {
+		t.Fatalf("create task status=%d body=%s", createTask.Code, createTask.Body.String())
+	}
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createCycle := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/review-cycles", map[string]any{
+		"commit_hash": "abc123",
+	}, true)
+	if createCycle.Code != http.StatusCreated {
+		t.Fatalf("create review cycle status=%d body=%s", createCycle.Code, createCycle.Body.String())
+	}
+	var cycle map[string]any
+	decodeBody(t, createCycle, &cycle)
+	cycleID := cycle["id"].(string)
+
+	createIssue := apiRequest(t, h, http.MethodPost, "/api/review-cycles/"+cycleID+"/issues", map[string]any{
+		"severity": "high",
+		"summary":  "fix this",
+	}, true)
+	if createIssue.Code != http.StatusCreated {
+		t.Fatalf("create review issue status=%d body=%s", createIssue.Code, createIssue.Body.String())
+	}
+	var issue map[string]any
+	decodeBody(t, createIssue, &issue)
+	issueID := issue["id"].(string)
+
+	completeBlocked := apiRequest(t, h, http.MethodPatch, "/api/tasks/"+taskID, map[string]any{
+		"status": "done",
+	}, true)
+	if completeBlocked.Code != http.StatusConflict {
+		t.Fatalf("complete with open review issue status=%d body=%s", completeBlocked.Code, completeBlocked.Body.String())
+	}
+
+	resolveIssue := apiRequest(t, h, http.MethodPatch, "/api/review-issues/"+issueID, map[string]any{
+		"status":     "resolved",
+		"resolution": "fixed in followup commit",
+	}, true)
+	if resolveIssue.Code != http.StatusOK {
+		t.Fatalf("resolve review issue status=%d body=%s", resolveIssue.Code, resolveIssue.Body.String())
+	}
+
+	completeTask := apiRequest(t, h, http.MethodPatch, "/api/tasks/"+taskID, map[string]any{
+		"status": "done",
+	}, true)
+	if completeTask.Code != http.StatusOK {
+		t.Fatalf("complete task after resolving issues status=%d body=%s", completeTask.Code, completeTask.Body.String())
 	}
 }
 
@@ -692,4 +840,19 @@ func initGitRepo(t *testing.T) string {
 	run("add", "README.md")
 	run("commit", "-m", "init")
 	return repo
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func mockJSONResponse(v any) *http.Response {
+	buf, _ := json.Marshal(v)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(string(buf))),
+	}
 }

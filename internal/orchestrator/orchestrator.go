@@ -39,13 +39,17 @@ type Options struct {
 	APIToken         string
 	HTTPClient       *http.Client
 
-	ProjectRepo  *db.ProjectRepo
-	TaskRepo     *db.TaskRepo
-	WorktreeRepo *db.WorktreeRepo
-	SessionRepo  *db.SessionRepo
-	HistoryRepo  *db.OrchestratorHistoryRepo
-	Registry     *registry.Registry
-	Toolset      *Toolset
+	ProjectRepo             *db.ProjectRepo
+	TaskRepo                *db.TaskRepo
+	WorktreeRepo            *db.WorktreeRepo
+	SessionRepo             *db.SessionRepo
+	HistoryRepo             *db.OrchestratorHistoryRepo
+	ProjectOrchestratorRepo *db.ProjectOrchestratorRepo
+	WorkflowRepo            *db.WorkflowRepo
+	KnowledgeRepo           *db.ProjectKnowledgeRepo
+	RoleBindingRepo         *db.RoleBindingRepo
+	Registry                *registry.Registry
+	Toolset                 *Toolset
 
 	MaxToolRounds int
 	MaxHistory    int
@@ -57,13 +61,17 @@ type Orchestrator struct {
 	anthropicBaseURL string
 	httpClient       *http.Client
 
-	projectRepo  *db.ProjectRepo
-	taskRepo     *db.TaskRepo
-	worktreeRepo *db.WorktreeRepo
-	sessionRepo  *db.SessionRepo
-	historyRepo  *db.OrchestratorHistoryRepo
-	registry     *registry.Registry
-	toolset      *Toolset
+	projectRepo             *db.ProjectRepo
+	taskRepo                *db.TaskRepo
+	worktreeRepo            *db.WorktreeRepo
+	sessionRepo             *db.SessionRepo
+	historyRepo             *db.OrchestratorHistoryRepo
+	projectOrchestratorRepo *db.ProjectOrchestratorRepo
+	workflowRepo            *db.WorkflowRepo
+	knowledgeRepo           *db.ProjectKnowledgeRepo
+	roleBindingRepo         *db.RoleBindingRepo
+	registry                *registry.Registry
+	toolset                 *Toolset
 
 	maxToolRounds int
 	maxHistory    int
@@ -100,19 +108,23 @@ func New(opts Options) *Orchestrator {
 	}
 
 	return &Orchestrator{
-		apiKey:           strings.TrimSpace(opts.APIKey),
-		model:            model,
-		anthropicBaseURL: anthropicURL,
-		httpClient:       httpClient,
-		projectRepo:      opts.ProjectRepo,
-		taskRepo:         opts.TaskRepo,
-		worktreeRepo:     opts.WorktreeRepo,
-		sessionRepo:      opts.SessionRepo,
-		historyRepo:      opts.HistoryRepo,
-		registry:         opts.Registry,
-		toolset:          toolset,
-		maxToolRounds:    maxRounds,
-		maxHistory:       maxHistory,
+		apiKey:                  strings.TrimSpace(opts.APIKey),
+		model:                   model,
+		anthropicBaseURL:        anthropicURL,
+		httpClient:              httpClient,
+		projectRepo:             opts.ProjectRepo,
+		taskRepo:                opts.TaskRepo,
+		worktreeRepo:            opts.WorktreeRepo,
+		sessionRepo:             opts.SessionRepo,
+		historyRepo:             opts.HistoryRepo,
+		projectOrchestratorRepo: opts.ProjectOrchestratorRepo,
+		workflowRepo:            opts.WorkflowRepo,
+		knowledgeRepo:           opts.KnowledgeRepo,
+		roleBindingRepo:         opts.RoleBindingRepo,
+		registry:                opts.Registry,
+		toolset:                 toolset,
+		maxToolRounds:           maxRounds,
+		maxHistory:              maxHistory,
 	}
 }
 
@@ -142,7 +154,22 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if o.registry != nil {
 		agents = o.registry.List()
 	}
-	systemPrompt := BuildSystemPrompt(state, agents, nil)
+	playbook := o.loadWorkflowAsPlaybook(ctx, projectID)
+	systemPrompt := BuildSystemPrompt(state, agents, playbook)
+	if o.knowledgeRepo != nil {
+		knowledge, err := o.knowledgeRepo.ListByProject(ctx, projectID)
+		if err == nil && len(knowledge) > 0 {
+			systemPrompt += "\n\nProject Knowledge Highlights:\n"
+			limit := len(knowledge)
+			if limit > 8 {
+				limit = 8
+			}
+			for i := 0; i < limit; i++ {
+				k := knowledge[i]
+				systemPrompt += fmt.Sprintf("- [%s] %s: %s\n", k.Kind, k.Title, truncate(k.Content, 180))
+			}
+		}
+	}
 	history := o.loadHistory(ctx, projectID)
 	messages := append(history, anthropicMessage{Role: "user", Content: []anthropicContentBlock{{Type: "text", Text: userMessage}}})
 
@@ -183,6 +210,22 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 				case "tool_use":
 					toolUsed = true
 					ch <- StreamEvent{Type: "tool_call", Name: block.Name, Args: block.Input}
+					if block.Name == "create_session" {
+						decision := o.checkSessionCreationAllowed(ctx, block.Input)
+						if !decision.Allowed {
+							result := map[string]any{"error": "scheduler_blocked", "reason": decision.Reason}
+							ch <- StreamEvent{Type: "tool_result", Name: block.Name, Result: result}
+							messages = append(messages, anthropicMessage{
+								Role: "user",
+								Content: []anthropicContentBlock{{
+									Type:      "tool_result",
+									ToolUseID: block.ID,
+									Content:   toJSON(result),
+								}},
+							})
+							continue
+						}
+					}
 					result, err := o.toolset.Execute(ctx, block.Name, block.Input)
 					if err != nil {
 						result = map[string]any{"error": err.Error()}
@@ -292,12 +335,53 @@ func (o *Orchestrator) loadHistory(ctx context.Context, projectID string) []anth
 	return messages
 }
 
+func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID string) *Playbook {
+	if o.projectOrchestratorRepo == nil || o.workflowRepo == nil {
+		return nil
+	}
+	profile, err := o.projectOrchestratorRepo.Get(ctx, projectID)
+	if err != nil || profile == nil {
+		return nil
+	}
+	workflow, err := o.workflowRepo.Get(ctx, profile.WorkflowID)
+	if err != nil || workflow == nil {
+		return nil
+	}
+	phases := make([]PlaybookPhase, 0, len(workflow.Phases))
+	for _, p := range workflow.Phases {
+		if p == nil {
+			continue
+		}
+		phases = append(phases, PlaybookPhase{
+			Name:        p.PhaseType + ":" + p.Role,
+			Description: fmt.Sprintf("entry=%s | exit=%s | max_parallel=%d", p.EntryRule, p.ExitRule, p.MaxParallel),
+		})
+	}
+	return &Playbook{
+		ID:       workflow.ID,
+		Name:     workflow.Name,
+		Phases:   phases,
+		Strategy: fmt.Sprintf("project_max_parallel=%d, review_policy=%s", profile.MaxParallel, profile.ReviewPolicy),
+	}
+}
+
 func toJSON(v any) string {
 	buf, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
 	}
 	return string(buf)
+}
+
+func truncate(v string, max int) string {
+	v = strings.TrimSpace(v)
+	if max <= 0 || len(v) <= max {
+		return v
+	}
+	if max <= 3 {
+		return v[:max]
+	}
+	return v[:max-3] + "..."
 }
 
 type anthropicRequest struct {
