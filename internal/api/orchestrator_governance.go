@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/user/agenterm/internal/db"
@@ -239,6 +240,10 @@ func (h *handler) createWorkflow(w http.ResponseWriter, r *http.Request) {
 			AgentSelector: phase.AgentSelector,
 		})
 	}
+	if err := validateWorkflowPhases(item.Phases); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := h.workflowRepo.Create(r.Context(), item); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -291,6 +296,10 @@ func (h *handler) updateWorkflow(w http.ResponseWriter, r *http.Request) {
 			MaxParallel:   phase.MaxParallel,
 			AgentSelector: phase.AgentSelector,
 		})
+	}
+	if err := validateWorkflowPhases(existing.Phases); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	if err := h.workflowRepo.Update(r.Context(), existing); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -440,6 +449,7 @@ func (h *handler) updateReviewCycle(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.emitReviewCycleProjectEvents(r, updated)
 	jsonResponse(w, http.StatusOK, updated)
 }
 
@@ -543,7 +553,110 @@ func (h *handler) updateReviewIssue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if cycle, err := h.reviewRepo.GetCycle(r.Context(), issue.CycleID); err == nil && cycle != nil {
+		_ = h.reviewRepo.SetCycleStatusByTaskOpenIssues(r.Context(), cycle.TaskID)
+		if latestCycles, err := h.reviewRepo.ListCyclesByTask(r.Context(), cycle.TaskID); err == nil && len(latestCycles) > 0 {
+			h.emitReviewCycleProjectEvents(r, latestCycles[len(latestCycles)-1])
+		}
+	}
 	jsonResponse(w, http.StatusOK, issue)
+}
+
+func validateWorkflowPhases(phases []*db.WorkflowPhase) error {
+	if len(phases) == 0 {
+		return nil
+	}
+	typeByOrdinal := make(map[int]struct{}, len(phases))
+	allowedRoles := map[string]struct{}{
+		"planner":    {},
+		"coder":      {},
+		"reviewer":   {},
+		"researcher": {},
+		"qa":         {},
+	}
+	allowedTypes := map[string]struct{}{
+		"scan":           {},
+		"planning":       {},
+		"implementation": {},
+		"review":         {},
+		"testing":        {},
+	}
+	ordinals := make([]int, 0, len(phases))
+	for _, phase := range phases {
+		if phase == nil {
+			return errBadRequest("workflow phase cannot be null")
+		}
+		if phase.Ordinal <= 0 {
+			return errBadRequest("workflow phase ordinal must be >= 1")
+		}
+		if _, exists := typeByOrdinal[phase.Ordinal]; exists {
+			return errBadRequest("workflow phase ordinals must be unique")
+		}
+		typeByOrdinal[phase.Ordinal] = struct{}{}
+		ordinals = append(ordinals, phase.Ordinal)
+
+		phaseType := strings.ToLower(strings.TrimSpace(phase.PhaseType))
+		if phaseType == "" {
+			return errBadRequest("workflow phase_type is required")
+		}
+		if _, ok := allowedTypes[phaseType]; !ok {
+			return errBadRequest("workflow phase_type is invalid")
+		}
+
+		role := strings.ToLower(strings.TrimSpace(phase.Role))
+		if role == "" {
+			return errBadRequest("workflow role is required")
+		}
+		if _, ok := allowedRoles[role]; !ok {
+			return errBadRequest("workflow role is invalid")
+		}
+
+		if phase.MaxParallel <= 0 || phase.MaxParallel > 64 {
+			return errBadRequest("workflow phase max_parallel must be between 1 and 64")
+		}
+	}
+	sort.Ints(ordinals)
+	for i, ord := range ordinals {
+		if ord != i+1 {
+			return errBadRequest("workflow phase ordinals must be contiguous starting at 1")
+		}
+	}
+	return nil
+}
+
+func errBadRequest(msg string) error {
+	return &badRequestError{msg: msg}
+}
+
+type badRequestError struct {
+	msg string
+}
+
+func (e *badRequestError) Error() string {
+	return e.msg
+}
+
+func (h *handler) emitReviewCycleProjectEvents(r *http.Request, cycle *db.ReviewCycle) {
+	if h == nil || h.hub == nil || h.taskRepo == nil || cycle == nil {
+		return
+	}
+	task, err := h.taskRepo.Get(r.Context(), cycle.TaskID)
+	if err != nil || task == nil {
+		return
+	}
+	projectID := task.ProjectID
+	status := strings.ToLower(strings.TrimSpace(cycle.Status))
+	switch status {
+	case "review_running":
+		h.hub.BroadcastProjectEvent(projectID, "project_phase_changed", map[string]any{"phase": "review", "status": status})
+	case "review_changes_requested":
+		h.hub.BroadcastProjectEvent(projectID, "review_iteration_completed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration, "status": status})
+		h.hub.BroadcastProjectEvent(projectID, "project_blocked", map[string]any{"reason": "review_changes_requested", "task_id": cycle.TaskID, "cycle_id": cycle.ID})
+	case "review_passed":
+		h.hub.BroadcastProjectEvent(projectID, "review_iteration_completed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration, "status": status})
+		h.hub.BroadcastProjectEvent(projectID, "review_loop_passed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration})
+		h.hub.BroadcastProjectEvent(projectID, "project_phase_changed", map[string]any{"phase": "review", "status": status})
+	}
 }
 
 func (h *handler) listProjectRoleBindings(w http.ResponseWriter, r *http.Request) {

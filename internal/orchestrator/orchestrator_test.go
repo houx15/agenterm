@@ -203,7 +203,7 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 		HistoryRepo:      historyRepo,
 		HTTPClient:       httpClient,
 	})
-	trigger := NewEventTrigger(o, sessionRepo, taskRepo, projectRepo)
+	trigger := NewEventTrigger(o, sessionRepo, taskRepo, projectRepo, nil)
 	trigger.OnSessionIdle(sess.ID)
 
 	deadline := time.Now().Add(2 * time.Second)

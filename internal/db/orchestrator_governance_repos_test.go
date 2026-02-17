@@ -114,6 +114,47 @@ func TestReviewRepoCycleAndIssues(t *testing.T) {
 	}
 }
 
+func TestReviewRepoUpdateCycleStatusRejectsInvalidTransitionAndOpenIssues(t *testing.T) {
+	database, _ := openTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := NewProjectRepo(database.SQL())
+	taskRepo := NewTaskRepo(database.SQL())
+	reviewRepo := NewReviewRepo(database.SQL())
+
+	project := &Project{Name: "P", RepoPath: "/tmp/p", Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &Task{ProjectID: project.ID, Title: "T", Description: "D", Status: "running"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	cycle := &ReviewCycle{TaskID: task.ID}
+	if err := reviewRepo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("create cycle: %v", err)
+	}
+	issue := &ReviewIssue{CycleID: cycle.ID, Summary: "must fix"}
+	if err := reviewRepo.CreateIssue(ctx, issue); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	if err := reviewRepo.UpdateCycleStatus(ctx, cycle.ID, "review_passed"); err == nil {
+		t.Fatalf("expected review_passed to be blocked while issues are open")
+	}
+
+	if err := reviewRepo.UpdateCycleStatus(ctx, cycle.ID, "done"); err == nil {
+		t.Fatalf("expected invalid cycle status to fail")
+	}
+
+	if err := reviewRepo.UpdateCycleStatus(ctx, cycle.ID, "review_running"); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := reviewRepo.UpdateCycleStatus(ctx, cycle.ID, "review_pending"); err == nil {
+		t.Fatalf("expected invalid transition review_running -> review_pending")
+	}
+}
+
 func TestProjectRepoCreateWithDefaultOrchestratorIsAtomic(t *testing.T) {
 	database, _ := openTestDB(t)
 	ctx := context.Background()

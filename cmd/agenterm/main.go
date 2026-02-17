@@ -444,7 +444,7 @@ func main() {
 		return out, nil
 	})
 
-	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo)
+	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo, worktreeRepo)
 	eventTrigger.SetOnEvent(func(projectID string, event string, data map[string]any) {
 		h.BroadcastProjectEvent(projectID, event, data)
 	})

@@ -1,9 +1,11 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -16,18 +18,20 @@ type EventTrigger struct {
 	sessionRepo  *db.SessionRepo
 	taskRepo     *db.TaskRepo
 	projectRepo  *db.ProjectRepo
+	worktreeRepo *db.WorktreeRepo
 	onEvent      func(projectID string, event string, data map[string]any)
 
 	mu         sync.Mutex
 	lastStatus map[string]string
 }
 
-func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.TaskRepo, projectRepo *db.ProjectRepo) *EventTrigger {
+func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.TaskRepo, projectRepo *db.ProjectRepo, worktreeRepo *db.WorktreeRepo) *EventTrigger {
 	return &EventTrigger{
 		orchestrator: o,
 		sessionRepo:  sessionRepo,
 		taskRepo:     taskRepo,
 		projectRepo:  projectRepo,
+		worktreeRepo: worktreeRepo,
 		lastStatus:   make(map[string]string),
 	}
 }
@@ -37,6 +41,7 @@ func (et *EventTrigger) SetOnEvent(fn func(projectID string, event string, data 
 }
 
 func (et *EventTrigger) OnSessionIdle(sessionID string) {
+	et.emitProjectPhaseEventForSession(sessionID, "dispatch")
 	et.emitForSession(sessionID, fmt.Sprintf("Session %s is idle. Evaluate whether to dispatch next tasks or request review.", sessionID))
 }
 
@@ -51,12 +56,18 @@ func (et *EventTrigger) OnTimer(projectID string) {
 		slog.Debug("orchestrator timer trigger failed", "project_id", projectID, "error", err)
 		return
 	}
-	et.emitEvent(projectID, "project_status_check_started", map[string]any{"source": "timer"})
+	et.emitEvent(projectID, "project_phase_changed", map[string]any{"phase": "status_check", "source": "timer"})
 	drain(ch)
-	et.emitEvent(projectID, "project_status_check_completed", map[string]any{"source": "timer"})
+	report, reportErr := et.orchestrator.GenerateProgressReport(ctx, projectID)
+	if reportErr == nil {
+		if blockers, ok := report["blockers"].([]any); ok && len(blockers) > 0 {
+			et.emitEvent(projectID, "project_blocked", map[string]any{"source": "timer", "blockers": blockers})
+		}
+	}
 }
 
 func (et *EventTrigger) OnReviewReady(sessionID string, commitHash string) {
+	et.emitProjectPhaseEventForSession(sessionID, "review")
 	message := fmt.Sprintf("Session %s produced commit %s with [READY_FOR_REVIEW]. Summarize changes and prepare review workflow.", sessionID, commitHash)
 	et.emitForSession(sessionID, message)
 }
@@ -116,7 +127,7 @@ func (et *EventTrigger) handleTransition(sess *db.Session) {
 	case "idle":
 		go et.OnSessionIdle(sess.ID)
 	case "waiting_review":
-		go et.OnReviewReady(sess.ID, "latest")
+		go et.OnReviewReady(sess.ID, et.resolveReviewCommitHash(sess))
 	}
 }
 
@@ -155,4 +166,64 @@ func (et *EventTrigger) emitEvent(projectID string, event string, data map[strin
 		return
 	}
 	et.onEvent(projectID, event, data)
+}
+
+func (et *EventTrigger) emitProjectPhaseEventForSession(sessionID string, phase string) {
+	if et == nil || et.sessionRepo == nil || et.taskRepo == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sess, err := et.sessionRepo.Get(ctx, sessionID)
+	if err != nil || sess == nil {
+		return
+	}
+	task, err := et.taskRepo.Get(ctx, sess.TaskID)
+	if err != nil || task == nil {
+		return
+	}
+	et.emitEvent(task.ProjectID, "project_phase_changed", map[string]any{"phase": phase, "session_id": sessionID, "task_id": task.ID})
+}
+
+func (et *EventTrigger) resolveReviewCommitHash(sess *db.Session) string {
+	if sess == nil || et.taskRepo == nil {
+		return "unknown"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	task, err := et.taskRepo.Get(ctx, sess.TaskID)
+	if err != nil || task == nil {
+		return "unknown"
+	}
+	repoPath := ""
+	if strings.TrimSpace(task.WorktreeID) != "" && et.worktreeRepo != nil {
+		wt, err := et.worktreeRepo.Get(ctx, task.WorktreeID)
+		if err == nil && wt != nil {
+			repoPath = strings.TrimSpace(wt.Path)
+		}
+	}
+	if repoPath == "" && et.projectRepo != nil {
+		project, err := et.projectRepo.Get(ctx, task.ProjectID)
+		if err == nil && project != nil {
+			repoPath = strings.TrimSpace(project.RepoPath)
+		}
+	}
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return "unknown"
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--short=12", "HEAD")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	hash := strings.TrimSpace(string(out))
+	if hash == "" {
+		return "unknown"
+	}
+	return hash
 }

@@ -741,6 +741,18 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	if createWorkflow.Code != http.StatusCreated {
 		t.Fatalf("create workflow status=%d body=%s", createWorkflow.Code, createWorkflow.Body.String())
 	}
+	createWorkflowInvalid := apiRequest(t, h, http.MethodPost, "/api/workflows", map[string]any{
+		"id":          "workflow-test-invalid",
+		"name":        "Invalid",
+		"description": "invalid flow",
+		"scope":       "project",
+		"phases": []map[string]any{
+			{"ordinal": 1, "phase_type": "unknown", "role": "nonexistent", "max_parallel": 1},
+		},
+	}, true)
+	if createWorkflowInvalid.Code != http.StatusBadRequest {
+		t.Fatalf("create invalid workflow status=%d body=%s", createWorkflowInvalid.Code, createWorkflowInvalid.Body.String())
+	}
 
 	updateWorkflow := apiRequest(t, h, http.MethodPut, "/api/workflows/workflow-test-custom", map[string]any{
 		"name":        "Custom V2",
@@ -820,6 +832,13 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	var issue map[string]any
 	decodeBody(t, createIssue, &issue)
 	issueID := issue["id"].(string)
+
+	passWithOpenIssues := apiRequest(t, h, http.MethodPatch, "/api/review-cycles/"+cycleID, map[string]any{
+		"status": "review_passed",
+	}, true)
+	if passWithOpenIssues.Code != http.StatusBadRequest {
+		t.Fatalf("set review_passed with open issues status=%d body=%s", passWithOpenIssues.Code, passWithOpenIssues.Body.String())
+	}
 
 	completeBlocked := apiRequest(t, h, http.MethodPatch, "/api/tasks/"+taskID, map[string]any{
 		"status": "done",

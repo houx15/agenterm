@@ -202,3 +202,145 @@ func TestSchedulerCountsHumanTakeoverTowardProjectCapacity(t *testing.T) {
 		t.Fatalf("reason=%q want project max_parallel", decision.Reason)
 	}
 }
+
+func TestSchedulerBlocksCreateSessionWhenRoleBindingModelMismatchesAgent(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	profileRepo := db.NewProjectOrchestratorRepo(database.SQL())
+	workflowRepo := db.NewWorkflowRepo(database.SQL())
+	roleBindingRepo := db.NewRoleBindingRepo(database.SQL())
+	ctx := context.Background()
+
+	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, project.ID); err != nil {
+		t.Fatalf("ensure profile: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "t", Description: "d", Status: "pending"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := roleBindingRepo.ReplaceForProject(ctx, project.ID, []*db.RoleBinding{
+		{Role: "coder", Provider: "anthropic", Model: "claude-sonnet-4-5", MaxParallel: 1},
+	}); err != nil {
+		t.Fatalf("replace role bindings: %v", err)
+	}
+
+	reg, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	if err := reg.Save(&registry.AgentConfig{
+		ID:                "model-mismatch-agent",
+		Name:              "ModelMismatchAgent",
+		Model:             "gpt-5-codex",
+		Command:           "echo run",
+		MaxParallelAgents: 4,
+		Capabilities:      []string{"code"},
+		Languages:         []string{"go"},
+		CostTier:          "medium",
+		SpeedTier:         "fast",
+	}); err != nil {
+		t.Fatalf("save agent: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		SessionRepo:             sessionRepo,
+		ProjectOrchestratorRepo: profileRepo,
+		WorkflowRepo:            workflowRepo,
+		RoleBindingRepo:         roleBindingRepo,
+		Registry:                reg,
+	})
+
+	decision := o.checkSessionCreationAllowed(ctx, map[string]any{
+		"task_id":    task.ID,
+		"role":       "coder",
+		"agent_type": "model-mismatch-agent",
+	})
+	if decision.Allowed {
+		t.Fatalf("expected session creation to be blocked by role binding model mismatch")
+	}
+	if !strings.Contains(decision.Reason, "agent model mismatch") {
+		t.Fatalf("reason=%q want model mismatch", decision.Reason)
+	}
+}
+
+func TestSchedulerBlocksCreateSessionWhenGlobalModelLimitReached(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	profileRepo := db.NewProjectOrchestratorRepo(database.SQL())
+	workflowRepo := db.NewWorkflowRepo(database.SQL())
+	roleBindingRepo := db.NewRoleBindingRepo(database.SQL())
+	ctx := context.Background()
+
+	projectA := &db.Project{Name: "PA", RepoPath: t.TempDir(), Status: "active"}
+	projectB := &db.Project{Name: "PB", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create projectA: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create projectB: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, projectA.ID); err != nil {
+		t.Fatalf("ensure profileA: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, projectB.ID); err != nil {
+		t.Fatalf("ensure profileB: %v", err)
+	}
+	taskA := &db.Task{ProjectID: projectA.ID, Title: "ta", Description: "d", Status: "pending"}
+	taskB := &db.Task{ProjectID: projectB.ID, Title: "tb", Description: "d", Status: "pending"}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatalf("create taskA: %v", err)
+	}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatalf("create taskB: %v", err)
+	}
+	if err := sessionRepo.Create(ctx, &db.Session{
+		TaskID: taskA.ID, TmuxSessionName: "s-model", TmuxWindowID: "@m1", AgentType: "codex", Role: "coder", Status: "working",
+	}); err != nil {
+		t.Fatalf("create active session: %v", err)
+	}
+
+	reg, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	codex := reg.Get("codex")
+	if codex == nil || strings.TrimSpace(codex.Model) == "" {
+		t.Fatalf("missing codex model in registry")
+	}
+	if err := roleBindingRepo.ReplaceForProject(ctx, projectB.ID, []*db.RoleBinding{
+		{Role: "coder", Provider: "openai", Model: strings.TrimSpace(codex.Model), MaxParallel: 1},
+	}); err != nil {
+		t.Fatalf("replace role binding: %v", err)
+	}
+	o := New(Options{
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		SessionRepo:             sessionRepo,
+		ProjectOrchestratorRepo: profileRepo,
+		WorkflowRepo:            workflowRepo,
+		RoleBindingRepo:         roleBindingRepo,
+		Registry:                reg,
+	})
+
+	decision := o.checkSessionCreationAllowed(ctx, map[string]any{
+		"task_id":    taskB.ID,
+		"role":       "coder",
+		"agent_type": "codex",
+	})
+	if decision.Allowed {
+		t.Fatalf("expected session creation to be blocked by global model limit")
+	}
+	if !strings.Contains(decision.Reason, "model max_parallel limit reached") {
+		t.Fatalf("reason=%q want model max_parallel", decision.Reason)
+	}
+}

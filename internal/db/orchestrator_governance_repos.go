@@ -7,6 +7,28 @@ import (
 	"strings"
 )
 
+var reviewCycleStatusTransitions = map[string]map[string]bool{
+	"review_pending": {
+		"review_pending":           true,
+		"review_running":           true,
+		"review_changes_requested": true,
+		"review_passed":            true,
+	},
+	"review_running": {
+		"review_running":           true,
+		"review_changes_requested": true,
+		"review_passed":            true,
+	},
+	"review_changes_requested": {
+		"review_changes_requested": true,
+		"review_running":           true,
+		"review_passed":            true,
+	},
+	"review_passed": {
+		"review_passed": true,
+	},
+}
+
 type ProjectOrchestratorRepo struct {
 	db *sql.DB
 }
@@ -598,15 +620,41 @@ WHERE id = ?
 }
 
 func (r *ReviewRepo) UpdateCycleStatus(ctx context.Context, id string, status string) error {
-	status = strings.TrimSpace(status)
-	if status == "" {
-		return fmt.Errorf("status is required")
+	nextStatus, err := normalizeReviewCycleStatus(status)
+	if err != nil {
+		return err
 	}
+
+	current, err := r.GetCycle(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("review cycle not found")
+	}
+	currentStatus, err := normalizeReviewCycleStatus(current.Status)
+	if err != nil {
+		return err
+	}
+	allowed := reviewCycleStatusTransitions[currentStatus][nextStatus]
+	if !allowed {
+		return fmt.Errorf("invalid review cycle transition: %s -> %s", currentStatus, nextStatus)
+	}
+	if nextStatus == "review_passed" {
+		openIssues, err := r.CountOpenIssuesByCycle(ctx, id)
+		if err != nil {
+			return err
+		}
+		if openIssues > 0 {
+			return fmt.Errorf("cannot set review_passed while review issues are open")
+		}
+	}
+
 	res, err := r.db.ExecContext(ctx, `
 UPDATE review_cycles
 SET status = ?, updated_at = ?
 WHERE id = ?
-`, status, formatTimestamp(nowUTC()), id)
+`, nextStatus, formatTimestamp(nowUTC()), id)
 	if err != nil {
 		return fmt.Errorf("update review cycle status: %w", err)
 	}
@@ -616,6 +664,59 @@ WHERE id = ?
 	}
 	if rows == 0 {
 		return fmt.Errorf("review cycle not found")
+	}
+	return nil
+}
+
+func normalizeReviewCycleStatus(status string) (string, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case "review_pending", "review_running", "review_changes_requested", "review_passed":
+		return status, nil
+	default:
+		return "", fmt.Errorf("invalid review cycle status")
+	}
+}
+
+func (r *ReviewRepo) CountOpenIssuesByCycle(ctx context.Context, cycleID string) (int, error) {
+	cycleID = strings.TrimSpace(cycleID)
+	if cycleID == "" {
+		return 0, fmt.Errorf("cycle id is required")
+	}
+	var total int
+	err := r.db.QueryRowContext(ctx, `
+SELECT count(1)
+FROM review_issues
+WHERE cycle_id = ?
+  AND lower(trim(status)) NOT IN ('resolved', 'closed', 'accepted')
+`, cycleID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("count open review issues by cycle: %w", err)
+	}
+	return total, nil
+}
+
+func (r *ReviewRepo) SetCycleStatusByTaskOpenIssues(ctx context.Context, taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	open, err := r.CountOpenIssuesByTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	nextStatus := "review_passed"
+	if open > 0 {
+		nextStatus = "review_changes_requested"
+	}
+	_, err = r.db.ExecContext(ctx, `
+UPDATE review_cycles
+SET status = ?, updated_at = ?
+WHERE task_id = ?
+  AND iteration = (SELECT max(iteration) FROM review_cycles WHERE task_id = ?)
+`, nextStatus, formatTimestamp(nowUTC()), taskID, taskID)
+	if err != nil {
+		return fmt.Errorf("set latest cycle status by issues: %w", err)
 	}
 	return nil
 }

@@ -54,7 +54,10 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	activeRole := 0
 	activeModel := 0
 	activeGlobal := 0
-	model := o.resolveModelForSession(agentType)
+	targetModel, roleBinding, modelMismatch := o.resolveTargetModel(ctx, projectID, strings.TrimSpace(role), strings.TrimSpace(agentType), profile)
+	if modelMismatch != "" {
+		return scheduleDecision{Allowed: false, Reason: modelMismatch}
+	}
 	for _, sess := range projectSessions {
 		if !isActiveSessionStatus(sess.Status) {
 			continue
@@ -63,18 +66,20 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 		if strings.EqualFold(strings.TrimSpace(sess.Role), strings.TrimSpace(role)) {
 			activeRole++
 		}
-		if model != "" {
-			sessModel := o.resolveModelForSession(sess.AgentType)
-			if sessModel == model {
-				activeModel++
-			}
-		}
 	}
+	taskCache := map[string]*db.Task{}
+	bindingCache := map[string][]*db.RoleBinding{}
 	for _, sess := range allSessions {
 		if !isActiveSessionStatus(sess.Status) {
 			continue
 		}
 		activeGlobal++
+		if targetModel != "" {
+			sessModel := o.resolveModelForExistingSession(ctx, sess, taskCache, bindingCache)
+			if sessModel != "" && strings.EqualFold(strings.TrimSpace(sessModel), strings.TrimSpace(targetModel)) {
+				activeModel++
+			}
+		}
 	}
 
 	if o.globalMaxParallel > 0 && activeGlobal >= o.globalMaxParallel {
@@ -84,22 +89,12 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("project max_parallel limit reached (%d)", profile.MaxParallel)}
 	}
 
-	if o.roleBindingRepo != nil && strings.TrimSpace(role) != "" {
-		bindings, err := o.roleBindingRepo.ListByProject(ctx, projectID)
-		if err == nil {
-			for _, b := range bindings {
-				if b == nil {
-					continue
-				}
-				if strings.EqualFold(strings.TrimSpace(b.Role), strings.TrimSpace(role)) {
-					if b.MaxParallel > 0 && activeRole >= b.MaxParallel {
-						return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("role max_parallel limit reached for %s (%d)", role, b.MaxParallel)}
-					}
-					if strings.TrimSpace(b.Model) != "" && strings.TrimSpace(model) == strings.TrimSpace(b.Model) && b.MaxParallel > 0 && activeModel >= b.MaxParallel {
-						return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("model max_parallel limit reached for %s (%d)", b.Model, b.MaxParallel)}
-					}
-				}
-			}
+	if roleBinding != nil {
+		if roleBinding.MaxParallel > 0 && activeRole >= roleBinding.MaxParallel {
+			return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("role max_parallel limit reached for %s (%d)", role, roleBinding.MaxParallel)}
+		}
+		if targetModel != "" && roleBinding.MaxParallel > 0 && activeModel >= roleBinding.MaxParallel {
+			return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("model max_parallel limit reached for %s (%d)", targetModel, roleBinding.MaxParallel)}
 		}
 	}
 
@@ -130,6 +125,93 @@ func (o *Orchestrator) resolveModelForSession(agentType string) string {
 		return ""
 	}
 	return strings.TrimSpace(agent.Model)
+}
+
+func (o *Orchestrator) resolveTargetModel(ctx context.Context, projectID string, role string, agentType string, profile *db.ProjectOrchestrator) (string, *db.RoleBinding, string) {
+	requestedModel := o.resolveModelForSession(agentType)
+	binding := o.getRoleBinding(ctx, projectID, role)
+	if binding != nil && strings.TrimSpace(binding.Model) != "" {
+		boundModel := strings.TrimSpace(binding.Model)
+		if requestedModel != "" && !strings.EqualFold(requestedModel, boundModel) {
+			return "", binding, fmt.Sprintf("agent model mismatch for role %s: expected %s, got %s", role, boundModel, requestedModel)
+		}
+		return boundModel, binding, ""
+	}
+	if requestedModel != "" {
+		return requestedModel, binding, ""
+	}
+	if profile != nil && strings.TrimSpace(profile.DefaultModel) != "" {
+		return strings.TrimSpace(profile.DefaultModel), binding, ""
+	}
+	return "", binding, ""
+}
+
+func (o *Orchestrator) getRoleBinding(ctx context.Context, projectID string, role string) *db.RoleBinding {
+	if o == nil || o.roleBindingRepo == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(role) == "" {
+		return nil
+	}
+	bindings, err := o.roleBindingRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	for _, b := range bindings {
+		if b == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(b.Role), strings.TrimSpace(role)) {
+			return b
+		}
+	}
+	return nil
+}
+
+func (o *Orchestrator) resolveModelForExistingSession(
+	ctx context.Context,
+	sess *db.Session,
+	taskCache map[string]*db.Task,
+	bindingCache map[string][]*db.RoleBinding,
+) string {
+	if sess == nil {
+		return ""
+	}
+	agentModel := strings.TrimSpace(o.resolveModelForSession(sess.AgentType))
+	taskID := strings.TrimSpace(sess.TaskID)
+	if taskID == "" || o.taskRepo == nil {
+		return agentModel
+	}
+	task := taskCache[taskID]
+	if task == nil {
+		loaded, err := o.taskRepo.Get(ctx, taskID)
+		if err != nil || loaded == nil {
+			return agentModel
+		}
+		task = loaded
+		taskCache[taskID] = task
+	}
+	projectID := strings.TrimSpace(task.ProjectID)
+	if projectID == "" {
+		return agentModel
+	}
+	role := strings.TrimSpace(sess.Role)
+	if o.roleBindingRepo != nil && role != "" {
+		bindings, ok := bindingCache[projectID]
+		if !ok {
+			loaded, err := o.roleBindingRepo.ListByProject(ctx, projectID)
+			if err == nil {
+				bindings = loaded
+			}
+			bindingCache[projectID] = bindings
+		}
+		for _, b := range bindings {
+			if b == nil {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(b.Role), role) && strings.TrimSpace(b.Model) != "" {
+				return strings.TrimSpace(b.Model)
+			}
+		}
+	}
+	return agentModel
 }
 
 func (o *Orchestrator) listSessionsByProject(ctx context.Context, projectID string) ([]*db.Session, error) {
