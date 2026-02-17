@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -15,10 +16,11 @@ import (
 
 type Server struct {
 	cfg        *config.Config
+	db         *sql.DB
 	httpServer *http.Server
 }
 
-func New(cfg *config.Config, h *hub.Hub) (*Server, error) {
+func New(cfg *config.Config, h *hub.Hub, db *sql.DB) (*Server, error) {
 	mux := http.NewServeMux()
 
 	subFS, err := fs.Sub(web.Assets, ".")
@@ -32,6 +34,7 @@ func New(cfg *config.Config, h *hub.Hub) (*Server, error) {
 
 	return &Server{
 		cfg: cfg,
+		db:  db,
 		httpServer: &http.Server{
 			Addr:    fmt.Sprintf("0.0.0.0:%d", cfg.Port),
 			Handler: mux,

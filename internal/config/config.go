@@ -17,6 +17,7 @@ type Config struct {
 	ConfigPath  string
 	PrintToken  bool
 	DefaultDir  string
+	DBPath      string
 }
 
 func Load() (*Config, error) {
@@ -30,6 +31,7 @@ func Load() (*Config, error) {
 		TmuxSession: "ai-coding",
 		DefaultDir:  filepath.Join(homeDir, "08Coding"),
 		ConfigPath:  filepath.Join(homeDir, ".config", "agenterm", "config"),
+		DBPath:      filepath.Join(homeDir, ".config", "agenterm", "agenterm.db"),
 	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
@@ -40,6 +42,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.TmuxSession, "session", cfg.TmuxSession, "tmux session name")
 	flag.StringVar(&cfg.Token, "token", cfg.Token, "authentication token (auto-generated if empty)")
 	flag.StringVar(&cfg.DefaultDir, "dir", cfg.DefaultDir, "default directory for new windows")
+	flag.StringVar(&cfg.DBPath, "db-path", cfg.DBPath, "path to SQLite database")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
 
@@ -91,6 +94,8 @@ func (c *Config) loadFromFile() error {
 			c.TmuxSession = value
 		case "DefaultDir":
 			c.DefaultDir = value
+		case "DBPath":
+			c.DBPath = value
 		}
 	}
 	return nil
@@ -101,7 +106,7 @@ func (c *Config) saveToFile() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data := fmt.Sprintf("Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\n", c.Port, c.TmuxSession, c.Token, c.DefaultDir)
+	data := fmt.Sprintf("Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\n", c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }
 

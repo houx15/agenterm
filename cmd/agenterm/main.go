@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/config"
+	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/server"
@@ -32,6 +33,17 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	appDB, err := db.Open(context.Background(), cfg.DBPath)
+	if err != nil {
+		slog.Error("failed to initialize database", "path", cfg.DBPath, "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := appDB.Close(); err != nil {
+			slog.Error("failed to close database", "error", err)
+		}
+	}()
 
 	gw := tmux.New(cfg.TmuxSession)
 	psr := parser.New()
@@ -65,7 +77,7 @@ func main() {
 		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
-	srv, err := server.New(cfg, h)
+	srv, err := server.New(cfg, h, appDB.SQL())
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)

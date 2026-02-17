@@ -1,0 +1,151 @@
+package db
+
+import (
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"time"
+)
+
+type Project struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	RepoPath  string    `json:"repo_path"`
+	Status    string    `json:"status"`
+	Playbook  string    `json:"playbook,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Task struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Status      string    `json:"status"`
+	DependsOn   []string  `json:"depends_on"`
+	WorktreeID  string    `json:"worktree_id,omitempty"`
+	SpecPath    string    `json:"spec_path,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type Worktree struct {
+	ID         string `json:"id"`
+	ProjectID  string `json:"project_id"`
+	BranchName string `json:"branch_name"`
+	Path       string `json:"path"`
+	TaskID     string `json:"task_id,omitempty"`
+	Status     string `json:"status"`
+}
+
+type Session struct {
+	ID              string    `json:"id"`
+	TaskID          string    `json:"task_id,omitempty"`
+	TmuxSessionName string    `json:"tmux_session_name"`
+	TmuxWindowID    string    `json:"tmux_window_id,omitempty"`
+	AgentType       string    `json:"agent_type"`
+	Role            string    `json:"role"`
+	Status          string    `json:"status"`
+	HumanAttached   bool      `json:"human_attached"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastActivityAt  time.Time `json:"last_activity_at"`
+}
+
+type AgentConfig struct {
+	ID                    string   `json:"id" yaml:"id"`
+	Name                  string   `json:"name" yaml:"name"`
+	Command               string   `json:"command" yaml:"command"`
+	ResumeCommand         string   `json:"resume_command,omitempty" yaml:"resume_command,omitempty"`
+	HeadlessCommand       string   `json:"headless_command,omitempty" yaml:"headless_command,omitempty"`
+	Capabilities          []string `json:"capabilities" yaml:"capabilities"`
+	Languages             []string `json:"languages" yaml:"languages"`
+	CostTier              string   `json:"cost_tier" yaml:"cost_tier"`
+	SpeedTier             string   `json:"speed_tier" yaml:"speed_tier"`
+	SupportsSessionResume bool     `json:"supports_session_resume" yaml:"supports_session_resume"`
+	SupportsHeadless      bool     `json:"supports_headless" yaml:"supports_headless"`
+	AutoAcceptMode        string   `json:"auto_accept_mode,omitempty" yaml:"auto_accept_mode,omitempty"`
+}
+
+type ProjectFilter struct {
+	Status string
+}
+
+type TaskFilter struct {
+	ProjectID string
+	Status    string
+}
+
+type WorktreeFilter struct {
+	ProjectID string
+	Status    string
+	TaskID    string
+}
+
+type SessionFilter struct {
+	TaskID string
+	Status string
+}
+
+type AgentConfigFilter struct {
+	CostTier  string
+	SpeedTier string
+}
+
+func NewID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("failed to read random bytes: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func nowUTC() time.Time {
+	return time.Now().UTC()
+}
+
+func formatTimestamp(ts time.Time) string {
+	if ts.IsZero() {
+		ts = nowUTC()
+	}
+	return ts.UTC().Format(time.RFC3339)
+}
+
+func parseTimestamp(v string) (time.Time, error) {
+	ts, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse timestamp %q: %w", v, err)
+	}
+	return ts, nil
+}
+
+func encodeStringSlice(values []string) (string, error) {
+	if values == nil {
+		values = []string{}
+	}
+	buf, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode string slice: %w", err)
+	}
+	return string(buf), nil
+}
+
+func decodeStringSlice(raw string) ([]string, error) {
+	if raw == "" {
+		return []string{}, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("failed to decode string slice: %w", err)
+	}
+	return values, nil
+}
+
+func nullIfEmpty(v string) sql.NullString {
+	if v == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: v, Valid: true}
+}

@@ -139,12 +139,12 @@ Plus model-specific queries:
 - Test DB file is created at configured path
 
 ## Acceptance Criteria
-- [ ] SQLite database created on first startup
-- [ ] All 5 tables created with correct schema
-- [ ] CRUD operations work for all models
-- [ ] Migrations are idempotent (running twice is safe)
-- [ ] DB path configurable via config file
-- [ ] JSON array fields (depends_on, capabilities) serialize/deserialize correctly
+- [x] SQLite database created on first startup
+- [x] All 5 tables created with correct schema
+- [x] CRUD operations work for all models
+- [x] Migrations are idempotent (running twice is safe)
+- [x] DB path configurable via config file
+- [x] JSON array fields (depends_on, capabilities) serialize/deserialize correctly
 
 ## Notes
 - Use `modernc.org/sqlite` (pure Go, no CGO) to keep single-binary deployment
