@@ -372,9 +372,12 @@ func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
 
 	create := apiRequest(t, h, http.MethodPost, "/api/agents", map[string]any{
-		"id":      "custom-agent",
-		"name":    "Custom Agent",
-		"command": "custom run",
+		"id":                  "custom-agent",
+		"name":                "Custom Agent",
+		"model":               "qwen3-coder",
+		"command":             "custom run",
+		"max_parallel_agents": 3,
+		"notes":               "good at fast iteration",
 	}, true)
 	if create.Code != http.StatusCreated {
 		t.Fatalf("create agent status=%d body=%s", create.Code, create.Body.String())
@@ -384,10 +387,17 @@ func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	if get.Code != http.StatusOK {
 		t.Fatalf("get agent status=%d body=%s", get.Code, get.Body.String())
 	}
+	var got map[string]any
+	decodeBody(t, get, &got)
+	if got["model"] != "qwen3-coder" {
+		t.Fatalf("model=%v want qwen3-coder", got["model"])
+	}
 
 	update := apiRequest(t, h, http.MethodPut, "/api/agents/custom-agent", map[string]any{
-		"name":    "Custom Agent Updated",
-		"command": "custom run",
+		"name":                "Custom Agent Updated",
+		"model":               "glm5",
+		"command":             "custom run",
+		"max_parallel_agents": 4,
 	}, true)
 	if update.Code != http.StatusOK {
 		t.Fatalf("update agent status=%d body=%s", update.Code, update.Body.String())

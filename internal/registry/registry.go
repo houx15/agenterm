@@ -190,6 +190,17 @@ func validate(cfg *AgentConfig) error {
 	if strings.TrimSpace(cfg.Command) == "" {
 		return errors.New("command is required")
 	}
+	cfg.Model = strings.TrimSpace(cfg.Model)
+	if cfg.Model == "" {
+		cfg.Model = "default"
+	}
+	if cfg.MaxParallelAgents <= 0 {
+		cfg.MaxParallelAgents = 1
+	}
+	if cfg.MaxParallelAgents > 64 {
+		return errors.New("max_parallel_agents must be <= 64")
+	}
+	cfg.Notes = strings.TrimSpace(cfg.Notes)
 	if cfg.Capabilities == nil {
 		cfg.Capabilities = []string{}
 	}

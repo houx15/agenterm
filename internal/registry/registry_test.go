@@ -89,6 +89,10 @@ func TestRegistrySaveValidation(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected invalid id error")
 	}
+
+	if err := r.Save(&AgentConfig{ID: "ok-id", Name: "N", Model: "m", Command: "c", MaxParallelAgents: 100}); err == nil {
+		t.Fatalf("expected max_parallel_agents validation error")
+	}
 }
 
 func TestRegistryDeleteSupportsYMLExtension(t *testing.T) {
@@ -117,5 +121,37 @@ func TestRegistryDeleteSupportsYMLExtension(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "custom-yml.yml")); !os.IsNotExist(err) {
 		t.Fatalf("expected .yml file removed, stat err = %v", err)
+	}
+}
+
+func TestRegistrySaveNormalizesModelAndParallel(t *testing.T) {
+	r, err := NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	cfg := &AgentConfig{
+		ID:                "normalize-agent",
+		Name:              "Normalize Agent",
+		Command:           "run",
+		MaxParallelAgents: 0,
+		Notes:             "  test notes  ",
+	}
+	if err := r.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	got := r.Get("normalize-agent")
+	if got == nil {
+		t.Fatalf("expected saved config")
+	}
+	if got.Model != "default" {
+		t.Fatalf("Model = %q, want default", got.Model)
+	}
+	if got.MaxParallelAgents != 1 {
+		t.Fatalf("MaxParallelAgents = %d, want 1", got.MaxParallelAgents)
+	}
+	if got.Notes != "test notes" {
+		t.Fatalf("Notes = %q, want %q", got.Notes, "test notes")
 	}
 }

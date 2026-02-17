@@ -712,6 +712,20 @@
             margin-bottom: 0;
         }
 
+        .agent-form textarea {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+            min-height: 74px;
+            resize: vertical;
+        }
+
         .agent-form .checkbox {
             display: flex;
             align-items: center;
@@ -848,8 +862,12 @@
                     <input id="agent-id" type="text" placeholder="codex">
                     <label for="agent-name">Name</label>
                     <input id="agent-name" type="text" placeholder="OpenAI Codex CLI">
+                    <label for="agent-model">Model</label>
+                    <input id="agent-model" type="text" placeholder="glm5 / minimax / ark-latest-code / qwen3-coder">
                     <label for="agent-command">Command</label>
                     <input id="agent-command" type="text" placeholder="codex">
+                    <label for="agent-max-parallel">Max Parallel Agents</label>
+                    <input id="agent-max-parallel" type="number" min="1" max="64" step="1" placeholder="2">
                     <label for="agent-resume-command">Resume Command</label>
                     <input id="agent-resume-command" type="text" placeholder="codex resume">
                     <label for="agent-headless-command">Headless Command</label>
@@ -864,6 +882,8 @@
                     <input id="agent-speed-tier" type="text" placeholder="fast">
                     <label for="agent-auto-accept-mode">Auto Accept Mode</label>
                     <input id="agent-auto-accept-mode" type="text" placeholder="optional">
+                    <label for="agent-notes">Notes</label>
+                    <textarea id="agent-notes" placeholder="What this model is good at, caveats, preferred tasks..."></textarea>
                     <label class="checkbox"><input id="agent-supports-resume" type="checkbox">Supports Session Resume</label>
                     <label class="checkbox"><input id="agent-supports-headless" type="checkbox">Supports Headless</label>
                     <div class="agent-form-actions">
@@ -1184,7 +1204,9 @@
         const agentForm = {
             id: document.getElementById('agent-id'),
             name: document.getElementById('agent-name'),
+            model: document.getElementById('agent-model'),
             command: document.getElementById('agent-command'),
+            maxParallelAgents: document.getElementById('agent-max-parallel'),
             resumeCommand: document.getElementById('agent-resume-command'),
             headlessCommand: document.getElementById('agent-headless-command'),
             capabilities: document.getElementById('agent-capabilities'),
@@ -1192,6 +1214,7 @@
             costTier: document.getElementById('agent-cost-tier'),
             speedTier: document.getElementById('agent-speed-tier'),
             autoAcceptMode: document.getElementById('agent-auto-accept-mode'),
+            notes: document.getElementById('agent-notes'),
             supportsSessionResume: document.getElementById('agent-supports-resume'),
             supportsHeadless: document.getElementById('agent-supports-headless')
         };
@@ -1236,7 +1259,9 @@
         function fillAgentForm(agent) {
             agentForm.id.value = agent.id || '';
             agentForm.name.value = agent.name || '';
+            agentForm.model.value = agent.model || '';
             agentForm.command.value = agent.command || '';
+            agentForm.maxParallelAgents.value = String(agent.max_parallel_agents || 1);
             agentForm.resumeCommand.value = agent.resume_command || '';
             agentForm.headlessCommand.value = agent.headless_command || '';
             agentForm.capabilities.value = toCSV(agent.capabilities);
@@ -1244,6 +1269,7 @@
             agentForm.costTier.value = agent.cost_tier || '';
             agentForm.speedTier.value = agent.speed_tier || '';
             agentForm.autoAcceptMode.value = agent.auto_accept_mode || '';
+            agentForm.notes.value = agent.notes || '';
             agentForm.supportsSessionResume.checked = !!agent.supports_session_resume;
             agentForm.supportsHeadless.checked = !!agent.supports_headless;
             agentForm.id.disabled = true;
@@ -1253,7 +1279,9 @@
             state.activeAgentID = '';
             agentForm.id.value = '';
             agentForm.name.value = '';
+            agentForm.model.value = '';
             agentForm.command.value = '';
+            agentForm.maxParallelAgents.value = '1';
             agentForm.resumeCommand.value = '';
             agentForm.headlessCommand.value = '';
             agentForm.capabilities.value = '';
@@ -1261,6 +1289,7 @@
             agentForm.costTier.value = '';
             agentForm.speedTier.value = '';
             agentForm.autoAcceptMode.value = '';
+            agentForm.notes.value = '';
             agentForm.supportsSessionResume.checked = false;
             agentForm.supportsHeadless.checked = false;
             agentForm.id.disabled = false;
@@ -1268,10 +1297,13 @@
         }
 
         function collectAgentForm() {
+            const parsedParallel = Number.parseInt(agentForm.maxParallelAgents.value.trim(), 10);
             return {
                 id: agentForm.id.value.trim(),
                 name: agentForm.name.value.trim(),
+                model: agentForm.model.value.trim(),
                 command: agentForm.command.value.trim(),
+                max_parallel_agents: Number.isFinite(parsedParallel) && parsedParallel > 0 ? parsedParallel : 1,
                 resume_command: agentForm.resumeCommand.value.trim(),
                 headless_command: agentForm.headlessCommand.value.trim(),
                 capabilities: parseCSV(agentForm.capabilities.value),
@@ -1279,6 +1311,7 @@
                 cost_tier: agentForm.costTier.value.trim(),
                 speed_tier: agentForm.speedTier.value.trim(),
                 auto_accept_mode: agentForm.autoAcceptMode.value.trim(),
+                notes: agentForm.notes.value.trim(),
                 supports_session_resume: agentForm.supportsSessionResume.checked,
                 supports_headless: agentForm.supportsHeadless.checked
             };
@@ -1320,8 +1353,8 @@
 
         async function saveAgentConfig() {
             const payload = collectAgentForm();
-            if (!payload.id || !payload.name || !payload.command) {
-                setAgentStatus('id, name, and command are required', true);
+            if (!payload.id || !payload.name || !payload.model || !payload.command) {
+                setAgentStatus('id, name, model, and command are required', true);
                 return;
             }
             try {
