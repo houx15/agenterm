@@ -1,13 +1,10 @@
 package session
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +14,6 @@ import (
 	"github.com/user/agenterm/internal/parser"
 )
 
-var capturePaneFn = capturePane
 var tmuxSessionExistsFn = tmuxSessionExists
 
 type MonitorConfig struct {
@@ -45,11 +41,12 @@ type Monitor struct {
 	pollInterval time.Duration
 	captureLines int
 
-	mu           sync.RWMutex
-	lastOutput   time.Time
-	lastStatus   string
-	lastSnapshot []string
-	buffer       *ringBuffer
+	mu         sync.RWMutex
+	lastOutput time.Time
+	lastStatus string
+	lastClass  string
+	lastText   string
+	buffer     *ringBuffer
 }
 
 func NewMonitor(cfg MonitorConfig) *Monitor {
@@ -100,12 +97,8 @@ func (m *Monitor) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if !tmuxSessionExistsFn(m.tmuxSession) {
-				m.persistStatus(context.Background(), "completed")
+				m.persistStatus(context.Background(), m.statusOnSessionExit())
 				return
-			}
-			captured, err := capturePaneFn(m.windowID, m.captureLines)
-			if err == nil {
-				m.recordOutput(captured)
 			}
 			m.touchActivity(context.Background())
 
@@ -124,26 +117,20 @@ func (m *Monitor) OutputSince(since time.Time) []OutputEntry {
 	return m.buffer.Since(since)
 }
 
-func (m *Monitor) recordOutput(captured []string) {
-	filtered := make([]string, 0, len(captured))
-	for _, line := range captured {
-		if strings.TrimSpace(line) != "" {
-			filtered = append(filtered, line)
-		}
+func (m *Monitor) IngestParsed(text string, class string, ts time.Time) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
 	}
-
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	newLines := diffNewLines(m.lastSnapshot, filtered)
-	if len(newLines) > 0 {
-		now := time.Now().UTC()
-		for i, line := range newLines {
-			m.buffer.Add(OutputEntry{Text: line, Timestamp: now.Add(time.Duration(i) * time.Microsecond)})
-		}
-		m.lastOutput = now
-	}
-	m.lastSnapshot = filtered
+	m.buffer.Add(OutputEntry{Text: text, Timestamp: ts})
+	m.lastOutput = ts
+	m.lastClass = strings.ToLower(strings.TrimSpace(class))
+	m.lastText = text
 }
 
 func (m *Monitor) detectStatus() string {
@@ -175,19 +162,13 @@ func (m *Monitor) isIdle() bool {
 }
 
 func (m *Monitor) hasPrompt() bool {
-	entries := m.buffer.Last(20)
-	for i := len(entries) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(entries[i].Text)
-		if line == "" {
-			continue
-		}
-		if parser.PromptShellPattern.MatchString(line) {
-			return true
-		}
-		if parser.PromptConfirmPattern.MatchString(line) || parser.PromptQuestionPattern.MatchString(line) || parser.PromptBracketedChoicePattern.MatchString(line) {
-			return true
-		}
-		break
+	m.mu.RLock()
+	lastClass := m.lastClass
+	lastText := strings.TrimSpace(m.lastText)
+	m.mu.RUnlock()
+	// Task spec requires parser-based prompt detection for shell prompts.
+	if lastClass == string(parser.ClassPrompt) && parser.PromptShellPattern.MatchString(lastText) {
+		return true
 	}
 	return false
 }
@@ -210,6 +191,16 @@ func (m *Monitor) hasReadyForReviewCommit() bool {
 		return false
 	}
 	return strings.Contains(string(out), "[READY_FOR_REVIEW]")
+}
+
+func (m *Monitor) statusOnSessionExit() string {
+	if m.isMarkerDone() {
+		return "completed"
+	}
+	if m.hasReadyForReviewCommit() {
+		return "waiting_review"
+	}
+	return "failed"
 }
 
 func (m *Monitor) persistStatus(ctx context.Context, status string) {
@@ -247,36 +238,9 @@ func (m *Monitor) touchActivity(ctx context.Context) {
 	_ = m.sessionRepo.Update(ctx, sess)
 }
 
-func capturePane(windowID string, lines int) ([]string, error) {
-	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", windowID, "-S", fmt.Sprintf("-%d", lines))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if stderr.Len() > 0 {
-			return nil, fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(stderr.String()))
-		}
-		return nil, fmt.Errorf("tmux capture-pane failed: %w", err)
-	}
-	return strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n"), nil
-}
-
 func tmuxSessionExists(name string) bool {
 	cmd := exec.Command("tmux", "has-session", "-t", name)
 	return cmd.Run() == nil
-}
-
-func diffNewLines(previous []string, current []string) []string {
-	if len(previous) == 0 {
-		return current
-	}
-	maxOverlap := min(len(previous), len(current))
-	for overlap := maxOverlap; overlap > 0; overlap-- {
-		if slices.Equal(previous[len(previous)-overlap:], current[:overlap]) {
-			return current[overlap:]
-		}
-	}
-	return current
 }
 
 type ringBuffer struct {
@@ -330,9 +294,9 @@ func (r *ringBuffer) Last(n int) []OutputEntry {
 	return out
 }
 
-func min(a int, b int) int {
-	if a < b {
-		return a
+func (m *Monitor) matches(tmuxSession string, windowID string) bool {
+	if strings.TrimSpace(tmuxSession) == "" || strings.TrimSpace(windowID) == "" {
+		return false
 	}
-	return b
+	return m.tmuxSession == tmuxSession && m.windowID == windowID
 }

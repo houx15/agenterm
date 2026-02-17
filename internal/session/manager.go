@@ -332,6 +332,37 @@ func (sm *Manager) DestroySession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+func (sm *Manager) ObserveParsedOutput(tmuxSession string, windowID string, text string, class string, timestamp time.Time) {
+	if sm == nil {
+		return
+	}
+	tmuxSession = strings.TrimSpace(tmuxSession)
+	windowID = strings.TrimSpace(windowID)
+	if tmuxSession == "" || windowID == "" {
+		return
+	}
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+
+	sm.mu.RLock()
+	handles := make([]monitorHandle, 0, len(sm.monitors))
+	for _, handle := range sm.monitors {
+		handles = append(handles, handle)
+	}
+	sm.mu.RUnlock()
+
+	for _, handle := range handles {
+		if handle.monitor == nil {
+			continue
+		}
+		if !handle.monitor.matches(tmuxSession, windowID) {
+			continue
+		}
+		handle.monitor.IngestParsed(text, class, timestamp)
+	}
+}
+
 func (sm *Manager) ensureStarted() error {
 	if sm == nil {
 		return fmt.Errorf("session manager unavailable")
@@ -360,6 +391,26 @@ func (sm *Manager) createTmuxSession(projectName string, taskTitle string, role 
 			}
 			name += suffix
 		}
+		gw, err := sm.tmux.CreateSession(name, workDir)
+		if err == nil {
+			return name, gw, nil
+		}
+		if !strings.Contains(strings.ToLower(err.Error()), "already exists") {
+			return "", nil, err
+		}
+	}
+	const maxRandomAttempts = 8
+	for i := 0; i < maxRandomAttempts; i++ {
+		name := base
+		randomID, err := db.NewID()
+		if err != nil {
+			return "", nil, err
+		}
+		suffix := "-" + randomID[:8]
+		if len(name)+len(suffix) > 80 {
+			name = name[:80-len(suffix)]
+		}
+		name += suffix
 		gw, err := sm.tmux.CreateSession(name, workDir)
 		if err == nil {
 			return name, gw, nil

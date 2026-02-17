@@ -34,16 +34,18 @@ type runtimeState struct {
 	cfg            *config.Config
 	manager        *tmux.Manager
 	hub            *hub.Hub
+	lifecycle      *session.Manager
 	mu             sync.RWMutex
 	sessions       map[string]*sessionRuntime
 	windowToSessID map[string]string
 }
 
-func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub) *runtimeState {
+func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub, lifecycle *session.Manager) *runtimeState {
 	return &runtimeState{
 		cfg:            cfg,
 		manager:        manager,
 		hub:            h,
+		lifecycle:      lifecycle,
 		sessions:       make(map[string]*sessionRuntime),
 		windowToSessID: make(map[string]string),
 	}
@@ -124,6 +126,9 @@ func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, 
 
 	go func() {
 		for msg := range rt.parser.Messages() {
+			if s.lifecycle != nil {
+				s.lifecycle.ObserveParsedOutput(sessionID, msg.WindowID, msg.Text, string(msg.Class), msg.Timestamp)
+			}
 			s.hub.BroadcastOutput(hub.OutputMessage{
 				Type:      "output",
 				SessionID: sessionID,
@@ -309,7 +314,8 @@ func main() {
 
 	manager := tmux.NewManager(cfg.DefaultDir)
 	h := hub.New(cfg.Token, nil)
-	state := newRuntimeState(cfg, manager, h)
+	lifecycleManager := session.NewManager(appDB.SQL(), manager, agentRegistry, h)
+	state := newRuntimeState(cfg, manager, h, lifecycleManager)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -371,7 +377,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	lifecycleManager := session.NewManager(appDB.SQL(), manager, agentRegistry, h)
 	if lifecycleManager != nil {
 		if err := lifecycleManager.Start(ctx); err != nil {
 			slog.Error("failed to start session lifecycle manager", "error", err)

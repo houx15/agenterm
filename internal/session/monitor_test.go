@@ -74,7 +74,7 @@ func TestMonitorDetectStatusPromptBeatsMarker(t *testing.T) {
 		IdleTimeout:  30 * time.Second,
 		PollInterval: 10 * time.Millisecond,
 	})
-	m.buffer.Add(OutputEntry{Text: "$ ", Timestamp: time.Now().UTC()})
+	m.IngestParsed("$ ", "prompt", time.Now().UTC())
 
 	if got := m.detectStatus(); got != "waiting_review" {
 		t.Fatalf("detectStatus()=%q want waiting_review", got)
@@ -117,14 +117,11 @@ func TestMonitorRunRefreshesLastActivityWithoutStatusChange(t *testing.T) {
 	sess := seedSession(t, sessionRepo, taskRepo, projectRepo, old)
 
 	origExists := tmuxSessionExistsFn
-	origCapture := capturePaneFn
 	t.Cleanup(func() {
 		tmuxSessionExistsFn = origExists
-		capturePaneFn = origCapture
 	})
 
 	tmuxSessionExistsFn = func(string) bool { return true }
-	capturePaneFn = func(string, int) ([]string, error) { return []string{"agent running"}, nil }
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    sess.ID,
@@ -152,5 +149,47 @@ func TestMonitorRunRefreshesLastActivityWithoutStatusChange(t *testing.T) {
 	}
 	if !updated.LastActivityAt.After(old) {
 		t.Fatalf("last_activity_at=%v, want > %v", updated.LastActivityAt, old)
+	}
+}
+
+func TestMonitorRunMarksFailedWhenSessionDisappearsWithoutCompletionSignal(t *testing.T) {
+	database := openSessionTestDB(t)
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	projectRepo := db.NewProjectRepo(database.SQL())
+
+	now := time.Now().UTC().Truncate(time.Second)
+	sess := seedSession(t, sessionRepo, taskRepo, projectRepo, now)
+
+	origExists := tmuxSessionExistsFn
+	t.Cleanup(func() {
+		tmuxSessionExistsFn = origExists
+	})
+	tmuxSessionExistsFn = func(string) bool { return false }
+
+	m := NewMonitor(MonitorConfig{
+		SessionID:    sess.ID,
+		TmuxSession:  sess.TmuxSessionName,
+		WindowID:     sess.TmuxWindowID,
+		SessionRepo:  sessionRepo,
+		IdleTimeout:  10 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx)
+		close(done)
+	}()
+	<-done
+
+	updated, err := sessionRepo.Get(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if updated.Status != "failed" {
+		t.Fatalf("status=%q want failed", updated.Status)
 	}
 }
