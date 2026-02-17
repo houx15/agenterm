@@ -8,6 +8,7 @@ export function useWebSocket(token: string) {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptsRef = useRef<number>(0)
+  const shouldReconnectRef = useRef<boolean>(false)
 
   const [connected, setConnected] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected')
@@ -42,6 +43,11 @@ export function useWebSocket(token: string) {
     ws.onclose = () => {
       setConnected(false)
       setConnectionStatus('disconnected')
+      wsRef.current = null
+
+      if (!shouldReconnectRef.current) {
+        return
+      }
 
       const attempts = reconnectAttemptsRef.current + 1
       reconnectAttemptsRef.current = attempts
@@ -70,8 +76,10 @@ export function useWebSocket(token: string) {
   }, [clearReconnectTimer, token])
 
   useEffect(() => {
+    shouldReconnectRef.current = true
     connect()
     return () => {
+      shouldReconnectRef.current = false
       clearReconnectTimer()
       wsRef.current?.close()
       wsRef.current = null

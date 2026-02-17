@@ -46,6 +46,11 @@ func New(cfg *config.Config, h *hub.Hub, db *sql.DB, apiHandler http.Handler) (*
 			return
 		}
 
+		if path.Ext(cleanPath) != "" {
+			http.NotFound(w, r)
+			return
+		}
+
 		fallbackReq := r.Clone(r.Context())
 		fallbackURL := *r.URL
 		fallbackURL.Path = "/index.html"
