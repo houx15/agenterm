@@ -19,6 +19,7 @@ import (
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
+	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -370,7 +371,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
+	lifecycleManager := session.NewManager(appDB.SQL(), manager, agentRegistry, h)
+	if lifecycleManager != nil {
+		if err := lifecycleManager.Start(ctx); err != nil {
+			slog.Error("failed to start session lifecycle manager", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
@@ -388,7 +397,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gracefulShutdown(state, h)
+	gracefulShutdown(state, h, lifecycleManager)
 }
 
 func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
@@ -438,10 +447,13 @@ func convertActions(actions []parser.QuickAction) []hub.ActionMessage {
 	return result
 }
 
-func gracefulShutdown(state *runtimeState, h *hub.Hub) {
+func gracefulShutdown(state *runtimeState, h *hub.Hub, lifecycle *session.Manager) {
 	slog.Info("shutting down...")
 
 	h.FlushPendingOutput()
+	if lifecycle != nil {
+		lifecycle.Close()
+	}
 	state.close()
 
 	slog.Info("agenterm stopped")

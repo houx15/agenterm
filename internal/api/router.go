@@ -11,6 +11,7 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/registry"
+	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -32,6 +33,7 @@ type sessionManager interface {
 	AttachSession(name string) (*tmux.Gateway, error)
 	GetGateway(name string) (*tmux.Gateway, error)
 	DestroySession(name string) error
+	ListSessions() []string
 }
 
 type handler struct {
@@ -42,6 +44,7 @@ type handler struct {
 	registry     *registry.Registry
 	gw           gateway
 	manager      sessionManager
+	lifecycle    *session.Manager
 	hub          *hub.Hub
 	tmuxSession  string
 
@@ -49,7 +52,10 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hub, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
+	if lifecycle == nil {
+		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
+	}
 	handler := &handler{
 		projectRepo:  db.NewProjectRepo(conn),
 		taskRepo:     db.NewTaskRepo(conn),
@@ -58,6 +64,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hu
 		registry:     agentRegistry,
 		gw:           gw,
 		manager:      manager,
+		lifecycle:    lifecycle,
 		hub:          hubInst,
 		tmuxSession:  tmuxSession,
 		outputState:  make(map[string]*windowOutputState),
@@ -87,6 +94,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hu
 	mux.HandleFunc("GET /api/sessions/{id}/output", handler.getSessionOutput)
 	mux.HandleFunc("GET /api/sessions/{id}/idle", handler.getSessionIdle)
 	mux.HandleFunc("PATCH /api/sessions/{id}/takeover", handler.patchSessionTakeover)
+	mux.HandleFunc("DELETE /api/sessions/{id}", handler.deleteSession)
 
 	mux.HandleFunc("GET /api/agents", handler.listAgents)
 	mux.HandleFunc("GET /api/agents/{id}", handler.getAgent)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -44,6 +45,32 @@ const maxSessionOutputEntries = 5000
 
 func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
+
+	var req createSessionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.AgentType == "" || req.Role == "" {
+		jsonError(w, http.StatusBadRequest, "agent_type and role are required")
+		return
+	}
+
+	if h.lifecycle != nil {
+		sess, err := h.lifecycle.CreateSession(r.Context(), session.CreateSessionRequest{
+			TaskID:    taskID,
+			AgentType: req.AgentType,
+			Role:      req.Role,
+		})
+		if err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		jsonResponse(w, http.StatusCreated, sess)
+		return
+	}
+
 	task, err := h.taskRepo.Get(r.Context(), taskID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -63,13 +90,8 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req createSessionRequest
-	if err := decodeJSON(r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if req.AgentType == "" || req.Role == "" {
-		jsonError(w, http.StatusBadRequest, "agent_type and role are required")
+	if h.registry != nil && h.registry.Get(req.AgentType) == nil {
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf("unknown agent type %q", req.AgentType))
 		return
 	}
 
@@ -198,6 +220,26 @@ func (h *handler) getSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
+	var req sendCommandRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.Text == "" {
+		jsonError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+
+	if h.lifecycle != nil {
+		if err := h.lifecycle.SendCommand(r.Context(), r.PathValue("id"), req.Text); err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+		return
+	}
+
 	session, ok := h.mustGetSession(w, r)
 	if !ok {
 		return
@@ -212,21 +254,11 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req sendCommandRequest
-	if err := decodeJSON(r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	if req.Text == "" {
-		jsonError(w, http.StatusBadRequest, "text is required")
-		return
-	}
-
 	if err := gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	session.Status = "running"
+	session.Status = "working"
 	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -235,15 +267,6 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
-	session, ok := h.mustGetSession(w, r)
-	if !ok {
-		return
-	}
-	if session.TmuxWindowID == "" {
-		jsonResponse(w, http.StatusOK, []sessionOutputLine{})
-		return
-	}
-
 	lines := 200
 	if raw := r.URL.Query().Get("lines"); raw != "" {
 		n, err := strconv.Atoi(raw)
@@ -263,6 +286,33 @@ func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.lifecycle != nil {
+		entries, err := h.lifecycle.GetOutput(r.Context(), r.PathValue("id"), since)
+		if err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		result := make([]sessionOutputLine, 0, len(entries))
+		for _, entry := range entries {
+			result = append(result, sessionOutputLine{Text: entry.Text, Timestamp: entry.Timestamp})
+		}
+		if lines > 0 && len(result) > lines {
+			result = result[len(result)-lines:]
+		}
+		jsonResponse(w, http.StatusOK, result)
+		return
+	}
+
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
+		return
+	}
+	if session.TmuxWindowID == "" {
+		jsonResponse(w, http.StatusOK, []sessionOutputLine{})
+		return
+	}
+
 	out, err := capturePaneFn(session.TmuxWindowID, lines)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
@@ -278,7 +328,7 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	idle := time.Since(session.LastActivityAt) > 30*time.Second || session.Status == "idle"
+	idle := session.Status == "idle" || session.Status == "waiting_review" || session.Status == "human_takeover"
 	jsonResponse(w, http.StatusOK, map[string]any{
 		"idle":          idle,
 		"last_activity": session.LastActivityAt,
@@ -287,13 +337,28 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) patchSessionTakeover(w http.ResponseWriter, r *http.Request) {
-	session, ok := h.mustGetSession(w, r)
-	if !ok {
-		return
-	}
 	var req patchTakeoverRequest
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	if h.lifecycle != nil {
+		if err := h.lifecycle.SetTakeover(r.Context(), r.PathValue("id"), req.HumanTakeover); err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		session, ok := h.mustGetSession(w, r)
+		if !ok {
+			return
+		}
+		jsonResponse(w, http.StatusOK, session)
+		return
+	}
+
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
 		return
 	}
 	session.HumanAttached = req.HumanTakeover
@@ -307,6 +372,19 @@ func (h *handler) patchSessionTakeover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, session)
+}
+
+func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request) {
+	if h.lifecycle == nil {
+		jsonError(w, http.StatusNotImplemented, "session lifecycle manager unavailable")
+		return
+	}
+	if err := h.lifecycle.DestroySession(r.Context(), r.PathValue("id")); err != nil {
+		status, msg := mapSessionError(err)
+		jsonError(w, status, msg)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) mustGetSession(w http.ResponseWriter, r *http.Request) (*db.Session, bool) {
@@ -487,4 +565,18 @@ func diffNewLines(previous []string, current []string) []string {
 		}
 	}
 	return current
+}
+
+func mapSessionError(err error) (int, string) {
+	if err == nil {
+		return http.StatusOK, ""
+	}
+	switch {
+	case session.IsNotFound(err):
+		return http.StatusNotFound, err.Error()
+	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "unknown agent type"):
+		return http.StatusBadRequest, err.Error()
+	default:
+		return http.StatusInternalServerError, err.Error()
+	}
 }
