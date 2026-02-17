@@ -77,12 +77,12 @@ func (m *Manager) Close()                                    // Close all gatewa
 - Test backward compatibility (single-session mode still works)
 
 ## Acceptance Criteria
-- [ ] Can create new tmux sessions via Manager
-- [ ] Can attach to existing tmux sessions
-- [ ] Multiple Gateways run concurrently without interference
-- [ ] Hub routes messages to correct session
-- [ ] Destroying a session kills the tmux session and closes the Gateway
-- [ ] Default session auto-attach still works (backward compatible)
+- [x] Can create new tmux sessions via Manager
+- [x] Can attach to existing tmux sessions
+- [x] Multiple Gateways run concurrently without interference
+- [x] Hub routes messages to correct session
+- [x] Destroying a session kills the tmux session and closes the Gateway
+- [x] Default session auto-attach still works (backward compatible)
 
 ## Notes
 - Each Gateway runs its own goroutine for reading tmux control mode output

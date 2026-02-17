@@ -56,9 +56,10 @@ func TestProtocolMarshalOutputMessage(t *testing.T) {
 
 func TestProtocolMarshalClientMessage(t *testing.T) {
 	msg := ClientMessage{
-		Type:   "input",
-		Window: "@0",
-		Keys:   "ls -la\n",
+		Type:      "input",
+		SessionID: "demo-session",
+		Window:    "@0",
+		Keys:      "ls -la\n",
 	}
 
 	data, err := json.Marshal(msg)
@@ -77,8 +78,74 @@ func TestProtocolMarshalClientMessage(t *testing.T) {
 	if decoded.Window != "@0" {
 		t.Errorf("window mismatch: got %q", decoded.Window)
 	}
+	if decoded.SessionID != "demo-session" {
+		t.Errorf("session mismatch: got %q", decoded.SessionID)
+	}
 	if decoded.Keys != "ls -la\n" {
 		t.Errorf("keys mismatch: got %q", decoded.Keys)
+	}
+}
+
+func TestTerminalInputRoutesSessionID(t *testing.T) {
+	h := New("token", nil)
+	calls := 0
+	h.SetOnTerminalInputWithSession(func(sessionID string, windowID string, keys string) {
+		calls++
+		if sessionID != "s-1" || windowID != "@9" || keys != "pwd\n" {
+			t.Fatalf("unexpected callback payload: session=%q window=%q keys=%q", sessionID, windowID, keys)
+		}
+	})
+
+	h.handleTerminalInput("s-1", "@9", "pwd\n")
+	if calls != 1 {
+		t.Fatalf("expected callback to be called once, got %d", calls)
+	}
+}
+
+func TestBroadcastToClientsRespectsSessionSubscription(t *testing.T) {
+	h := New("token", nil)
+
+	clientA := &Client{
+		id:            "a",
+		send:          make(chan []byte, 1),
+		subscribeAll:  false,
+		subscriptions: map[string]struct{}{"s-1": {}},
+	}
+	clientB := &Client{
+		id:            "b",
+		send:          make(chan []byte, 1),
+		subscribeAll:  false,
+		subscriptions: map[string]struct{}{"s-2": {}},
+	}
+	clientAll := &Client{
+		id:            "all",
+		send:          make(chan []byte, 1),
+		subscribeAll:  true,
+		subscriptions: map[string]struct{}{},
+	}
+
+	h.clients = map[string]*Client{
+		clientA.id:   clientA,
+		clientB.id:   clientB,
+		clientAll.id: clientAll,
+	}
+
+	h.broadcastToClients(hubBroadcast{data: []byte(`{"type":"output"}`), sessionID: "s-1"})
+
+	select {
+	case <-clientA.send:
+	default:
+		t.Fatal("expected clientA to receive message for s-1")
+	}
+	select {
+	case <-clientAll.send:
+	default:
+		t.Fatal("expected subscribe-all client to receive message")
+	}
+	select {
+	case <-clientB.send:
+		t.Fatal("did not expect clientB to receive message for s-1")
+	default:
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/user/agenterm/internal/db"
@@ -62,7 +63,17 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return NewRouter(database.SQL(), gw, nil, "test-token", "configured-session"), database
+	return NewRouter(database.SQL(), gw, nil, nil, "test-token", "configured-session"), database
+}
+
+func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
+	t.Helper()
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	return NewRouter(database.SQL(), gw, manager, nil, "test-token", "configured-session"), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -203,6 +214,60 @@ func TestSessionCreationCreatesTmuxWindow(t *testing.T) {
 	}
 	if session["tmux_session_name"] != "configured-session" {
 		t.Fatalf("tmux_session_name=%v want configured-session", session["tmux_session_name"])
+	}
+}
+
+func TestSessionCreationUsesManagerWhenAvailable(t *testing.T) {
+	if os.Getenv("TMUX_INTEGRATION_TEST") == "" {
+		t.Skip("skipping integration test; set TMUX_INTEGRATION_TEST=1 to run")
+	}
+
+	gw := &fakeGateway{}
+	manager := tmux.NewManager(t.TempDir())
+	h, _ := openAPIWithManager(t, gw, manager)
+	t.Cleanup(func() { manager.Close() })
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "My App", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "Auth Flow", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusCreated {
+		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+
+	if gw.newWindowCalls != 0 {
+		t.Fatalf("expected legacy gateway NewWindow not to be used; calls=%d", gw.newWindowCalls)
+	}
+
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+	tmuxSessionName, _ := session["tmux_session_name"].(string)
+	if tmuxSessionName == "" {
+		t.Fatalf("expected tmux_session_name in response: %v", session)
+	}
+	if !strings.Contains(tmuxSessionName, "my-app-auth-flow-coder") {
+		t.Fatalf("tmux_session_name=%q want slugged project-task-role", tmuxSessionName)
+	}
+
+	if _, err := manager.GetGateway(tmuxSessionName); err != nil {
+		t.Fatalf("expected manager to have attached gateway for %s: %v", tmuxSessionName, err)
+	}
+
+	if err := manager.DestroySession(tmuxSessionName); err != nil {
+		t.Fatalf("cleanup destroy session failed: %v", err)
 	}
 }
 
