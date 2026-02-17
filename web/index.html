@@ -100,6 +100,27 @@
             color: var(--accent);
         }
 
+        #sidebar-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        #agent-settings-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        #agent-settings-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
         #session-list {
             flex: 1;
             overflow-y: auto;
@@ -636,6 +657,136 @@
             background: var(--accent-hover);
         }
 
+        #agent-settings-modal .modal {
+            width: min(920px, 95vw);
+            max-height: 85vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .agent-settings-body {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 16px;
+            min-height: 0;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .agent-list {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: auto;
+            background: var(--bg-input);
+        }
+
+        .agent-row {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+
+        .agent-row:last-child {
+            border-bottom: none;
+        }
+
+        .agent-row.active {
+            background: rgba(0, 210, 255, 0.12);
+            border-left: 2px solid var(--accent);
+        }
+
+        .agent-row .name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .agent-row .meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .agent-form {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            overflow: auto;
+            background: var(--bg-input);
+        }
+
+        .agent-form label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+            margin-top: 10px;
+        }
+
+        .agent-form label:first-child {
+            margin-top: 0;
+        }
+
+        .agent-form input {
+            width: 100%;
+            margin-bottom: 0;
+        }
+
+        .agent-form textarea {
+            width: 100%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 14px;
+            border-radius: 4px;
+            outline: none;
+            min-height: 74px;
+            resize: vertical;
+        }
+
+        .agent-form .checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .agent-form .checkbox input {
+            width: auto;
+        }
+
+        .agent-form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .agent-form-actions button {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .agent-form-actions .primary {
+            background: var(--accent);
+            color: var(--bg-main);
+            border: none;
+        }
+
+        #agent-settings-status {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            min-height: 18px;
+        }
+
         @media (max-width: 767px) {
             #sidebar {
                 position: absolute;
@@ -665,7 +816,10 @@
         <div id="sidebar">
             <div id="sidebar-header">
                 <h1>agenterm</h1>
-                <button id="new-session-btn">+ new</button>
+                <div id="sidebar-actions">
+                    <button id="agent-settings-btn">agents</button>
+                    <button id="new-session-btn">+ new</button>
+                </div>
             </div>
             <div id="session-list"></div>
             <div id="empty-sidebar" style="display: none;">
@@ -717,6 +871,53 @@
             </div>
         </div>
     </div>
+    <div id="agent-settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <h3>Agent Settings</h3>
+            <div class="agent-settings-body">
+                <div class="agent-list" id="agent-list"></div>
+                <div class="agent-form">
+                    <label for="agent-id">ID (lowercase-hyphen)</label>
+                    <input id="agent-id" type="text" placeholder="codex">
+                    <label for="agent-name">Name</label>
+                    <input id="agent-name" type="text" placeholder="OpenAI Codex CLI">
+                    <label for="agent-model">Model</label>
+                    <input id="agent-model" type="text" placeholder="glm5 / minimax / ark-latest-code / qwen3-coder">
+                    <label for="agent-command">Command</label>
+                    <input id="agent-command" type="text" placeholder="codex">
+                    <label for="agent-max-parallel">Max Parallel Agents</label>
+                    <input id="agent-max-parallel" type="number" min="1" max="64" step="1" placeholder="2">
+                    <label for="agent-resume-command">Resume Command</label>
+                    <input id="agent-resume-command" type="text" placeholder="codex resume">
+                    <label for="agent-headless-command">Headless Command</label>
+                    <input id="agent-headless-command" type="text" placeholder="codex exec --auto-edit">
+                    <label for="agent-capabilities">Capabilities (comma separated)</label>
+                    <input id="agent-capabilities" type="text" placeholder="coding,review">
+                    <label for="agent-languages">Languages (comma separated)</label>
+                    <input id="agent-languages" type="text" placeholder="go,typescript,python">
+                    <label for="agent-cost-tier">Cost Tier</label>
+                    <input id="agent-cost-tier" type="text" placeholder="medium">
+                    <label for="agent-speed-tier">Speed Tier</label>
+                    <input id="agent-speed-tier" type="text" placeholder="fast">
+                    <label for="agent-auto-accept-mode">Auto Accept Mode</label>
+                    <input id="agent-auto-accept-mode" type="text" placeholder="optional">
+                    <label for="agent-notes">Notes</label>
+                    <textarea id="agent-notes" placeholder="What this model is good at, caveats, preferred tasks..."></textarea>
+                    <label class="checkbox"><input id="agent-supports-resume" type="checkbox">Supports Session Resume</label>
+                    <label class="checkbox"><input id="agent-supports-headless" type="checkbox">Supports Headless</label>
+                    <div class="agent-form-actions">
+                        <button id="agent-new-btn">New</button>
+                        <button id="agent-delete-btn">Delete</button>
+                        <button id="agent-save-btn" class="primary">Save</button>
+                    </div>
+                    <div id="agent-settings-status"></div>
+                </div>
+            </div>
+            <div class="modal-buttons" style="margin-top: 14px;">
+                <button class="btn-cancel" id="agent-settings-close">Close</button>
+            </div>
+        </div>
+    </div>
     <script type="module">
         const state = {
             windows: [],
@@ -728,7 +929,9 @@
             connected: false,
             connectionStatus: 'disconnected',
             reconnectAttempts: 0,
-            reconnectTimer: null
+            reconnectTimer: null,
+            agentConfigs: [],
+            activeAgentID: ''
         };
 
         let ws = null;
@@ -833,6 +1036,38 @@
         function getToken() {
             const params = new URLSearchParams(location.search);
             return params.get('token') || '';
+        }
+
+        function apiURL(path) {
+            const u = new URL(path, window.location.origin);
+            if (token) {
+                u.searchParams.set('token', token);
+            }
+            return u.toString();
+        }
+
+        async function apiFetch(path, options = {}) {
+            const response = await fetch(apiURL(path), {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(options.headers || {})
+                }
+            });
+            if (!response.ok) {
+                let message = `request failed: ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if (body && body.error) {
+                        message = body.error;
+                    }
+                } catch (_) {
+                    // ignore non-json errors
+                }
+                throw new Error(message);
+            }
+            if (response.status === 204) return null;
+            return response.json();
         }
 
         function updateConnectionIndicator() {
@@ -1014,6 +1249,229 @@
                 hideKillModal();
             }
         });
+
+        const agentSettingsModal = document.getElementById('agent-settings-modal');
+        const agentSettingsBtn = document.getElementById('agent-settings-btn');
+        const agentSettingsClose = document.getElementById('agent-settings-close');
+        const agentListEl = document.getElementById('agent-list');
+        const agentStatusEl = document.getElementById('agent-settings-status');
+        const agentNewBtn = document.getElementById('agent-new-btn');
+        const agentDeleteBtn = document.getElementById('agent-delete-btn');
+        const agentSaveBtn = document.getElementById('agent-save-btn');
+        const agentForm = {
+            id: document.getElementById('agent-id'),
+            name: document.getElementById('agent-name'),
+            model: document.getElementById('agent-model'),
+            command: document.getElementById('agent-command'),
+            maxParallelAgents: document.getElementById('agent-max-parallel'),
+            resumeCommand: document.getElementById('agent-resume-command'),
+            headlessCommand: document.getElementById('agent-headless-command'),
+            capabilities: document.getElementById('agent-capabilities'),
+            languages: document.getElementById('agent-languages'),
+            costTier: document.getElementById('agent-cost-tier'),
+            speedTier: document.getElementById('agent-speed-tier'),
+            autoAcceptMode: document.getElementById('agent-auto-accept-mode'),
+            notes: document.getElementById('agent-notes'),
+            supportsSessionResume: document.getElementById('agent-supports-resume'),
+            supportsHeadless: document.getElementById('agent-supports-headless')
+        };
+
+        function parseCSV(raw) {
+            return raw.split(',').map(v => v.trim()).filter(Boolean);
+        }
+
+        function toCSV(values) {
+            return (values || []).join(',');
+        }
+
+        function setAgentStatus(message, isError = false) {
+            agentStatusEl.textContent = message || '';
+            agentStatusEl.style.color = isError ? 'var(--error)' : 'var(--text-secondary)';
+        }
+
+        function renderAgentList() {
+            if (state.agentConfigs.length === 0) {
+                agentListEl.innerHTML = '<div style="padding:12px;color:var(--text-secondary);">No agents configured</div>';
+                return;
+            }
+            agentListEl.innerHTML = state.agentConfigs.map(agent => `
+                <div class="agent-row ${state.activeAgentID === agent.id ? 'active' : ''}" data-agent-id="${escapeHtml(agent.id)}">
+                    <div class="name">${escapeHtml(agent.name || agent.id)}</div>
+                    <div class="meta">${escapeHtml(agent.id)} · ${escapeHtml(agent.command || '')}</div>
+                </div>
+            `).join('');
+            agentListEl.querySelectorAll('.agent-row').forEach(row => {
+                row.addEventListener('click', () => {
+                    const id = row.dataset.agentId;
+                    const agent = state.agentConfigs.find(a => a.id === id);
+                    if (!agent) return;
+                    fillAgentForm(agent);
+                    state.activeAgentID = id;
+                    renderAgentList();
+                    setAgentStatus('');
+                });
+            });
+        }
+
+        function fillAgentForm(agent) {
+            agentForm.id.value = agent.id || '';
+            agentForm.name.value = agent.name || '';
+            agentForm.model.value = agent.model || '';
+            agentForm.command.value = agent.command || '';
+            agentForm.maxParallelAgents.value = String(agent.max_parallel_agents || 1);
+            agentForm.resumeCommand.value = agent.resume_command || '';
+            agentForm.headlessCommand.value = agent.headless_command || '';
+            agentForm.capabilities.value = toCSV(agent.capabilities);
+            agentForm.languages.value = toCSV(agent.languages);
+            agentForm.costTier.value = agent.cost_tier || '';
+            agentForm.speedTier.value = agent.speed_tier || '';
+            agentForm.autoAcceptMode.value = agent.auto_accept_mode || '';
+            agentForm.notes.value = agent.notes || '';
+            agentForm.supportsSessionResume.checked = !!agent.supports_session_resume;
+            agentForm.supportsHeadless.checked = !!agent.supports_headless;
+            agentForm.id.disabled = true;
+        }
+
+        function clearAgentForm() {
+            state.activeAgentID = '';
+            agentForm.id.value = '';
+            agentForm.name.value = '';
+            agentForm.model.value = '';
+            agentForm.command.value = '';
+            agentForm.maxParallelAgents.value = '1';
+            agentForm.resumeCommand.value = '';
+            agentForm.headlessCommand.value = '';
+            agentForm.capabilities.value = '';
+            agentForm.languages.value = '';
+            agentForm.costTier.value = '';
+            agentForm.speedTier.value = '';
+            agentForm.autoAcceptMode.value = '';
+            agentForm.notes.value = '';
+            agentForm.supportsSessionResume.checked = false;
+            agentForm.supportsHeadless.checked = false;
+            agentForm.id.disabled = false;
+            renderAgentList();
+        }
+
+        function collectAgentForm() {
+            const parsedParallel = Number.parseInt(agentForm.maxParallelAgents.value.trim(), 10);
+            return {
+                id: agentForm.id.value.trim(),
+                name: agentForm.name.value.trim(),
+                model: agentForm.model.value.trim(),
+                command: agentForm.command.value.trim(),
+                max_parallel_agents: Number.isFinite(parsedParallel) && parsedParallel > 0 ? parsedParallel : 1,
+                resume_command: agentForm.resumeCommand.value.trim(),
+                headless_command: agentForm.headlessCommand.value.trim(),
+                capabilities: parseCSV(agentForm.capabilities.value),
+                languages: parseCSV(agentForm.languages.value),
+                cost_tier: agentForm.costTier.value.trim(),
+                speed_tier: agentForm.speedTier.value.trim(),
+                auto_accept_mode: agentForm.autoAcceptMode.value.trim(),
+                notes: agentForm.notes.value.trim(),
+                supports_session_resume: agentForm.supportsSessionResume.checked,
+                supports_headless: agentForm.supportsHeadless.checked
+            };
+        }
+
+        async function loadAgentConfigs() {
+            const data = await apiFetch('/api/agents');
+            state.agentConfigs = Array.isArray(data) ? data : [];
+            state.agentConfigs.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+            if (state.activeAgentID && !state.agentConfigs.some(a => a.id === state.activeAgentID)) {
+                state.activeAgentID = '';
+            }
+            renderAgentList();
+            if (!state.activeAgentID && state.agentConfigs.length > 0) {
+                state.activeAgentID = state.agentConfigs[0].id;
+                fillAgentForm(state.agentConfigs[0]);
+                renderAgentList();
+            }
+        }
+
+        async function openAgentSettings() {
+            agentSettingsModal.style.display = 'flex';
+            setAgentStatus('Loading...');
+            try {
+                await loadAgentConfigs();
+                if (state.agentConfigs.length === 0) {
+                    clearAgentForm();
+                }
+                setAgentStatus('');
+            } catch (err) {
+                setAgentStatus(err.message, true);
+            }
+        }
+
+        function closeAgentSettings() {
+            agentSettingsModal.style.display = 'none';
+            setAgentStatus('');
+        }
+
+        async function saveAgentConfig() {
+            const payload = collectAgentForm();
+            if (!payload.id || !payload.name || !payload.model || !payload.command) {
+                setAgentStatus('id, name, model, and command are required', true);
+                return;
+            }
+            try {
+                if (state.activeAgentID) {
+                    await apiFetch(`/api/agents/${encodeURIComponent(state.activeAgentID)}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    await apiFetch('/api/agents', {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                    });
+                    state.activeAgentID = payload.id;
+                }
+                await loadAgentConfigs();
+                const selected = state.agentConfigs.find(a => a.id === state.activeAgentID);
+                if (selected) {
+                    fillAgentForm(selected);
+                }
+                setAgentStatus('Saved');
+            } catch (err) {
+                setAgentStatus(err.message, true);
+            }
+        }
+
+        async function deleteAgentConfig() {
+            if (!state.activeAgentID) {
+                setAgentStatus('Select an agent to delete', true);
+                return;
+            }
+            if (!confirm(`Delete agent '${state.activeAgentID}'?`)) {
+                return;
+            }
+            try {
+                await apiFetch(`/api/agents/${encodeURIComponent(state.activeAgentID)}`, { method: 'DELETE' });
+                clearAgentForm();
+                await loadAgentConfigs();
+                if (state.agentConfigs.length === 0) {
+                    clearAgentForm();
+                }
+                setAgentStatus('Deleted');
+            } catch (err) {
+                setAgentStatus(err.message, true);
+            }
+        }
+
+        agentSettingsBtn.addEventListener('click', openAgentSettings);
+        agentSettingsClose.addEventListener('click', closeAgentSettings);
+        agentSettingsModal.addEventListener('click', (e) => {
+            if (e.target === agentSettingsModal) {
+                closeAgentSettings();
+            }
+        });
+        agentNewBtn.addEventListener('click', () => {
+            clearAgentForm();
+            setAgentStatus('Creating new agent');
+        });
+        agentSaveBtn.addEventListener('click', saveAgentConfig);
+        agentDeleteBtn.addEventListener('click', deleteAgentConfig);
 
         function getViewMode(windowId) {
             if (!windowId) return 'stream';

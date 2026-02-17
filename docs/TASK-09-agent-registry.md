@@ -88,11 +88,11 @@ If `~/.config/agenterm/agents/` is empty, create default YAML files for:
 - Test reload after file changes
 
 ## Acceptance Criteria
-- [ ] YAML agent configs loaded from configurable directory
-- [ ] Default configs created on first run
-- [ ] API CRUD for agent configs
-- [ ] Validation: id, name, command are required
-- [ ] Thread-safe access to registry
+- [x] YAML agent configs loaded from configurable directory
+- [x] Default configs created on first run
+- [x] API CRUD for agent configs
+- [x] Validation: id, name, command are required
+- [x] Thread-safe access to registry
 
 ## Notes
 - Use `gopkg.in/yaml.v3` for YAML parsing

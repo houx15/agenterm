@@ -17,6 +17,7 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/parser"
+	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
 	"github.com/user/agenterm/internal/tmux"
 )
@@ -299,6 +300,12 @@ func main() {
 		}
 	}()
 
+	agentRegistry, err := registry.NewRegistry(cfg.AgentsDir)
+	if err != nil {
+		slog.Error("failed to initialize agent registry", "dir", cfg.AgentsDir, "error", err)
+		os.Exit(1)
+	}
+
 	manager := tmux.NewManager(cfg.DefaultDir)
 	h := hub.New(cfg.Token, nil)
 	state := newRuntimeState(cfg, manager, h)
@@ -363,7 +370,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, h, cfg.Token, cfg.TmuxSession)
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, h, cfg.Token, cfg.TmuxSession, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

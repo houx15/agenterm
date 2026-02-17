@@ -10,7 +10,7 @@ func TestLoadFromFileParsesDBPath(t *testing.T) {
 	cfg := &Config{}
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "config")
 
-	content := "Port=9999\nTmuxSession=ai\nToken=test-token\nDefaultDir=/tmp/work\nDBPath=/tmp/custom/agenterm.db\n"
+	content := "Port=9999\nTmuxSession=ai\nToken=test-token\nDefaultDir=/tmp/work\nDBPath=/tmp/custom/agenterm.db\nAgentsDir=/tmp/custom/agents\n"
 	if err := os.WriteFile(cfg.ConfigPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config file error = %v", err)
 	}
@@ -21,5 +21,8 @@ func TestLoadFromFileParsesDBPath(t *testing.T) {
 
 	if cfg.DBPath != "/tmp/custom/agenterm.db" {
 		t.Fatalf("DBPath = %q, want /tmp/custom/agenterm.db", cfg.DBPath)
+	}
+	if cfg.AgentsDir != "/tmp/custom/agents" {
+		t.Fatalf("AgentsDir = %q, want /tmp/custom/agents", cfg.AgentsDir)
 	}
 }

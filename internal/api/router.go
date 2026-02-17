@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
+	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -40,7 +39,7 @@ type handler struct {
 	taskRepo     *db.TaskRepo
 	worktreeRepo *db.WorktreeRepo
 	sessionRepo  *db.SessionRepo
-	agentRepo    *db.AgentConfigRepo
+	registry     *registry.Registry
 	gw           gateway
 	manager      sessionManager
 	hub          *hub.Hub
@@ -50,13 +49,13 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hub, token string, tmuxSession string) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hub, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
 	handler := &handler{
 		projectRepo:  db.NewProjectRepo(conn),
 		taskRepo:     db.NewTaskRepo(conn),
 		worktreeRepo: db.NewWorktreeRepo(conn),
 		sessionRepo:  db.NewSessionRepo(conn),
-		agentRepo:    db.NewAgentConfigRepo(conn),
+		registry:     agentRegistry,
 		gw:           gw,
 		manager:      manager,
 		hub:          hubInst,
@@ -91,6 +90,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hu
 
 	mux.HandleFunc("GET /api/agents", handler.listAgents)
 	mux.HandleFunc("GET /api/agents/{id}", handler.getAgent)
+	mux.HandleFunc("POST /api/agents", handler.createAgent)
+	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)
+	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
 
 	wrapped := authMiddleware(token)(jsonMiddleware(corsMiddleware(mux)))
 	return wrapped
@@ -158,12 +160,4 @@ func decodeJSON(r *http.Request, dst any) error {
 		return io.ErrUnexpectedEOF
 	}
 	return nil
-}
-
-func defaultAgentsDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "agenterm", "agents")
 }

@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -63,7 +64,11 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return NewRouter(database.SQL(), gw, nil, nil, "test-token", "configured-session"), database
+	agentRegistry, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	return NewRouter(database.SQL(), gw, nil, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
@@ -73,7 +78,11 @@ func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return NewRouter(database.SQL(), gw, manager, nil, "test-token", "configured-session"), database
+	agentRegistry, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	return NewRouter(database.SQL(), gw, manager, nil, "test-token", "configured-session", agentRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -446,6 +455,52 @@ func TestSessionAndAgentNotFoundErrors(t *testing.T) {
 	}
 	if got := apiRequest(t, h, http.MethodGet, "/api/agents/missing", nil, true).Code; got != http.StatusNotFound {
 		t.Fatalf("agent not found status=%d", got)
+	}
+}
+
+func TestAgentRegistryCRUDEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+
+	create := apiRequest(t, h, http.MethodPost, "/api/agents", map[string]any{
+		"id":                  "custom-agent",
+		"name":                "Custom Agent",
+		"model":               "qwen3-coder",
+		"command":             "custom run",
+		"max_parallel_agents": 3,
+		"notes":               "good at fast iteration",
+	}, true)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create agent status=%d body=%s", create.Code, create.Body.String())
+	}
+
+	get := apiRequest(t, h, http.MethodGet, "/api/agents/custom-agent", nil, true)
+	if get.Code != http.StatusOK {
+		t.Fatalf("get agent status=%d body=%s", get.Code, get.Body.String())
+	}
+	var got map[string]any
+	decodeBody(t, get, &got)
+	if got["model"] != "qwen3-coder" {
+		t.Fatalf("model=%v want qwen3-coder", got["model"])
+	}
+
+	update := apiRequest(t, h, http.MethodPut, "/api/agents/custom-agent", map[string]any{
+		"name":                "Custom Agent Updated",
+		"model":               "glm5",
+		"command":             "custom run",
+		"max_parallel_agents": 4,
+	}, true)
+	if update.Code != http.StatusOK {
+		t.Fatalf("update agent status=%d body=%s", update.Code, update.Body.String())
+	}
+
+	del := apiRequest(t, h, http.MethodDelete, "/api/agents/custom-agent", nil, true)
+	if del.Code != http.StatusNoContent {
+		t.Fatalf("delete agent status=%d body=%s", del.Code, del.Body.String())
+	}
+
+	getMissing := apiRequest(t, h, http.MethodGet, "/api/agents/custom-agent", nil, true)
+	if getMissing.Code != http.StatusNotFound {
+		t.Fatalf("get deleted status=%d body=%s", getMissing.Code, getMissing.Body.String())
 	}
 }
 

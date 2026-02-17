@@ -1,0 +1,21 @@
+id: gemini-cli
+name: Gemini CLI
+model: gemini
+command: gemini
+max_parallel_agents: 2
+resume_command: gemini --resume
+headless_command: gemini --prompt
+capabilities:
+  - coding
+  - review
+  - multimodal
+languages:
+  - go
+  - javascript
+  - python
+cost_tier: medium
+speed_tier: medium
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: optional
+notes: useful for multimodal and fast prototyping tasks

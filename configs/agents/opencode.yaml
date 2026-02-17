@@ -1,0 +1,21 @@
+id: opencode
+name: OpenCode
+model: glm5
+command: opencode
+max_parallel_agents: 4
+resume_command: opencode resume
+headless_command: opencode run --yes
+capabilities:
+  - coding
+  - review
+  - orchestration
+languages:
+  - go
+  - typescript
+  - python
+cost_tier: low
+speed_tier: fast
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: supported
+notes: change model to glm5, minimax, ark-latest-code, or qwen3-coder
