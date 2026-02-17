@@ -1,18 +1,16 @@
 package api
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/user/agenterm/internal/db"
+	gitops "github.com/user/agenterm/internal/git"
 )
 
 var branchSegmentRe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -21,19 +19,6 @@ type createWorktreeRequest struct {
 	BranchName string `json:"branch_name"`
 	Path       string `json:"path"`
 	TaskID     string `json:"task_id"`
-}
-
-type gitStatusResponse struct {
-	Modified  []string `json:"modified"`
-	Added     []string `json:"added"`
-	Deleted   []string `json:"deleted"`
-	Untracked []string `json:"untracked"`
-	Clean     bool     `json:"clean"`
-}
-
-type gitCommit struct {
-	Hash    string `json:"hash"`
-	Message string `json:"message"`
 }
 
 func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +39,12 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	repoRoot, err := gitops.GetRepoRoot(project.RepoPath)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid project repo_path")
+		return
+	}
+
 	slug := sanitizeBranchSegment(req.TaskID)
 	if slug == "" {
 		slug = "task"
@@ -69,18 +60,18 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	worktreePath := req.Path
-	repoRoot, err := filepath.Abs(project.RepoPath)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid project repo_path")
-		return
-	}
 	if worktreePath == "" {
 		worktreePath = filepath.Join(repoRoot, ".worktrees", slug)
 	}
 	if !filepath.IsAbs(worktreePath) {
 		worktreePath = filepath.Join(repoRoot, worktreePath)
 	}
-	worktreePath = filepath.Clean(worktreePath)
+	absWorktreePath, err := filepath.Abs(worktreePath)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid worktree path")
+		return
+	}
+	worktreePath = filepath.Clean(absWorktreePath)
 	if !pathWithinBase(repoRoot, worktreePath) {
 		jsonError(w, http.StatusBadRequest, "worktree path must be inside project repo")
 		return
@@ -90,7 +81,7 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := runGit(repoRoot, "worktree", "add", worktreePath, "-b", branchName); err != nil {
+	if err := gitops.CreateWorktree(repoRoot, worktreePath, branchName); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -119,6 +110,8 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 }
 
 func pathWithinBase(base string, target string) bool {
+	base = canonicalPathForCompare(base)
+	target = canonicalPathForCompare(target)
 	rel, err := filepath.Rel(base, target)
 	if err != nil {
 		return false
@@ -130,17 +123,38 @@ func pathWithinBase(base string, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+func canonicalPathForCompare(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	ancestor := path
+	suffix := make([]string, 0, 4)
+	for {
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		suffix = append([]string{filepath.Base(ancestor)}, suffix...)
+		ancestor = parent
+		if resolved, err := filepath.EvalSymlinks(ancestor); err == nil {
+			parts := append([]string{filepath.Clean(resolved)}, suffix...)
+			return filepath.Join(parts...)
+		}
+	}
+	return path
+}
+
 func (h *handler) getWorktreeGitStatus(w http.ResponseWriter, r *http.Request) {
 	worktree, ok := h.mustGetWorktree(w, r)
 	if !ok {
 		return
 	}
-	out, err := runGitOutput(worktree.Path, "-C", worktree.Path, "status", "--porcelain")
+	status, err := gitops.GetStatus(worktree.Path)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	status := parseGitStatus(out)
 	jsonResponse(w, http.StatusOK, status)
 }
 
@@ -161,12 +175,11 @@ func (h *handler) getWorktreeGitLog(w http.ResponseWriter, r *http.Request) {
 		}
 		count = n
 	}
-	out, err := runGitOutput(worktree.Path, "-C", worktree.Path, "log", "--oneline", "-n", strconv.Itoa(count))
+	commits, err := gitops.GetLog(worktree.Path, count)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	commits := parseGitLog(out)
 	jsonResponse(w, http.StatusOK, commits)
 }
 
@@ -184,7 +197,7 @@ func (h *handler) deleteWorktree(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "project for worktree not found")
 		return
 	}
-	if err := runGit(project.RepoPath, "-C", project.RepoPath, "worktree", "remove", worktree.Path); err != nil {
+	if err := gitops.RemoveWorktree(project.RepoPath, worktree.Path); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -227,67 +240,4 @@ func sanitizeBranchName(v string) string {
 		}
 	}
 	return strings.Join(clean, "/")
-}
-
-func runGit(dir string, args ...string) error {
-	_, err := runGitOutput(dir, args...)
-	return err
-}
-
-func runGitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if stderr.Len() > 0 {
-			return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
-		}
-		return "", fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
-	}
-	return string(out), nil
-}
-
-func parseGitStatus(output string) gitStatusResponse {
-	status := gitStatusResponse{}
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) < 3 {
-			continue
-		}
-		code := line[:2]
-		file := strings.TrimSpace(line[3:])
-		switch {
-		case strings.HasPrefix(code, "??"):
-			status.Untracked = append(status.Untracked, file)
-		case strings.Contains(code, "A"):
-			status.Added = append(status.Added, file)
-		case strings.Contains(code, "D"):
-			status.Deleted = append(status.Deleted, file)
-		default:
-			status.Modified = append(status.Modified, file)
-		}
-	}
-	status.Clean = len(status.Modified) == 0 && len(status.Added) == 0 && len(status.Deleted) == 0 && len(status.Untracked) == 0
-	return status
-}
-
-func parseGitLog(output string) []gitCommit {
-	commits := make([]gitCommit, 0)
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, " ", 2)
-		entry := gitCommit{Hash: parts[0]}
-		if len(parts) > 1 {
-			entry.Message = parts[1]
-		}
-		commits = append(commits, entry)
-	}
-	return commits
 }

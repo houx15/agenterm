@@ -108,12 +108,12 @@ Branch naming: `feature/{task-slug}`
 - Test error handling (repo doesn't exist, branch already exists)
 
 ## Acceptance Criteria
-- [ ] Worktrees created with correct branch and path
-- [ ] Git status returns structured data (not raw text)
-- [ ] Git log returns structured commit list
-- [ ] Worktree removal cleans up both filesystem and DB
-- [ ] All git commands sanitize input to prevent injection
-- [ ] Works with repos that have existing worktrees
+- [x] Worktrees created with correct branch and path
+- [x] Git status returns structured data (not raw text)
+- [x] Git log returns structured commit list
+- [x] Worktree removal cleans up both filesystem and DB
+- [x] All git commands sanitize input to prevent injection
+- [x] Works with repos that have existing worktrees
 
 ## Notes
 - ALWAYS sanitize branch names and paths before passing to git commands
