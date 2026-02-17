@@ -115,13 +115,13 @@ Add to session monitor:
 - Check if agent process has exited (tmux window closed)
 
 ## Acceptance Criteria
-- [ ] Auto-commit runs periodically for active worktrees
-- [ ] Claude Code hooks injected on session creation
-- [ ] Coordinator detects review-ready commits and sends to reviewer
-- [ ] Reviewer feedback relayed back to coder
-- [ ] Human takeover pauses all automation for the session
-- [ ] Returning control resumes automation
-- [ ] Completion detection works with marker files and git commits
+- [x] Auto-commit runs periodically for active worktrees
+- [x] Claude Code hooks injected on session creation
+- [x] Coordinator detects review-ready commits and sends to reviewer
+- [x] Reviewer feedback relayed back to coder
+- [x] Human takeover pauses all automation for the session
+- [x] Returning control resumes automation
+- [x] Completion detection works with marker files and git commits
 
 ## Notes
 - Auto-commit should NOT commit if there's a merge conflict

@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/user/agenterm/internal/api"
+	"github.com/user/agenterm/internal/automation"
 	"github.com/user/agenterm/internal/config"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
@@ -394,6 +395,89 @@ func main() {
 	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
 	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
 	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
+
+	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
+		Interval:     30 * time.Second,
+		WorktreeRepo: worktreeRepo,
+	})
+	coordinator := automation.NewCoordinator(automation.CoordinatorConfig{
+		SessionRepo:   sessionRepo,
+		TaskRepo:      taskRepo,
+		WorktreeRepo:  worktreeRepo,
+		ProjectRepo:   projectRepo,
+		PollInterval:  2 * time.Second,
+		MaxIterations: 3,
+		SendCommand: func(callCtx context.Context, sessionID string, text string) error {
+			if lifecycleManager == nil {
+				return fmt.Errorf("session manager unavailable")
+			}
+			return lifecycleManager.SendCommand(callCtx, sessionID, text)
+		},
+		GetOutputSince: func(callCtx context.Context, sessionID string, since time.Time) ([]automation.OutputEntry, error) {
+			if lifecycleManager == nil {
+				return nil, fmt.Errorf("session manager unavailable")
+			}
+			out, err := lifecycleManager.GetOutput(callCtx, sessionID, since)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]automation.OutputEntry, 0, len(out))
+			for _, entry := range out {
+				result = append(result, automation.OutputEntry{Text: entry.Text, Timestamp: entry.Timestamp})
+			}
+			return result, nil
+		},
+	})
+
+	resolveSessionWorktree := func(callCtx context.Context, sessionID string) string {
+		if sessionID == "" {
+			return ""
+		}
+		sess, err := sessionRepo.Get(callCtx, sessionID)
+		if err != nil || sess == nil || sess.TaskID == "" {
+			return ""
+		}
+		task, err := taskRepo.Get(callCtx, sess.TaskID)
+		if err != nil || task == nil {
+			return ""
+		}
+		return strings.TrimSpace(task.WorktreeID)
+	}
+
+	h.SetOnTerminalAttach(func(sessionID string) {
+		if strings.TrimSpace(sessionID) == "" {
+			return
+		}
+		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if lifecycleManager != nil {
+			if err := lifecycleManager.SetTakeover(callCtx, sessionID, true); err != nil {
+				slog.Debug("failed to set human takeover", "session", sessionID, "error", err)
+			}
+		}
+		coordinator.SetSessionPaused(sessionID, true)
+		if worktreeID := resolveSessionWorktree(callCtx, sessionID); worktreeID != "" {
+			autoCommitter.SetWorktreePaused(worktreeID, true)
+		}
+	})
+
+	h.SetOnTerminalDetach(func(sessionID string) {
+		if strings.TrimSpace(sessionID) == "" {
+			return
+		}
+		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if lifecycleManager != nil {
+			if err := lifecycleManager.SetTakeover(callCtx, sessionID, false); err != nil {
+				slog.Debug("failed to clear human takeover", "session", sessionID, "error", err)
+			}
+		}
+		coordinator.SetSessionPaused(sessionID, false)
+		if worktreeID := resolveSessionWorktree(callCtx, sessionID); worktreeID != "" {
+			autoCommitter.SetWorktreePaused(worktreeID, false)
+		}
+	})
+
 	if projects, err := projectRepo.List(ctx, db.ProjectFilter{}); err == nil {
 		for _, p := range projects {
 			if p == nil {
@@ -448,7 +532,21 @@ func main() {
 	eventTrigger.SetOnEvent(func(projectID string, event string, data map[string]any) {
 		h.BroadcastProjectEvent(projectID, event, data)
 	})
+	autoCommitter.SetOnReadyForReview(func(worktreeID string, commitHash string) {
+		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		wt, err := worktreeRepo.Get(callCtx, worktreeID)
+		if err != nil || wt == nil {
+			return
+		}
+		h.BroadcastProjectEvent(wt.ProjectID, "worktree_auto_commit", map[string]any{
+			"worktree_id": worktreeID,
+			"commit_hash": commitHash,
+		})
+	})
 	go eventTrigger.Start(ctx, 15*time.Second)
+	go autoCommitter.Run(ctx)
+	go coordinator.Run(ctx)
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()

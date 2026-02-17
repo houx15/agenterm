@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/user/agenterm/internal/automation"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/registry"
@@ -178,6 +179,11 @@ func (sm *Manager) CreateSession(ctx context.Context, req CreateSessionRequest) 
 	workDir, err := sm.resolveWorkDir(ctx, task, project)
 	if err != nil {
 		return nil, err
+	}
+	if strings.EqualFold(strings.TrimSpace(req.AgentType), "claude-code") {
+		if err := automation.EnsureClaudeCodeAutomation(workDir); err != nil {
+			return nil, fmt.Errorf("inject claude automation hooks: %w", err)
+		}
 	}
 
 	sessionName, gw, err := sm.createTmuxSession(project.Name, task.Title, req.Role, workDir)

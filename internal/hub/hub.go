@@ -32,6 +32,8 @@ type Hub struct {
 	onNewSessionByID func(sessionID string, name string)
 	onKillWindow     func(windowID string)
 	onKillBySession  func(sessionID string, windowID string)
+	onTerminalAttach func(sessionID string)
+	onTerminalDetach func(sessionID string)
 	onOrchestrator   func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)
 	token            string
 	defaultDir       string
@@ -404,6 +406,18 @@ func (h *Hub) handleKillWindow(sessionID string, windowID string) {
 	}
 }
 
+func (h *Hub) handleTerminalAttach(sessionID string) {
+	if h.onTerminalAttach != nil {
+		h.onTerminalAttach(sessionID)
+	}
+}
+
+func (h *Hub) handleTerminalDetach(sessionID string) {
+	if h.onTerminalDetach != nil {
+		h.onTerminalDetach(sessionID)
+	}
+}
+
 func (h *Hub) SetOnNewWindow(fn func(name string)) {
 	h.onNewWindow = fn
 }
@@ -450,6 +464,14 @@ func (h *Hub) SetOnKillWindowWithSession(fn func(sessionID string, windowID stri
 
 func (h *Hub) SetOnOrchestratorChat(fn func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)) {
 	h.onOrchestrator = fn
+}
+
+func (h *Hub) SetOnTerminalAttach(fn func(sessionID string)) {
+	h.onTerminalAttach = fn
+}
+
+func (h *Hub) SetOnTerminalDetach(fn func(sessionID string)) {
+	h.onTerminalDetach = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

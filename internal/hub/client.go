@@ -19,6 +19,7 @@ type Client struct {
 	subMu         sync.RWMutex
 	subscribeAll  bool
 	subscriptions map[string]struct{}
+	attached      map[string]struct{}
 }
 
 func newClient(conn *websocket.Conn, hub *Hub) *Client {
@@ -29,11 +30,13 @@ func newClient(conn *websocket.Conn, hub *Hub) *Client {
 		hub:           hub,
 		subscribeAll:  true,
 		subscriptions: make(map[string]struct{}),
+		attached:      make(map[string]struct{}),
 	}
 }
 
 func (c *Client) readPump(ctx context.Context) {
 	defer func() {
+		c.detachAll()
 		c.hub.unregisterClient(c)
 		c.conn.Close(websocket.StatusNormalClosure, "")
 	}()
@@ -87,12 +90,20 @@ func (c *Client) subscribe(sessionID string) {
 	c.subMu.Lock()
 	defer c.subMu.Unlock()
 	if sessionID == "" {
+		for id := range c.attached {
+			c.hub.handleTerminalDetach(id)
+		}
+		c.attached = make(map[string]struct{})
 		c.subscribeAll = true
 		c.subscriptions = make(map[string]struct{})
 		return
 	}
 	c.subscribeAll = false
 	c.subscriptions[sessionID] = struct{}{}
+	if _, ok := c.attached[sessionID]; !ok {
+		c.attached[sessionID] = struct{}{}
+		c.hub.handleTerminalAttach(sessionID)
+	}
 }
 
 func (c *Client) wantsSession(sessionID string) bool {
@@ -137,6 +148,15 @@ func (c *Client) writePump(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (c *Client) detachAll() {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	for sessionID := range c.attached {
+		c.hub.handleTerminalDetach(sessionID)
+	}
+	c.attached = make(map[string]struct{})
 }
 
 func generateID() string {
