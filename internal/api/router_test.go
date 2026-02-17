@@ -21,9 +21,13 @@ type fakeGateway struct {
 	nextID         int
 	newWindowCalls int
 	sentRaw        []string
+	failNewWindow  bool
 }
 
 func (f *fakeGateway) NewWindow(name, defaultDir string) error {
+	if f.failNewWindow {
+		return errFakeGateway
+	}
 	f.newWindowCalls++
 	f.nextID++
 	f.windows = append(f.windows, tmux.Window{ID: "@" + strconv.Itoa(f.nextID), Name: name})
@@ -45,6 +49,12 @@ func (f *fakeGateway) SendRaw(windowID string, keys string) error {
 	return nil
 }
 
+var errFakeGateway = &fakeGatewayError{"new window failed"}
+
+type fakeGatewayError struct{ msg string }
+
+func (e *fakeGatewayError) Error() string { return e.msg }
+
 func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	t.Helper()
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
@@ -52,7 +62,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return NewRouter(database.SQL(), gw, nil, "test-token"), database
+	return NewRouter(database.SQL(), gw, nil, "test-token", "configured-session"), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -94,6 +104,13 @@ func TestAuthMiddleware(t *testing.T) {
 	unauth := apiRequest(t, h, http.MethodGet, "/api/projects", nil, false)
 	if unauth.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d want %d", unauth.Code, http.StatusUnauthorized)
+	}
+	wrong := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	wrong.Header.Set("Authorization", "Bearer wrong-token")
+	wrongRR := httptest.NewRecorder()
+	h.ServeHTTP(wrongRR, wrong)
+	if wrongRR.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token status=%d want %d", wrongRR.Code, http.StatusUnauthorized)
 	}
 	auth := apiRequest(t, h, http.MethodGet, "/api/projects", nil, true)
 	if auth.Code != http.StatusOK {
@@ -184,6 +201,9 @@ func TestSessionCreationCreatesTmuxWindow(t *testing.T) {
 	if session["tmux_window_id"] == "" {
 		t.Fatalf("expected tmux_window_id in response: %v", session)
 	}
+	if session["tmux_session_name"] != "configured-session" {
+		t.Fatalf("tmux_session_name=%v want configured-session", session["tmux_session_name"])
+	}
 }
 
 func TestWorktreeGitEndpoints(t *testing.T) {
@@ -225,6 +245,121 @@ func TestWorktreeGitEndpoints(t *testing.T) {
 	del := apiRequest(t, h, http.MethodDelete, "/api/worktrees/"+worktreeID, nil, true)
 	if del.Code != http.StatusNoContent {
 		t.Fatalf("delete worktree code=%d body=%s", del.Code, del.Body.String())
+	}
+}
+
+func TestWorktreeRejectsPathOutsideProjectRepo(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	repo := initGitRepo(t)
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "Repo", "repo_path": repo,
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	outside := filepath.Join(t.TempDir(), "outside-worktree")
+	createWT := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/worktrees", map[string]any{
+		"branch_name": "feature/outside",
+		"path":        outside,
+	}, true)
+	if createWT.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", createWT.Code, createWT.Body.String())
+	}
+}
+
+func TestSessionCreateRollsBackWhenTmuxWindowFails(t *testing.T) {
+	gw := &fakeGateway{failNewWindow: true}
+	h, _ := openAPI(t, gw)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+	list := apiRequest(t, h, http.MethodGet, "/api/sessions?task_id="+taskID, nil, true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d", list.Code)
+	}
+	var sessions []map[string]any
+	decodeBody(t, list, &sessions)
+	if len(sessions) != 0 {
+		t.Fatalf("expected no persisted sessions after failure, got %d", len(sessions))
+	}
+}
+
+func TestSessionOutputSinceFiltering(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+
+	origCapture := capturePaneFn
+	defer func() { capturePaneFn = origCapture }()
+	capturePaneFn = func(windowID string, lines int) ([]string, error) {
+		return []string{"line-a", "line-b"}, nil
+	}
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+	sessionID := session["id"].(string)
+
+	first := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/output?lines=10", nil, true)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first output status=%d body=%s", first.Code, first.Body.String())
+	}
+	var lines []map[string]any
+	decodeBody(t, first, &lines)
+	if len(lines) != 2 {
+		t.Fatalf("len(lines)=%d want 2", len(lines))
+	}
+	lastTS := lines[len(lines)-1]["timestamp"].(string)
+
+	second := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/output?since="+lastTS+"&lines=10", nil, true)
+	if second.Code != http.StatusOK {
+		t.Fatalf("second output status=%d body=%s", second.Code, second.Body.String())
+	}
+	var lines2 []map[string]any
+	decodeBody(t, second, &lines2)
+	if len(lines2) != 1 {
+		t.Fatalf("len(lines2)=%d want 1", len(lines2))
+	}
+}
+
+func TestSessionAndAgentNotFoundErrors(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	if got := apiRequest(t, h, http.MethodGet, "/api/sessions/missing", nil, true).Code; got != http.StatusNotFound {
+		t.Fatalf("session not found status=%d", got)
+	}
+	if got := apiRequest(t, h, http.MethodGet, "/api/agents/missing", nil, true).Code; got != http.StatusNotFound {
+		t.Fatalf("agent not found status=%d", got)
 	}
 }
 

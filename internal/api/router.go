@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
@@ -29,9 +30,13 @@ type handler struct {
 	agentRepo    *db.AgentConfigRepo
 	gw           gateway
 	hub          *hub.Hub
+	tmuxSession  string
+
+	outputMu    sync.Mutex
+	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, hubInst *hub.Hub, token string) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, hubInst *hub.Hub, token string, tmuxSession string) http.Handler {
 	handler := &handler{
 		projectRepo:  db.NewProjectRepo(conn),
 		taskRepo:     db.NewTaskRepo(conn),
@@ -40,6 +45,8 @@ func NewRouter(conn *sql.DB, gw gateway, hubInst *hub.Hub, token string) http.Ha
 		agentRepo:    db.NewAgentConfigRepo(conn),
 		gw:           gw,
 		hub:          hubInst,
+		tmuxSession:  tmuxSession,
+		outputState:  make(map[string]*windowOutputState),
 	}
 
 	mux := http.NewServeMux()

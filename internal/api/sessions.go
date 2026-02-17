@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,15 @@ type sessionOutputLine struct {
 	Text      string    `json:"text"`
 	Timestamp time.Time `json:"timestamp"`
 }
+
+type windowOutputState struct {
+	snapshot []string
+	entries  []sessionOutputLine
+}
+
+var capturePaneFn = capturePane
+
+const maxSessionOutputEntries = 5000
 
 func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
@@ -76,7 +86,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 
 	session := &db.Session{
 		TaskID:          taskID,
-		TmuxSessionName: "agenterm",
+		TmuxSessionName: h.tmuxSessionName(),
 		AgentType:       req.AgentType,
 		Role:            req.Role,
 		Status:          "running",
@@ -90,6 +100,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 	windowName := "session-" + session.ID[:8]
 	before := h.gw.ListWindows()
 	if err := h.gw.NewWindow(windowName, workingDir); err != nil {
+		_ = h.sessionRepo.Delete(r.Context(), session.ID)
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -97,6 +108,11 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 	windowID := findWindowID(before, after, windowName)
 	if windowID == "" {
 		windowID = findWindowID(nil, after, windowName)
+	}
+	if windowID == "" {
+		_ = h.sessionRepo.Delete(r.Context(), session.ID)
+		jsonError(w, http.StatusInternalServerError, "failed to resolve tmux window id")
+		return
 	}
 	session.TmuxWindowID = windowID
 	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
@@ -233,25 +249,13 @@ func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := capturePane(session.TmuxWindowID, lines)
+	out, err := capturePaneFn(session.TmuxWindowID, lines)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	now := time.Now().UTC()
-	if !since.IsZero() && since.After(now) {
-		jsonResponse(w, http.StatusOK, []sessionOutputLine{})
-		return
-	}
-
-	result := make([]sessionOutputLine, 0, len(out))
-	for _, line := range out {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		result = append(result, sessionOutputLine{Text: line, Timestamp: now})
-	}
+	result := h.recordAndReadSessionOutput(session.TmuxWindowID, out, since, lines)
 	jsonResponse(w, http.StatusOK, result)
 }
 
@@ -356,4 +360,66 @@ func shellQuotePath(path string) string {
 		return strconv.Quote(path)
 	}
 	return path
+}
+
+func (h *handler) tmuxSessionName() string {
+	if h.tmuxSession != "" {
+		return h.tmuxSession
+	}
+	return "agenterm"
+}
+
+func (h *handler) recordAndReadSessionOutput(windowID string, captured []string, since time.Time, lines int) []sessionOutputLine {
+	filteredSnapshot := make([]string, 0, len(captured))
+	for _, line := range captured {
+		if strings.TrimSpace(line) != "" {
+			filteredSnapshot = append(filteredSnapshot, line)
+		}
+	}
+
+	h.outputMu.Lock()
+	defer h.outputMu.Unlock()
+
+	state, ok := h.outputState[windowID]
+	if !ok {
+		state = &windowOutputState{}
+		h.outputState[windowID] = state
+	}
+
+	newLines := diffNewLines(state.snapshot, filteredSnapshot)
+	baseTime := time.Now().UTC()
+	for i, line := range newLines {
+		state.entries = append(state.entries, sessionOutputLine{
+			Text:      line,
+			Timestamp: baseTime.Add(time.Duration(i) * time.Microsecond),
+		})
+	}
+	if len(state.entries) > maxSessionOutputEntries {
+		state.entries = state.entries[len(state.entries)-maxSessionOutputEntries:]
+	}
+	state.snapshot = filteredSnapshot
+
+	filteredEntries := make([]sessionOutputLine, 0, len(state.entries))
+	for _, entry := range state.entries {
+		if since.IsZero() || entry.Timestamp.After(since) || entry.Timestamp.Equal(since) {
+			filteredEntries = append(filteredEntries, entry)
+		}
+	}
+	if lines > 0 && len(filteredEntries) > lines {
+		filteredEntries = filteredEntries[len(filteredEntries)-lines:]
+	}
+	return filteredEntries
+}
+
+func diffNewLines(previous []string, current []string) []string {
+	if len(previous) == 0 {
+		return current
+	}
+	maxOverlap := min(len(previous), len(current))
+	for overlap := maxOverlap; overlap > 0; overlap-- {
+		if slices.Equal(previous[len(previous)-overlap:], current[:overlap]) {
+			return current[overlap:]
+		}
+	}
+	return current
 }

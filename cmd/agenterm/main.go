@@ -78,7 +78,7 @@ func main() {
 		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
-	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token)
+	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token, cfg.TmuxSession)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

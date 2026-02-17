@@ -69,18 +69,28 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	worktreePath := req.Path
+	repoRoot, err := filepath.Abs(project.RepoPath)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid project repo_path")
+		return
+	}
 	if worktreePath == "" {
-		worktreePath = filepath.Join(project.RepoPath, ".worktrees", slug)
+		worktreePath = filepath.Join(repoRoot, ".worktrees", slug)
 	}
 	if !filepath.IsAbs(worktreePath) {
-		worktreePath = filepath.Join(project.RepoPath, worktreePath)
+		worktreePath = filepath.Join(repoRoot, worktreePath)
+	}
+	worktreePath = filepath.Clean(worktreePath)
+	if !pathWithinBase(repoRoot, worktreePath) {
+		jsonError(w, http.StatusBadRequest, "worktree path must be inside project repo")
+		return
 	}
 	if err := os.MkdirAll(filepath.Dir(worktreePath), 0o755); err != nil {
 		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create worktree parent directory: %v", err))
 		return
 	}
 
-	if err := runGit(project.RepoPath, "worktree", "add", worktreePath, "-b", branchName); err != nil {
+	if err := runGit(repoRoot, "worktree", "add", worktreePath, "-b", branchName); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -106,6 +116,18 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusCreated, worktree)
+}
+
+func pathWithinBase(base string, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	rel = filepath.Clean(rel)
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (h *handler) getWorktreeGitStatus(w http.ResponseWriter, r *http.Request) {
