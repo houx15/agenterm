@@ -6,3 +6,8 @@ import "embed"
 //
 //go:embed agents/*.yaml
 var AgentDefaults embed.FS
+
+// PlaybookDefaults contains shipped default playbook YAML config files.
+//
+//go:embed playbooks/*.yaml
+var PlaybookDefaults embed.FS

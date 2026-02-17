@@ -75,12 +75,12 @@ DELETE /api/playbooks/{id}     — Delete playbook
 - YAML editor with syntax highlighting for advanced editing
 
 ## Acceptance Criteria
-- [ ] Playbooks loaded from YAML directory
-- [ ] Auto-match playbook to project based on language/patterns
-- [ ] API CRUD for playbooks
-- [ ] Orchestrator system prompt includes playbook phases
-- [ ] Settings page for managing agents and playbooks
-- [ ] Default playbook created on first run
+- [x] Playbooks loaded from YAML directory
+- [x] Auto-match playbook to project based on language/patterns
+- [x] API CRUD for playbooks
+- [x] Orchestrator system prompt includes playbook phases
+- [x] Settings page for managing agents and playbooks
+- [x] Default playbook created on first run
 
 ## Notes
 - Playbook matching is best-effort — user can override via project config

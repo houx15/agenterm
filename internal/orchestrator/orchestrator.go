@@ -12,14 +12,15 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 )
 
 const (
-	defaultModel         = "claude-sonnet-4-5"
-	defaultAnthropicURL  = "https://api.anthropic.com/v1/messages"
-	defaultMaxToolRounds = 10
-	defaultMaxHistory    = 50
+	defaultModel             = "claude-sonnet-4-5"
+	defaultAnthropicURL      = "https://api.anthropic.com/v1/messages"
+	defaultMaxToolRounds     = 10
+	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
 )
 
@@ -50,10 +51,11 @@ type Options struct {
 	KnowledgeRepo           *db.ProjectKnowledgeRepo
 	RoleBindingRepo         *db.RoleBindingRepo
 	Registry                *registry.Registry
+	PlaybookRegistry        *playbook.Registry
 	Toolset                 *Toolset
 
-	MaxToolRounds int
-	MaxHistory    int
+	MaxToolRounds     int
+	MaxHistory        int
 	GlobalMaxParallel int
 }
 
@@ -73,10 +75,11 @@ type Orchestrator struct {
 	knowledgeRepo           *db.ProjectKnowledgeRepo
 	roleBindingRepo         *db.RoleBindingRepo
 	registry                *registry.Registry
+	playbookRegistry        *playbook.Registry
 	toolset                 *Toolset
 
-	maxToolRounds int
-	maxHistory    int
+	maxToolRounds     int
+	maxHistory        int
 	globalMaxParallel int
 }
 
@@ -129,6 +132,7 @@ func New(opts Options) *Orchestrator {
 		knowledgeRepo:           opts.KnowledgeRepo,
 		roleBindingRepo:         opts.RoleBindingRepo,
 		registry:                opts.Registry,
+		playbookRegistry:        opts.PlaybookRegistry,
 		toolset:                 toolset,
 		maxToolRounds:           maxRounds,
 		maxHistory:              maxHistory,
@@ -162,8 +166,11 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if o.registry != nil {
 		agents = o.registry.List()
 	}
-	playbook := o.loadWorkflowAsPlaybook(ctx, projectID)
-	systemPrompt := BuildSystemPrompt(state, agents, playbook)
+	matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
+	if matchedPlaybook == nil {
+		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
+	}
+	systemPrompt := BuildSystemPrompt(state, agents, matchedPlaybook)
 	if o.knowledgeRepo != nil {
 		knowledge, err := o.knowledgeRepo.ListByProject(ctx, projectID)
 		if err == nil && len(knowledge) > 0 {
@@ -362,6 +369,8 @@ func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID str
 		}
 		phases = append(phases, PlaybookPhase{
 			Name:        p.PhaseType + ":" + p.Role,
+			Agent:       "",
+			Role:        p.Role,
 			Description: fmt.Sprintf("entry=%s | exit=%s | max_parallel=%d", p.EntryRule, p.ExitRule, p.MaxParallel),
 		})
 	}
@@ -370,6 +379,39 @@ func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID str
 		Name:     workflow.Name,
 		Phases:   phases,
 		Strategy: fmt.Sprintf("project_max_parallel=%d, review_policy=%s", profile.MaxParallel, profile.ReviewPolicy),
+	}
+}
+
+func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Project) *Playbook {
+	if o == nil || o.playbookRegistry == nil || project == nil {
+		return nil
+	}
+
+	var pb *playbook.Playbook
+	if overrideID := strings.TrimSpace(project.Playbook); overrideID != "" {
+		pb = o.playbookRegistry.Get(overrideID)
+	}
+	if pb == nil {
+		pb = o.playbookRegistry.MatchProject(project.RepoPath)
+	}
+	if pb == nil {
+		return nil
+	}
+
+	phases := make([]PlaybookPhase, 0, len(pb.Phases))
+	for _, phase := range pb.Phases {
+		phases = append(phases, PlaybookPhase{
+			Name:        phase.Name,
+			Agent:       phase.Agent,
+			Role:        phase.Role,
+			Description: phase.Description,
+		})
+	}
+	return &Playbook{
+		ID:       pb.ID,
+		Name:     pb.Name,
+		Phases:   phases,
+		Strategy: pb.ParallelismStrategy,
 	}
 }
 

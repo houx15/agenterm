@@ -11,6 +11,7 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/orchestrator"
+	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
@@ -48,6 +49,7 @@ type handler struct {
 	knowledgeRepo           *db.ProjectKnowledgeRepo
 	reviewRepo              *db.ReviewRepo
 	registry                *registry.Registry
+	playbookRegistry        *playbook.Registry
 	gw                      gateway
 	manager                 sessionManager
 	lifecycle               *session.Manager
@@ -59,7 +61,7 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
 	if lifecycle == nil {
 		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
 	}
@@ -74,6 +76,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
 		reviewRepo:              db.NewReviewRepo(conn),
 		registry:                agentRegistry,
+		playbookRegistry:        playbookRegistry,
 		gw:                      gw,
 		manager:                 manager,
 		lifecycle:               lifecycle,
@@ -114,6 +117,11 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/agents", handler.createAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
+	mux.HandleFunc("GET /api/playbooks", handler.listPlaybooks)
+	mux.HandleFunc("GET /api/playbooks/{id}", handler.getPlaybook)
+	mux.HandleFunc("POST /api/playbooks", handler.createPlaybook)
+	mux.HandleFunc("PUT /api/playbooks/{id}", handler.updatePlaybook)
+	mux.HandleFunc("DELETE /api/playbooks/{id}", handler.deletePlaybook)
 
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)

@@ -16,6 +16,7 @@ import (
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/orchestrator"
+	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/tmux"
 )
@@ -70,7 +71,11 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
+	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
 }
 
 func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
@@ -84,7 +89,11 @@ func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, "test-token", "configured-session", agentRegistry), database
+	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -628,6 +637,69 @@ func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	}
 }
 
+func TestPlaybookCRUDEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+
+	create := apiRequest(t, h, http.MethodPost, "/api/playbooks", map[string]any{
+		"id":                   "custom-playbook",
+		"name":                 "Custom Playbook",
+		"description":          "test",
+		"parallelism_strategy": "parallel unit tests after implementation",
+		"match": map[string]any{
+			"languages":        []string{"go"},
+			"project_patterns": []string{"go.mod"},
+		},
+		"phases": []map[string]any{
+			{"name": "Plan", "agent": "codex", "role": "planner", "description": "review scope"},
+			{"name": "Ship", "agent": "claude-code", "role": "implementer", "description": "deliver feature"},
+		},
+	}, true)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create playbook status=%d body=%s", create.Code, create.Body.String())
+	}
+
+	get := apiRequest(t, h, http.MethodGet, "/api/playbooks/custom-playbook", nil, true)
+	if get.Code != http.StatusOK {
+		t.Fatalf("get playbook status=%d body=%s", get.Code, get.Body.String())
+	}
+	var got map[string]any
+	decodeBody(t, get, &got)
+	if got["name"] != "Custom Playbook" {
+		t.Fatalf("name=%v want Custom Playbook", got["name"])
+	}
+
+	update := apiRequest(t, h, http.MethodPut, "/api/playbooks/custom-playbook", map[string]any{
+		"name":                 "Custom Playbook v2",
+		"description":          "updated",
+		"parallelism_strategy": "sequential first, parallel validate",
+		"match": map[string]any{
+			"languages":        []string{"go"},
+			"project_patterns": []string{"internal/"},
+		},
+		"phases": []map[string]any{
+			{"name": "Implement", "agent": "codex", "role": "implementer", "description": "write code"},
+		},
+	}, true)
+	if update.Code != http.StatusOK {
+		t.Fatalf("update playbook status=%d body=%s", update.Code, update.Body.String())
+	}
+
+	list := apiRequest(t, h, http.MethodGet, "/api/playbooks", nil, true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list playbooks status=%d body=%s", list.Code, list.Body.String())
+	}
+
+	del := apiRequest(t, h, http.MethodDelete, "/api/playbooks/custom-playbook", nil, true)
+	if del.Code != http.StatusNoContent {
+		t.Fatalf("delete playbook status=%d body=%s", del.Code, del.Body.String())
+	}
+
+	getMissing := apiRequest(t, h, http.MethodGet, "/api/playbooks/custom-playbook", nil, true)
+	if getMissing.Code != http.StatusNotFound {
+		t.Fatalf("get deleted playbook status=%d body=%s", getMissing.Code, getMissing.Body.String())
+	}
+}
+
 func TestOrchestratorEndpoints(t *testing.T) {
 	gw := &fakeGateway{}
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
@@ -702,7 +774,11 @@ func TestOrchestratorEndpoints(t *testing.T) {
 		Registry:         agentRegistry,
 	})
 
-	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, "test-token", "configured-session", agentRegistry)
+	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, "test-token", "configured-session", agentRegistry, playbookRegistry)
 
 	chat := apiRequest(t, h, http.MethodPost, "/api/orchestrator/chat", map[string]any{
 		"project_id": project.ID,

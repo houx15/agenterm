@@ -25,6 +25,8 @@ type Playbook struct {
 
 type PlaybookPhase struct {
 	Name        string
+	Agent       string
+	Role        string
 	Description string
 }
 
@@ -86,7 +88,15 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	if playbook != nil {
 		b.WriteString(fmt.Sprintf("Matched playbook: %s (%s)\\n", playbook.Name, playbook.ID))
 		for _, phase := range playbook.Phases {
-			b.WriteString(fmt.Sprintf("- %s: %s\\n", phase.Name, phase.Description))
+			line := fmt.Sprintf("- %s", phase.Name)
+			agentRole := strings.TrimSpace(strings.Join([]string{phase.Agent, phase.Role}, "/"))
+			if agentRole != "/" && agentRole != "" {
+				line += fmt.Sprintf(" [%s]", agentRole)
+			}
+			if strings.TrimSpace(phase.Description) != "" {
+				line += ": " + phase.Description
+			}
+			b.WriteString(line + "\\n")
 		}
 		if strings.TrimSpace(playbook.Strategy) != "" {
 			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\\n")

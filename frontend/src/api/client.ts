@@ -66,3 +66,51 @@ export function createProject<T>(input: CreateProjectInput) {
     body: JSON.stringify(input),
   })
 }
+
+export function listAgents<T>() {
+  return apiFetch<T>('/api/agents')
+}
+
+export function createAgent<T>(input: unknown) {
+  return apiFetch<T>('/api/agents', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateAgent<T>(id: string, input: unknown) {
+  return apiFetch<T>(`/api/agents/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteAgent(id: string) {
+  return apiFetch<void>(`/api/agents/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function listPlaybooks<T>() {
+  return apiFetch<T>('/api/playbooks')
+}
+
+export function createPlaybook<T>(input: unknown) {
+  return apiFetch<T>('/api/playbooks', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updatePlaybook<T>(id: string, input: unknown) {
+  return apiFetch<T>(`/api/playbooks/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export function deletePlaybook(id: string) {
+  return apiFetch<void>(`/api/playbooks/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}

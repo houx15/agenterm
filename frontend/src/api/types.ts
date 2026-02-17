@@ -94,3 +94,42 @@ export interface Session {
   created_at: string
   last_activity_at: string
 }
+
+export interface AgentConfig {
+  id: string
+  name: string
+  model?: string
+  command: string
+  max_parallel_agents?: number
+  resume_command?: string
+  headless_command?: string
+  capabilities: string[]
+  languages: string[]
+  cost_tier: string
+  speed_tier: string
+  supports_session_resume: boolean
+  supports_headless: boolean
+  auto_accept_mode?: string
+  notes?: string
+}
+
+export interface PlaybookMatch {
+  languages: string[]
+  project_patterns: string[]
+}
+
+export interface PlaybookPhase {
+  name: string
+  agent: string
+  role: string
+  description: string
+}
+
+export interface Playbook {
+  id: string
+  name: string
+  description: string
+  match: PlaybookMatch
+  phases: PlaybookPhase[]
+  parallelism_strategy: string
+}

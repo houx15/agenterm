@@ -11,17 +11,18 @@ import (
 )
 
 type Config struct {
-	Port        int
-	TmuxSession string
-	Token       string
-	ConfigPath  string
-	PrintToken  bool
-	DefaultDir  string
-	DBPath      string
-	AgentsDir   string
-	LLMAPIKey   string
-	LLMModel    string
-	LLMBaseURL  string
+	Port                          int
+	TmuxSession                   string
+	Token                         string
+	ConfigPath                    string
+	PrintToken                    bool
+	DefaultDir                    string
+	DBPath                        string
+	AgentsDir                     string
+	PlaybooksDir                  string
+	LLMAPIKey                     string
+	LLMModel                      string
+	LLMBaseURL                    string
 	OrchestratorGlobalMaxParallel int
 }
 
@@ -32,14 +33,15 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port:        8765,
-		TmuxSession: "ai-coding",
-		DefaultDir:  filepath.Join(homeDir, "08Coding"),
-		ConfigPath:  filepath.Join(homeDir, ".config", "agenterm", "config"),
-		DBPath:      filepath.Join(homeDir, ".config", "agenterm", "agenterm.db"),
-		AgentsDir:   filepath.Join(homeDir, ".config", "agenterm", "agents"),
-		LLMModel:    "claude-sonnet-4-5",
-		LLMBaseURL:  "https://api.anthropic.com/v1/messages",
+		Port:                          8765,
+		TmuxSession:                   "ai-coding",
+		DefaultDir:                    filepath.Join(homeDir, "08Coding"),
+		ConfigPath:                    filepath.Join(homeDir, ".config", "agenterm", "config"),
+		DBPath:                        filepath.Join(homeDir, ".config", "agenterm", "agenterm.db"),
+		AgentsDir:                     filepath.Join(homeDir, ".config", "agenterm", "agents"),
+		PlaybooksDir:                  filepath.Join(homeDir, ".config", "agenterm", "playbooks"),
+		LLMModel:                      "claude-sonnet-4-5",
+		LLMBaseURL:                    "https://api.anthropic.com/v1/messages",
 		OrchestratorGlobalMaxParallel: 32,
 	}
 
@@ -53,6 +55,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.DefaultDir, "dir", cfg.DefaultDir, "default directory for new windows")
 	flag.StringVar(&cfg.DBPath, "db-path", cfg.DBPath, "path to SQLite database")
 	flag.StringVar(&cfg.AgentsDir, "agents-dir", cfg.AgentsDir, "directory for agent YAML configs")
+	flag.StringVar(&cfg.PlaybooksDir, "playbooks-dir", cfg.PlaybooksDir, "directory for playbook YAML configs")
 	flag.StringVar(&cfg.LLMAPIKey, "llm-api-key", cfg.LLMAPIKey, "LLM API key (defaults to ANTHROPIC_API_KEY env var)")
 	flag.StringVar(&cfg.LLMModel, "llm-model", cfg.LLMModel, "LLM model name for orchestrator")
 	flag.StringVar(&cfg.LLMBaseURL, "llm-base-url", cfg.LLMBaseURL, "LLM API URL for orchestrator")
@@ -116,6 +119,8 @@ func (c *Config) loadFromFile() error {
 			c.DBPath = value
 		case "AgentsDir":
 			c.AgentsDir = value
+		case "PlaybooksDir":
+			c.PlaybooksDir = value
 		case "LLMAPIKey":
 			c.LLMAPIKey = value
 		case "LLMModel":
@@ -139,8 +144,8 @@ func (c *Config) saveToFile() error {
 		return err
 	}
 	data := fmt.Sprintf(
-		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\nOrchestratorGlobalMaxParallel=%d\n",
-		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL, c.OrchestratorGlobalMaxParallel,
+		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nPlaybooksDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\nOrchestratorGlobalMaxParallel=%d\n",
+		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.PlaybooksDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL, c.OrchestratorGlobalMaxParallel,
 	)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }

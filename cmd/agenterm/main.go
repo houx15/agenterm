@@ -18,6 +18,7 @@ import (
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/parser"
+	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
 	"github.com/user/agenterm/internal/session"
@@ -312,6 +313,11 @@ func main() {
 		slog.Error("failed to initialize agent registry", "dir", cfg.AgentsDir, "error", err)
 		os.Exit(1)
 	}
+	playbookRegistry, err := playbook.NewRegistry(cfg.PlaybooksDir)
+	if err != nil {
+		slog.Error("failed to initialize playbook registry", "dir", cfg.PlaybooksDir, "error", err)
+		os.Exit(1)
+	}
 
 	manager := tmux.NewManager(cfg.DefaultDir)
 	h := hub.New(cfg.Token, nil)
@@ -419,6 +425,7 @@ func main() {
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
 		Registry:                agentRegistry,
+		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
 	})
 
@@ -468,7 +475,7 @@ func main() {
 		}
 	}()
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry)
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry, playbookRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

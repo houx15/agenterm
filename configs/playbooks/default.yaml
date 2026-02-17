@@ -1,0 +1,24 @@
+id: default
+name: Default Engineering Flow
+description: General-purpose phased execution for mixed projects.
+parallelism_strategy: Start with one implementation stream, then parallelize independent verification and review tasks.
+match:
+  languages: []
+  project_patterns: []
+phases:
+  - name: Discover
+    agent: codex
+    role: planner
+    description: Read requirements, identify dependencies, and produce an execution checklist.
+  - name: Implement
+    agent: codex
+    role: implementer
+    description: Deliver the core feature in small, testable increments.
+  - name: Verify
+    agent: claude-code
+    role: tester
+    description: Run focused tests and close regressions before handoff.
+  - name: Review
+    agent: claude-code
+    role: reviewer
+    description: Perform a final quality pass and summarize risks.
