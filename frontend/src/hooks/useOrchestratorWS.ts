@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { OrchestratorClientMessage, OrchestratorServerMessage } from '../api/types'
+import type { OrchestratorClientMessage, OrchestratorHistoryMessage, OrchestratorServerMessage } from '../api/types'
 import type { MessageActionOption, SessionMessage } from '../components/ChatMessage'
-import { getToken } from '../api/client'
+import { getToken, listOrchestratorHistory } from '../api/client'
 
 const INITIAL_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30000
@@ -51,7 +51,11 @@ function buildConfirmationOptions(text: string): MessageActionOption[] | undefin
     return undefined
   }
 
-  if (/create\s+\d+\s+worktrees?/i.test(trimmed) || /create.*worktree/i.test(trimmed)) {
+  if (
+    /(create|delete|remove|apply|execute|start|run|proceed|continue|merge|deploy|ship|approve|confirm|should i|do you want)/i.test(
+      trimmed,
+    )
+  ) {
     return [
       { label: 'Confirm', value: 'Confirm' },
       { label: 'Modify', value: 'Modify plan' },
@@ -60,6 +64,21 @@ function buildConfirmationOptions(text: string): MessageActionOption[] | undefin
   }
 
   return undefined
+}
+
+function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessage {
+  const role = item.role === 'user' ? 'user' : 'assistant'
+  const text = item.content ?? ''
+  return createMessage({
+    id: item.id,
+    text,
+    className: role === 'user' ? 'input' : 'output',
+    role,
+    kind: 'text',
+    isUser: role === 'user',
+    timestamp: Date.parse(item.created_at) || Date.now(),
+    confirmationOptions: role === 'assistant' ? buildConfirmationOptions(text) : undefined,
+  })
 }
 
 export function useOrchestratorWS(projectId: string) {
@@ -180,7 +199,10 @@ export function useOrchestratorWS(projectId: string) {
 
     setConnectionStatus('connecting')
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${protocol}//${window.location.host}/ws/orchestrator?token=${encodeURIComponent(token)}`
+    const params = new URLSearchParams()
+    params.set('token', token)
+    params.set('project_id', projectId)
+    const url = `${protocol}//${window.location.host}/ws/orchestrator?${params.toString()}`
 
     const ws = new WebSocket(url)
     wsRef.current = ws
@@ -303,10 +325,36 @@ export function useOrchestratorWS(projectId: string) {
   }, [clearReconnectTimer, connect])
 
   useEffect(() => {
+    let canceled = false
+
     setMessages([])
     tokenBufferRef.current = []
     activeAssistantIDRef.current = null
     setIsStreaming(false)
+
+    if (!projectId) {
+      return () => {
+        canceled = true
+      }
+    }
+
+    void (async () => {
+      try {
+        const items = await listOrchestratorHistory<OrchestratorHistoryMessage[]>(projectId, 50)
+        if (canceled) {
+          return
+        }
+        setMessages(items.map(toHistorySessionMessage))
+      } catch {
+        if (!canceled) {
+          setMessages([])
+        }
+      }
+    })()
+
+    return () => {
+      canceled = true
+    }
   }, [projectId])
 
   const send = useCallback(

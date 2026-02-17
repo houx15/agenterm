@@ -66,3 +66,10 @@ export function createProject<T>(input: CreateProjectInput) {
     body: JSON.stringify(input),
   })
 }
+
+export function listOrchestratorHistory<T>(projectID: string, limit = 50) {
+  const params = new URLSearchParams()
+  params.set('project_id', projectID)
+  params.set('limit', String(limit))
+  return apiFetch<T>(`/api/orchestrator/history?${params.toString()}`)
+}

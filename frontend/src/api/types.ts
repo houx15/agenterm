@@ -74,6 +74,14 @@ export interface OrchestratorClientMessage {
   message: string
 }
 
+export interface OrchestratorHistoryMessage {
+  id: string
+  project_id: string
+  role: string
+  content: string
+  created_at: string
+}
+
 export interface OrchestratorServerTokenMessage {
   type: 'token'
   text?: string

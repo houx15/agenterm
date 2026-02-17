@@ -42,6 +42,7 @@ type handler struct {
 	taskRepo                *db.TaskRepo
 	worktreeRepo            *db.WorktreeRepo
 	sessionRepo             *db.SessionRepo
+	historyRepo             *db.OrchestratorHistoryRepo
 	projectOrchestratorRepo *db.ProjectOrchestratorRepo
 	workflowRepo            *db.WorkflowRepo
 	roleBindingRepo         *db.RoleBindingRepo
@@ -68,6 +69,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		taskRepo:                db.NewTaskRepo(conn),
 		worktreeRepo:            db.NewWorktreeRepo(conn),
 		sessionRepo:             db.NewSessionRepo(conn),
+		historyRepo:             db.NewOrchestratorHistoryRepo(conn),
 		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
 		workflowRepo:            db.NewWorkflowRepo(conn),
 		roleBindingRepo:         db.NewRoleBindingRepo(conn),
@@ -116,6 +118,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
 
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
+	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
 	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
