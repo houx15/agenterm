@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/user/agenterm/internal/api"
 	"github.com/user/agenterm/internal/config"
@@ -249,6 +250,21 @@ func (s *runtimeState) close() {
 	}
 }
 
+func (s *runtimeState) watchManagerSessions(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, sessionID := range s.manager.ListSessions() {
+				_, _ = s.ensureSession(ctx, sessionID)
+			}
+		}
+	}
+}
+
 func (s *runtimeState) defaultSessionWindows() []tmux.Window {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -315,6 +331,25 @@ func main() {
 			slog.Error("failed to create window", "session", sessionID, "error", err)
 		}
 	})
+	h.SetOnNewSessionWithSession(func(_ string, name string) {
+		sessionName := normalizeSessionName(name)
+		if sessionName == "" {
+			slog.Error("failed to create session", "error", "session name is required")
+			return
+		}
+		if _, err := manager.CreateSession(sessionName, cfg.DefaultDir); err != nil {
+			// If already exists, attach instead.
+			if _, attachErr := manager.AttachSession(sessionName); attachErr != nil {
+				slog.Error("failed to create or attach session", "session", sessionName, "error", err)
+				return
+			}
+		}
+		if _, err := state.ensureSession(ctx, sessionName); err != nil {
+			slog.Error("failed to activate session", "session", sessionName, "error", err)
+			return
+		}
+		state.broadcastWindows()
+	})
 	h.SetOnKillWindowWithSession(func(sessionID string, windowID string) {
 		if err := state.killWindow(ctx, sessionID, windowID); err != nil {
 			slog.Error("failed to kill window", "session", sessionID, "window", windowID, "error", err)
@@ -328,7 +363,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, h, cfg.Token, cfg.TmuxSession)
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, h, cfg.Token, cfg.TmuxSession)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
@@ -336,6 +371,7 @@ func main() {
 	}
 
 	go h.Run(ctx)
+	go state.watchManagerSessions(ctx)
 	state.broadcastWindows()
 
 	printStartupBanner(cfg, state.defaultSessionWindows())
@@ -402,4 +438,25 @@ func gracefulShutdown(state *runtimeState, h *hub.Hub) {
 	state.close()
 
 	slog.Info("agenterm stopped")
+}
+
+func normalizeSessionName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(name) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }

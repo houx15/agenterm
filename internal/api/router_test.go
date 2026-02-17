@@ -62,7 +62,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	return NewRouter(database.SQL(), gw, nil, "test-token", "configured-session"), database
+	return NewRouter(database.SQL(), gw, nil, nil, "test-token", "configured-session"), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {

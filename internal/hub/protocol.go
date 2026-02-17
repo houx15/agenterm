@@ -61,6 +61,11 @@ type NewWindowMessage struct {
 	Name string `json:"name"`
 }
 
+type hubBroadcast struct {
+	data      []byte
+	sessionID string
+}
+
 type ErrorMessage struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`

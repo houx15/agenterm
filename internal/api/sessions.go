@@ -72,10 +72,6 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "agent_type and role are required")
 		return
 	}
-	if h.gw == nil {
-		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
-		return
-	}
 
 	workingDir := project.RepoPath
 	if task.WorktreeID != "" {
@@ -84,43 +80,60 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	tmuxSessionName := h.tmuxSessionName()
+	var windowID string
+
+	if h.manager != nil {
+		tmuxSessionName = buildTmuxSessionName(project.Name, task.Title, req.Role)
+		gw, err := h.manager.CreateSession(tmuxSessionName, workingDir)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		windows := gw.ListWindows()
+		if len(windows) == 0 {
+			_ = h.manager.DestroySession(tmuxSessionName)
+			jsonError(w, http.StatusInternalServerError, "created tmux session has no windows")
+			return
+		}
+		windowID = windows[0].ID
+	} else {
+		if h.gw == nil {
+			jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
+			return
+		}
+		windowName := "session-" + task.ID[:8]
+		before := h.gw.ListWindows()
+		if err := h.gw.NewWindow(windowName, workingDir); err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		after := h.gw.ListWindows()
+		windowID = findWindowID(before, after, windowName)
+		if windowID == "" {
+			windowID = findWindowID(nil, after, windowName)
+		}
+		if windowID == "" {
+			jsonError(w, http.StatusInternalServerError, "failed to resolve tmux window id")
+			return
+		}
+	}
+
 	session := &db.Session{
 		TaskID:          taskID,
-		TmuxSessionName: h.tmuxSessionName(),
+		TmuxSessionName: tmuxSessionName,
+		TmuxWindowID:    windowID,
 		AgentType:       req.AgentType,
 		Role:            req.Role,
 		Status:          "running",
 		HumanAttached:   false,
 	}
 	if err := h.sessionRepo.Create(r.Context(), session); err != nil {
+		if h.manager != nil {
+			_ = h.manager.DestroySession(tmuxSessionName)
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	windowName := "session-" + session.ID[:8]
-	before := h.gw.ListWindows()
-	if err := h.gw.NewWindow(windowName, workingDir); err != nil {
-		_ = h.sessionRepo.Delete(r.Context(), session.ID)
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	after := h.gw.ListWindows()
-	windowID := findWindowID(before, after, windowName)
-	if windowID == "" {
-		windowID = findWindowID(nil, after, windowName)
-	}
-	if windowID == "" {
-		_ = h.sessionRepo.Delete(r.Context(), session.ID)
-		jsonError(w, http.StatusInternalServerError, "failed to resolve tmux window id")
-		return
-	}
-	session.TmuxWindowID = windowID
-	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if session.TmuxWindowID != "" {
-		_ = h.gw.SendKeys(session.TmuxWindowID, "cd "+shellQuotePath(workingDir)+"\n")
 	}
 
 	jsonResponse(w, http.StatusCreated, session)
@@ -189,7 +202,8 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if h.gw == nil {
+	gw, err := h.gatewayForSession(session.TmuxSessionName)
+	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
 		return
 	}
@@ -208,7 +222,7 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
+	if err := gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -409,6 +423,57 @@ func (h *handler) recordAndReadSessionOutput(windowID string, captured []string,
 		filteredEntries = filteredEntries[len(filteredEntries)-lines:]
 	}
 	return filteredEntries
+}
+
+func (h *handler) gatewayForSession(sessionName string) (sessionGateway, error) {
+	if h.manager != nil && sessionName != "" {
+		gw, err := h.manager.GetGateway(sessionName)
+		if err == nil {
+			return gw, nil
+		}
+		return h.manager.AttachSession(sessionName)
+	}
+	if h.gw != nil {
+		return h.gw, nil
+	}
+	return nil, fmt.Errorf("gateway unavailable")
+}
+
+func buildTmuxSessionName(projectName string, taskTitle string, role string) string {
+	base := []string{
+		slugPart(projectName),
+		slugPart(taskTitle),
+		slugPart(role),
+	}
+	for i := range base {
+		if base[i] == "" {
+			base[i] = "x"
+		}
+	}
+	return strings.Join(base, "-")
+}
+
+func slugPart(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range v {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	s := strings.Trim(b.String(), "-")
+	if len(s) > 36 {
+		s = s[:36]
+	}
+	return s
 }
 
 func diffNewLines(previous []string, current []string) []string {

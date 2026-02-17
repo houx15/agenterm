@@ -680,8 +680,8 @@
     </div>
     <div id="new-window-modal" class="modal-overlay" style="display: none;">
         <div class="modal">
-            <h3>New Window</h3>
-            <input type="text" id="new-window-name" placeholder="Window name (optional)">
+            <h3>New Session</h3>
+            <input type="text" id="new-window-name" placeholder="Session name (required)">
             <div class="modal-buttons">
                 <button class="btn-cancel" id="modal-cancel">Cancel</button>
                 <button class="btn-create" id="modal-create">Create</button>
@@ -1100,6 +1100,8 @@
         function setActiveWindow(id) {
             state.activeWindow = id;
             state.unread[id] = 0;
+            const target = parseWindowKey(id);
+            connection.send({ type: 'subscribe', session_id: target.session_id });
 
             const win = state.windows.find(w => windowKey(w.session_id || '', w.id) === id);
             const nameEl = document.getElementById('active-session-name');
@@ -1367,11 +1369,12 @@
 
         modalCreate.addEventListener('click', () => {
             const name = modalInput.value.trim();
-            const active = state.activeWindow ? parseWindowKey(state.activeWindow) : { session_id: '', window: '' };
+            if (!name) {
+                return;
+            }
             const message = {
-                type: 'new_window',
-                session_id: active.session_id,
-                name: name || ''
+                type: 'new_session',
+                name: name
             };
             connection.send(message);
             hideModal();

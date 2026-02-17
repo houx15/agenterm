@@ -22,6 +22,19 @@ type gateway interface {
 	SendRaw(windowID string, keys string) error
 }
 
+type sessionGateway interface {
+	ListWindows() []tmux.Window
+	SendKeys(windowID string, keys string) error
+	SendRaw(windowID string, keys string) error
+}
+
+type sessionManager interface {
+	CreateSession(name string, workDir string) (*tmux.Gateway, error)
+	AttachSession(name string) (*tmux.Gateway, error)
+	GetGateway(name string) (*tmux.Gateway, error)
+	DestroySession(name string) error
+}
+
 type handler struct {
 	projectRepo  *db.ProjectRepo
 	taskRepo     *db.TaskRepo
@@ -29,6 +42,7 @@ type handler struct {
 	sessionRepo  *db.SessionRepo
 	agentRepo    *db.AgentConfigRepo
 	gw           gateway
+	manager      sessionManager
 	hub          *hub.Hub
 	tmuxSession  string
 
@@ -36,7 +50,7 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, hubInst *hub.Hub, token string, tmuxSession string) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, hubInst *hub.Hub, token string, tmuxSession string) http.Handler {
 	handler := &handler{
 		projectRepo:  db.NewProjectRepo(conn),
 		taskRepo:     db.NewTaskRepo(conn),
@@ -44,6 +58,7 @@ func NewRouter(conn *sql.DB, gw gateway, hubInst *hub.Hub, token string, tmuxSes
 		sessionRepo:  db.NewSessionRepo(conn),
 		agentRepo:    db.NewAgentConfigRepo(conn),
 		gw:           gw,
+		manager:      manager,
 		hub:          hubInst,
 		tmuxSession:  tmuxSession,
 		outputState:  make(map[string]*windowOutputState),
