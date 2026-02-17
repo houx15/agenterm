@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strings"
@@ -510,6 +511,7 @@ func (h *handler) createReviewCycleIssue(w http.ResponseWriter, r *http.Request)
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.syncLatestCycleStatusAndEmit(r, cycle.TaskID)
 	jsonResponse(w, http.StatusCreated, issue)
 }
 
@@ -554,10 +556,7 @@ func (h *handler) updateReviewIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cycle, err := h.reviewRepo.GetCycle(r.Context(), issue.CycleID); err == nil && cycle != nil {
-		_ = h.reviewRepo.SetCycleStatusByTaskOpenIssues(r.Context(), cycle.TaskID)
-		if latestCycles, err := h.reviewRepo.ListCyclesByTask(r.Context(), cycle.TaskID); err == nil && len(latestCycles) > 0 {
-			h.emitReviewCycleProjectEvents(r, latestCycles[len(latestCycles)-1])
-		}
+		h.syncLatestCycleStatusAndEmit(r, cycle.TaskID)
 	}
 	jsonResponse(w, http.StatusOK, issue)
 }
@@ -651,12 +650,36 @@ func (h *handler) emitReviewCycleProjectEvents(r *http.Request, cycle *db.Review
 		h.hub.BroadcastProjectEvent(projectID, "project_phase_changed", map[string]any{"phase": "review", "status": status})
 	case "review_changes_requested":
 		h.hub.BroadcastProjectEvent(projectID, "review_iteration_completed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration, "status": status})
-		h.hub.BroadcastProjectEvent(projectID, "project_blocked", map[string]any{"reason": "review_changes_requested", "task_id": cycle.TaskID, "cycle_id": cycle.ID})
+		if h.shouldNotifyOnBlocked(r.Context(), projectID) {
+			h.hub.BroadcastProjectEvent(projectID, "project_blocked", map[string]any{"reason": "review_changes_requested", "task_id": cycle.TaskID, "cycle_id": cycle.ID})
+		}
 	case "review_passed":
 		h.hub.BroadcastProjectEvent(projectID, "review_iteration_completed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration, "status": status})
 		h.hub.BroadcastProjectEvent(projectID, "review_loop_passed", map[string]any{"task_id": cycle.TaskID, "cycle_id": cycle.ID, "iteration": cycle.Iteration})
 		h.hub.BroadcastProjectEvent(projectID, "project_phase_changed", map[string]any{"phase": "review", "status": status})
 	}
+}
+
+func (h *handler) syncLatestCycleStatusAndEmit(r *http.Request, taskID string) {
+	if h == nil || h.reviewRepo == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	changed, cycle, err := h.reviewRepo.SyncLatestCycleStatusByTaskOpenIssues(r.Context(), taskID)
+	if err != nil || !changed || cycle == nil {
+		return
+	}
+	h.emitReviewCycleProjectEvents(r, cycle)
+}
+
+func (h *handler) shouldNotifyOnBlocked(ctx context.Context, projectID string) bool {
+	if h == nil || h.projectOrchestratorRepo == nil || strings.TrimSpace(projectID) == "" {
+		return true
+	}
+	profile, err := h.projectOrchestratorRepo.Get(ctx, projectID)
+	if err != nil || profile == nil {
+		return true
+	}
+	return profile.NotifyOnBlocked
 }
 
 func (h *handler) listProjectRoleBindings(w http.ResponseWriter, r *http.Request) {

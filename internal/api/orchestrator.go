@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/user/agenterm/internal/orchestrator"
@@ -95,6 +96,12 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 		if err == nil {
 			totalCycles := 0
 			openIssues := 0
+			maxLatestIteration := 0
+			reviewTaskSummaries := make([]map[string]any, 0)
+			hasPending := false
+			hasRunning := false
+			hasChangesRequested := false
+			hasPassed := false
 			for _, t := range tasks {
 				cycles, err := h.reviewRepo.ListCyclesByTask(r.Context(), t.ID)
 				if err != nil {
@@ -105,9 +112,56 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 				if err == nil {
 					openIssues += count
 				}
+				if len(cycles) == 0 {
+					continue
+				}
+				latest := cycles[len(cycles)-1]
+				status := strings.ToLower(strings.TrimSpace(latest.Status))
+				if latest.Iteration > maxLatestIteration {
+					maxLatestIteration = latest.Iteration
+				}
+				reviewTaskSummaries = append(reviewTaskSummaries, map[string]any{
+					"task_id":          t.ID,
+					"cycle_id":         latest.ID,
+					"latest_iteration": latest.Iteration,
+					"latest_status":    status,
+					"open_issues":      count,
+				})
+				switch status {
+				case "review_pending":
+					hasPending = true
+				case "review_running":
+					hasRunning = true
+				case "review_changes_requested":
+					hasChangesRequested = true
+				case "review_passed":
+					hasPassed = true
+				}
+			}
+			sort.Slice(reviewTaskSummaries, func(i, j int) bool {
+				left, _ := reviewTaskSummaries[i]["task_id"].(string)
+				right, _ := reviewTaskSummaries[j]["task_id"].(string)
+				return left < right
+			})
+			reviewState := "not_started"
+			if len(reviewTaskSummaries) > 0 {
+				switch {
+				case hasChangesRequested || openIssues > 0:
+					reviewState = "changes_requested"
+				case hasRunning || hasPending:
+					reviewState = "in_review"
+				case hasPassed:
+					reviewState = "passed"
+				default:
+					reviewState = "unknown"
+				}
 			}
 			report["review_cycles_total"] = totalCycles
 			report["open_review_issues_total"] = openIssues
+			report["review_state"] = reviewState
+			report["review_latest_iteration"] = maxLatestIteration
+			report["review_tasks_in_loop"] = len(reviewTaskSummaries)
+			report["review_task_summaries"] = reviewTaskSummaries
 		}
 	}
 	jsonResponse(w, http.StatusOK, report)

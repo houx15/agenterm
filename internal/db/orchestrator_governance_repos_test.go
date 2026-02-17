@@ -155,6 +155,113 @@ func TestReviewRepoUpdateCycleStatusRejectsInvalidTransitionAndOpenIssues(t *tes
 	}
 }
 
+func TestReviewRepoSetCycleStatusByTaskOpenIssuesUsesStateMachine(t *testing.T) {
+	database, _ := openTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := NewProjectRepo(database.SQL())
+	taskRepo := NewTaskRepo(database.SQL())
+	reviewRepo := NewReviewRepo(database.SQL())
+
+	project := &Project{Name: "P", RepoPath: "/tmp/p", Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &Task{ProjectID: project.ID, Title: "T", Description: "D", Status: "running"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	cycle := &ReviewCycle{TaskID: task.ID}
+	if err := reviewRepo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("create cycle: %v", err)
+	}
+	if err := reviewRepo.UpdateCycleStatus(ctx, cycle.ID, "review_passed"); err != nil {
+		t.Fatalf("set cycle passed: %v", err)
+	}
+	issue := &ReviewIssue{CycleID: cycle.ID, Summary: "new regression"}
+	if err := reviewRepo.CreateIssue(ctx, issue); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	if err := reviewRepo.SetCycleStatusByTaskOpenIssues(ctx, task.ID); err != nil {
+		t.Fatalf("sync cycle status by issues: %v", err)
+	}
+	updated, err := reviewRepo.GetCycle(ctx, cycle.ID)
+	if err != nil {
+		t.Fatalf("get cycle: %v", err)
+	}
+	if updated.Status != "review_changes_requested" {
+		t.Fatalf("cycle status=%q want review_changes_requested", updated.Status)
+	}
+
+	issue.Status = "resolved"
+	if err := reviewRepo.UpdateIssue(ctx, issue); err != nil {
+		t.Fatalf("resolve issue: %v", err)
+	}
+	if err := reviewRepo.SetCycleStatusByTaskOpenIssues(ctx, task.ID); err != nil {
+		t.Fatalf("sync cycle status after resolve: %v", err)
+	}
+	updated, err = reviewRepo.GetCycle(ctx, cycle.ID)
+	if err != nil {
+		t.Fatalf("get cycle after resolve: %v", err)
+	}
+	if updated.Status != "review_passed" {
+		t.Fatalf("cycle status=%q want review_passed", updated.Status)
+	}
+}
+
+func TestReviewRepoSyncLatestCycleStatusByTaskOpenIssuesReturnsChangedFlag(t *testing.T) {
+	database, _ := openTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := NewProjectRepo(database.SQL())
+	taskRepo := NewTaskRepo(database.SQL())
+	reviewRepo := NewReviewRepo(database.SQL())
+
+	project := &Project{Name: "P", RepoPath: "/tmp/p", Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &Task{ProjectID: project.ID, Title: "T", Description: "D", Status: "running"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	cycle := &ReviewCycle{TaskID: task.ID, Status: "review_changes_requested"}
+	if err := reviewRepo.CreateCycle(ctx, cycle); err != nil {
+		t.Fatalf("create cycle: %v", err)
+	}
+	issue := &ReviewIssue{CycleID: cycle.ID, Summary: "open issue", Status: "open"}
+	if err := reviewRepo.CreateIssue(ctx, issue); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	changed, latest, err := reviewRepo.SyncLatestCycleStatusByTaskOpenIssues(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("sync status when unchanged: %v", err)
+	}
+	if changed {
+		t.Fatalf("changed=%v want false", changed)
+	}
+	if latest == nil || latest.Status != "review_changes_requested" {
+		t.Fatalf("latest=%#v want status review_changes_requested", latest)
+	}
+
+	issue.Status = "resolved"
+	if err := reviewRepo.UpdateIssue(ctx, issue); err != nil {
+		t.Fatalf("resolve issue: %v", err)
+	}
+	changed, latest, err = reviewRepo.SyncLatestCycleStatusByTaskOpenIssues(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("sync status when changed: %v", err)
+	}
+	if !changed {
+		t.Fatalf("changed=%v want true", changed)
+	}
+	if latest == nil || latest.Status != "review_passed" {
+		t.Fatalf("latest=%#v want status review_passed", latest)
+	}
+}
+
 func TestProjectRepoCreateWithDefaultOrchestratorIsAtomic(t *testing.T) {
 	database, _ := openTestDB(t)
 	ctx := context.Background()

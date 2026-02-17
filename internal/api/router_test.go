@@ -641,9 +641,24 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	}
 
 	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	reviewRepo := db.NewReviewRepo(database.SQL())
 	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
 	if err := projectRepo.Create(context.Background(), project); err != nil {
 		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "Review T", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	cycle := &db.ReviewCycle{TaskID: task.ID, Status: "review_changes_requested", CommitHash: "abc123"}
+	if err := reviewRepo.CreateCycle(context.Background(), cycle); err != nil {
+		t.Fatalf("create review cycle: %v", err)
+	}
+	if err := reviewRepo.CreateIssue(context.Background(), &db.ReviewIssue{
+		CycleID: cycle.ID, Summary: "fix style", Status: "open",
+	}); err != nil {
+		t.Fatalf("create review issue: %v", err)
 	}
 
 	httpClient := &http.Client{
@@ -655,10 +670,15 @@ func TestOrchestratorEndpoints(t *testing.T) {
 			}
 			if req.URL.Path == "/api/projects/"+project.ID && req.Method == http.MethodGet {
 				return mockJSONResponse(map[string]any{
-					"project":   map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
-					"tasks":     []any{},
+					"project": map[string]any{"id": project.ID, "name": project.Name, "repo_path": project.RepoPath, "status": project.Status},
+					"tasks": []any{
+						map[string]any{"id": "t1", "status": "pending"},
+						map[string]any{"id": "t2", "status": "blocked"},
+					},
 					"worktrees": []any{},
-					"sessions":  []any{},
+					"sessions": []any{
+						map[string]any{"id": "s1", "status": "failed"},
+					},
 				}), nil
 			}
 			return &http.Response{
@@ -675,7 +695,7 @@ func TestOrchestratorEndpoints(t *testing.T) {
 		APIToolBaseURL:   "http://mock",
 		HTTPClient:       httpClient,
 		ProjectRepo:      projectRepo,
-		TaskRepo:         db.NewTaskRepo(database.SQL()),
+		TaskRepo:         taskRepo,
 		WorktreeRepo:     db.NewWorktreeRepo(database.SQL()),
 		SessionRepo:      db.NewSessionRepo(database.SQL()),
 		HistoryRepo:      db.NewOrchestratorHistoryRepo(database.SQL()),
@@ -695,6 +715,28 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	report := apiRequest(t, h, http.MethodGet, "/api/orchestrator/report?project_id="+project.ID, nil, true)
 	if report.Code != http.StatusOK {
 		t.Fatalf("report status=%d body=%s", report.Code, report.Body.String())
+	}
+	var reportBody map[string]any
+	decodeBody(t, report, &reportBody)
+	if reportBody["phase"] != "blocked" {
+		t.Fatalf("report phase=%v want blocked", reportBody["phase"])
+	}
+	if reportBody["queue_depth"] == nil {
+		t.Fatalf("report missing queue_depth")
+	}
+	blockers, ok := reportBody["blockers"].([]any)
+	if !ok || len(blockers) == 0 {
+		t.Fatalf("report blockers=%T %#v want non-empty blockers list", reportBody["blockers"], reportBody["blockers"])
+	}
+	if reportBody["review_state"] != "changes_requested" {
+		t.Fatalf("report review_state=%v want changes_requested", reportBody["review_state"])
+	}
+	if reportBody["review_latest_iteration"] != float64(1) {
+		t.Fatalf("report review_latest_iteration=%v want 1", reportBody["review_latest_iteration"])
+	}
+	summaries, ok := reportBody["review_task_summaries"].([]any)
+	if !ok || len(summaries) == 0 {
+		t.Fatalf("report review_task_summaries=%T %#v want non-empty", reportBody["review_task_summaries"], reportBody["review_task_summaries"])
 	}
 }
 
@@ -832,6 +874,19 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	var issue map[string]any
 	decodeBody(t, createIssue, &issue)
 	issueID := issue["id"].(string)
+
+	cyclesAfterCreateIssue := apiRequest(t, h, http.MethodGet, "/api/tasks/"+taskID+"/review-cycles", nil, true)
+	if cyclesAfterCreateIssue.Code != http.StatusOK {
+		t.Fatalf("list review cycles after issue status=%d body=%s", cyclesAfterCreateIssue.Code, cyclesAfterCreateIssue.Body.String())
+	}
+	var listedCycles []map[string]any
+	decodeBody(t, cyclesAfterCreateIssue, &listedCycles)
+	if len(listedCycles) == 0 {
+		t.Fatalf("expected review cycle to be present")
+	}
+	if listedCycles[len(listedCycles)-1]["status"] != "review_changes_requested" {
+		t.Fatalf("cycle status after issue create=%v want review_changes_requested", listedCycles[len(listedCycles)-1]["status"])
+	}
 
 	passWithOpenIssues := apiRequest(t, h, http.MethodPatch, "/api/review-cycles/"+cycleID, map[string]any{
 		"status": "review_passed",

@@ -25,7 +25,9 @@ var reviewCycleStatusTransitions = map[string]map[string]bool{
 		"review_passed":            true,
 	},
 	"review_passed": {
-		"review_passed": true,
+		"review_passed":            true,
+		"review_running":           true,
+		"review_changes_requested": true,
 	},
 }
 
@@ -697,28 +699,44 @@ WHERE cycle_id = ?
 }
 
 func (r *ReviewRepo) SetCycleStatusByTaskOpenIssues(ctx context.Context, taskID string) error {
+	_, _, err := r.SyncLatestCycleStatusByTaskOpenIssues(ctx, taskID)
+	return err
+}
+
+func (r *ReviewRepo) SyncLatestCycleStatusByTaskOpenIssues(ctx context.Context, taskID string) (bool, *ReviewCycle, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return fmt.Errorf("task id is required")
+		return false, nil, fmt.Errorf("task id is required")
 	}
+	cycles, err := r.ListCyclesByTask(ctx, taskID)
+	if err != nil {
+		return false, nil, err
+	}
+	if len(cycles) == 0 {
+		return false, nil, nil
+	}
+	latest := cycles[len(cycles)-1]
+
 	open, err := r.CountOpenIssuesByTask(ctx, taskID)
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 	nextStatus := "review_passed"
 	if open > 0 {
 		nextStatus = "review_changes_requested"
 	}
-	_, err = r.db.ExecContext(ctx, `
-UPDATE review_cycles
-SET status = ?, updated_at = ?
-WHERE task_id = ?
-  AND iteration = (SELECT max(iteration) FROM review_cycles WHERE task_id = ?)
-`, nextStatus, formatTimestamp(nowUTC()), taskID, taskID)
+	current, err := normalizeReviewCycleStatus(latest.Status)
 	if err != nil {
-		return fmt.Errorf("set latest cycle status by issues: %w", err)
+		return false, nil, err
 	}
-	return nil
+	if current == nextStatus {
+		return false, latest, nil
+	}
+	if err := r.UpdateCycleStatus(ctx, latest.ID, nextStatus); err != nil {
+		return false, nil, fmt.Errorf("set latest cycle status by issues: %w", err)
+	}
+	latest.Status = nextStatus
+	return true, latest, nil
 }
 
 func (r *ReviewRepo) ListCyclesByTask(ctx context.Context, taskID string) ([]*ReviewCycle, error) {
