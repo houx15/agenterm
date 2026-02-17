@@ -102,6 +102,53 @@ func TestTerminalInputRoutesSessionID(t *testing.T) {
 	}
 }
 
+func TestBroadcastToClientsRespectsSessionSubscription(t *testing.T) {
+	h := New("token", nil)
+
+	clientA := &Client{
+		id:            "a",
+		send:          make(chan []byte, 1),
+		subscribeAll:  false,
+		subscriptions: map[string]struct{}{"s-1": {}},
+	}
+	clientB := &Client{
+		id:            "b",
+		send:          make(chan []byte, 1),
+		subscribeAll:  false,
+		subscriptions: map[string]struct{}{"s-2": {}},
+	}
+	clientAll := &Client{
+		id:            "all",
+		send:          make(chan []byte, 1),
+		subscribeAll:  true,
+		subscriptions: map[string]struct{}{},
+	}
+
+	h.clients = map[string]*Client{
+		clientA.id:   clientA,
+		clientB.id:   clientB,
+		clientAll.id: clientAll,
+	}
+
+	h.broadcastToClients(hubBroadcast{data: []byte(`{"type":"output"}`), sessionID: "s-1"})
+
+	select {
+	case <-clientA.send:
+	default:
+		t.Fatal("expected clientA to receive message for s-1")
+	}
+	select {
+	case <-clientAll.send:
+	default:
+		t.Fatal("expected subscribe-all client to receive message")
+	}
+	select {
+	case <-clientB.send:
+		t.Fatal("did not expect clientB to receive message for s-1")
+	default:
+	}
+}
+
 func TestTokenAuthentication(t *testing.T) {
 	validToken := "secret-token-123"
 

@@ -126,6 +126,25 @@
             border-color: var(--accent);
         }
 
+        .session-group {
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .session-group-header {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-dim);
+            margin: 0 4px 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
         .session-card .kill-btn {
             position: absolute;
             top: 8px;
@@ -902,26 +921,45 @@
             }
 
             empty.style.display = 'none';
-            list.innerHTML = state.windows.map(win => {
-                const key = windowKey(win.session_id || '', win.id);
-                const messages = state.messages[key] || [];
-                const lastMessage = messages[messages.length - 1];
-                const preview = lastMessage ? lastMessage.text.slice(0, 50) : '';
-                const unread = state.unread[key] || 0;
-                const isActive = key === state.activeWindow;
+            const grouped = {};
+            for (const win of state.windows) {
+                const sessionId = win.session_id || 'default';
+                if (!grouped[sessionId]) grouped[sessionId] = [];
+                grouped[sessionId].push(win);
+            }
+
+            list.innerHTML = Object.entries(grouped).map(([sessionId, windows]) => {
+                const cards = windows.map(win => {
+                    const key = windowKey(win.session_id || '', win.id);
+                    const messages = state.messages[key] || [];
+                    const lastMessage = messages[messages.length - 1];
+                    const preview = lastMessage ? lastMessage.text.slice(0, 50) : '';
+                    const unread = state.unread[key] || 0;
+                    const isActive = key === state.activeWindow;
+
+                    return `
+                        <div class="session-card ${isActive ? 'active' : ''}" data-key="${key}">
+                            <button class="kill-btn" data-key="${key}" title="Kill window">×</button>
+                            <div class="session-header">
+                                <span class="status-dot ${win.status || 'idle'}"></span>
+                                <span class="session-name">${parseSessionName(win.name)}</span>
+                            </div>
+                            <div class="session-preview">${escapeHtml(preview)}</div>
+                            <div class="session-meta">
+                                <span>${lastMessage ? formatTimestamp(lastMessage.timestamp) : ''}</span>
+                                ${unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
 
                 return `
-                    <div class="session-card ${isActive ? 'active' : ''}" data-key="${key}">
-                        <button class="kill-btn" data-key="${key}" title="Kill window">×</button>
-                        <div class="session-header">
-                            <span class="status-dot ${win.status || 'idle'}"></span>
-                            <span class="session-name">${parseSessionName(win.name)}</span>
+                    <div class="session-group">
+                        <div class="session-group-header">
+                            <span>${escapeHtml(sessionId)}</span>
+                            <span>${windows.length} window${windows.length === 1 ? '' : 's'}</span>
                         </div>
-                        <div class="session-preview">${escapeHtml(preview)}</div>
-                        <div class="session-meta">
-                            <span>${lastMessage ? formatTimestamp(lastMessage.timestamp) : ''}</span>
-                            ${unread > 0 ? `<span class="unread-badge">${unread}</span>` : ''}
-                        </div>
+                        ${cards}
                     </div>
                 `;
             }).join('');

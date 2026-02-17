@@ -116,18 +116,22 @@ func (h *Hub) Run(ctx context.Context) {
 			log.Printf("client disconnected: %s (total: %d)", client.id, h.ClientCount())
 
 		case msg := <-h.broadcast:
-			h.mu.RLock()
-			for _, c := range h.clients {
-				if !c.wantsSession(msg.sessionID) {
-					continue
-				}
-				select {
-				case c.send <- msg.data:
-				default:
-					log.Printf("client %s send buffer full, dropping message", c.id)
-				}
-			}
-			h.mu.RUnlock()
+			h.broadcastToClients(msg)
+		}
+	}
+}
+
+func (h *Hub) broadcastToClients(msg hubBroadcast) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, c := range h.clients {
+		if !c.wantsSession(msg.sessionID) {
+			continue
+		}
+		select {
+		case c.send <- msg.data:
+		default:
+			log.Printf("client %s send buffer full, dropping message", c.id)
 		}
 	}
 }
