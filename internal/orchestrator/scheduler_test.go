@@ -344,3 +344,145 @@ func TestSchedulerBlocksCreateSessionWhenGlobalModelLimitReached(t *testing.T) {
 		t.Fatalf("reason=%q want model max_parallel", decision.Reason)
 	}
 }
+
+func TestSchedulerBlocksCreateSessionWhenRoleNotInWorkflow(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	profileRepo := db.NewProjectOrchestratorRepo(database.SQL())
+	workflowRepo := db.NewWorkflowRepo(database.SQL())
+	ctx := context.Background()
+
+	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, project.ID); err != nil {
+		t.Fatalf("ensure profile: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "t", Description: "d", Status: "pending"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	workflow := &db.Workflow{
+		ID:      "workflow-role-limit-only-planner",
+		Name:    "PlannerOnly",
+		Scope:   "project",
+		Version: 1,
+		Phases: []*db.WorkflowPhase{
+			{Ordinal: 1, PhaseType: "planning", Role: "planner", MaxParallel: 1},
+		},
+	}
+	if err := workflowRepo.Create(ctx, workflow); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	profile, err := profileRepo.Get(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	profile.WorkflowID = workflow.ID
+	if err := profileRepo.Update(ctx, profile); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	reg, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	o := New(Options{
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		SessionRepo:             sessionRepo,
+		ProjectOrchestratorRepo: profileRepo,
+		WorkflowRepo:            workflowRepo,
+		Registry:                reg,
+	})
+
+	decision := o.checkSessionCreationAllowed(ctx, map[string]any{
+		"task_id":    task.ID,
+		"role":       "coder",
+		"agent_type": "codex",
+	})
+	if decision.Allowed {
+		t.Fatalf("expected session creation to be blocked by workflow role policy")
+	}
+	if !strings.Contains(decision.Reason, "not allowed by workflow") {
+		t.Fatalf("reason=%q want workflow role policy", decision.Reason)
+	}
+}
+
+func TestSchedulerBlocksCreateSessionWhenWorkflowPhaseParallelLimitReached(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	profileRepo := db.NewProjectOrchestratorRepo(database.SQL())
+	workflowRepo := db.NewWorkflowRepo(database.SQL())
+	ctx := context.Background()
+
+	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, project.ID); err != nil {
+		t.Fatalf("ensure profile: %v", err)
+	}
+	task1 := &db.Task{ProjectID: project.ID, Title: "t1", Description: "d", Status: "pending"}
+	task2 := &db.Task{ProjectID: project.ID, Title: "t2", Description: "d", Status: "pending"}
+	if err := taskRepo.Create(ctx, task1); err != nil {
+		t.Fatalf("create task1: %v", err)
+	}
+	if err := taskRepo.Create(ctx, task2); err != nil {
+		t.Fatalf("create task2: %v", err)
+	}
+	workflow := &db.Workflow{
+		ID:      "workflow-coder-parallel-1",
+		Name:    "CoderOne",
+		Scope:   "project",
+		Version: 1,
+		Phases: []*db.WorkflowPhase{
+			{Ordinal: 1, PhaseType: "implementation", Role: "coder", MaxParallel: 1},
+		},
+	}
+	if err := workflowRepo.Create(ctx, workflow); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	profile, err := profileRepo.Get(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	profile.WorkflowID = workflow.ID
+	profile.MaxParallel = 8
+	if err := profileRepo.Update(ctx, profile); err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	if err := sessionRepo.Create(ctx, &db.Session{
+		TaskID: task1.ID, TmuxSessionName: "s1", TmuxWindowID: "@1", AgentType: "codex", Role: "coder", Status: "working",
+	}); err != nil {
+		t.Fatalf("create active session: %v", err)
+	}
+	reg, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	o := New(Options{
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		SessionRepo:             sessionRepo,
+		ProjectOrchestratorRepo: profileRepo,
+		WorkflowRepo:            workflowRepo,
+		Registry:                reg,
+	})
+
+	decision := o.checkSessionCreationAllowed(ctx, map[string]any{
+		"task_id":    task2.ID,
+		"role":       "coder",
+		"agent_type": "codex",
+	})
+	if decision.Allowed {
+		t.Fatalf("expected session creation to be blocked by workflow phase max_parallel")
+	}
+	if !strings.Contains(decision.Reason, "workflow phase max_parallel") {
+		t.Fatalf("reason=%q want workflow phase max_parallel", decision.Reason)
+	}
+}

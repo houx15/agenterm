@@ -61,7 +61,9 @@ func (et *EventTrigger) OnTimer(projectID string) {
 	report, reportErr := et.orchestrator.GenerateProgressReport(ctx, projectID)
 	if reportErr == nil {
 		if blockers, ok := report["blockers"].([]any); ok && len(blockers) > 0 {
-			et.emitEvent(projectID, "project_blocked", map[string]any{"source": "timer", "blockers": blockers})
+			if et.shouldNotifyOnBlocked(ctx, projectID) {
+				et.emitEvent(projectID, "project_blocked", map[string]any{"source": "timer", "blockers": blockers})
+			}
 		}
 	}
 }
@@ -226,4 +228,15 @@ func (et *EventTrigger) resolveReviewCommitHash(sess *db.Session) string {
 		return "unknown"
 	}
 	return hash
+}
+
+func (et *EventTrigger) shouldNotifyOnBlocked(ctx context.Context, projectID string) bool {
+	if et == nil || et.orchestrator == nil || et.orchestrator.projectOrchestratorRepo == nil || strings.TrimSpace(projectID) == "" {
+		return true
+	}
+	profile, err := et.orchestrator.projectOrchestratorRepo.Get(ctx, projectID)
+	if err != nil || profile == nil {
+		return true
+	}
+	return profile.NotifyOnBlocked
 }

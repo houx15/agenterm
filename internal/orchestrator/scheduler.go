@@ -54,6 +54,10 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	activeRole := 0
 	activeModel := 0
 	activeGlobal := 0
+	workflowRoleLimit, workflowRoleKnown := o.resolveWorkflowRolePolicy(ctx, profile.WorkflowID, strings.TrimSpace(role))
+	if strings.TrimSpace(role) != "" && !workflowRoleKnown {
+		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("role %s is not allowed by workflow %s", role, profile.WorkflowID)}
+	}
 	targetModel, roleBinding, modelMismatch := o.resolveTargetModel(ctx, projectID, strings.TrimSpace(role), strings.TrimSpace(agentType), profile)
 	if modelMismatch != "" {
 		return scheduleDecision{Allowed: false, Reason: modelMismatch}
@@ -87,6 +91,9 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	}
 	if profile.MaxParallel > 0 && activeProject >= profile.MaxParallel {
 		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("project max_parallel limit reached (%d)", profile.MaxParallel)}
+	}
+	if workflowRoleLimit > 0 && activeRole >= workflowRoleLimit {
+		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("workflow phase max_parallel limit reached for role %s (%d)", role, workflowRoleLimit)}
 	}
 
 	if roleBinding != nil {
@@ -144,6 +151,35 @@ func (o *Orchestrator) resolveTargetModel(ctx context.Context, projectID string,
 		return strings.TrimSpace(profile.DefaultModel), binding, ""
 	}
 	return "", binding, ""
+}
+
+func (o *Orchestrator) resolveWorkflowRolePolicy(ctx context.Context, workflowID string, role string) (int, bool) {
+	workflowID = strings.TrimSpace(workflowID)
+	role = strings.ToLower(strings.TrimSpace(role))
+	if o == nil || o.workflowRepo == nil || workflowID == "" || role == "" {
+		return 0, true
+	}
+	workflow, err := o.workflowRepo.Get(ctx, workflowID)
+	if err != nil || workflow == nil {
+		return 0, true
+	}
+	limit := 0
+	seenRole := false
+	for _, phase := range workflow.Phases {
+		if phase == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(phase.Role), role) {
+			seenRole = true
+			if phase.MaxParallel > 0 && (limit == 0 || phase.MaxParallel < limit) {
+				limit = phase.MaxParallel
+			}
+		}
+	}
+	if !seenRole {
+		return 0, false
+	}
+	return limit, true
 }
 
 func (o *Orchestrator) getRoleBinding(ctx context.Context, projectID string, role string) *db.RoleBinding {

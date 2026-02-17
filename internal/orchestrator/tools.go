@@ -475,11 +475,38 @@ func summarizeProjectStatus(status map[string]any) map[string]any {
 		}
 		sessionCounts[st]++
 	}
+	blockers := make([]any, 0, 4)
+	if n := taskCounts["blocked"]; n > 0 {
+		blockers = append(blockers, map[string]any{"type": "tasks_blocked", "count": n})
+	}
+	if n := taskCounts["failed"]; n > 0 {
+		blockers = append(blockers, map[string]any{"type": "tasks_failed", "count": n})
+	}
+	if n := sessionCounts["failed"]; n > 0 {
+		blockers = append(blockers, map[string]any{"type": "sessions_failed", "count": n})
+	}
+	queueDepth := 0
+	for _, key := range []string{"pending", "queued", "ready", "todo"} {
+		queueDepth += taskCounts[key]
+	}
+	phase := "planning"
+	if len(blockers) > 0 {
+		phase = "blocked"
+	} else if sessionCounts["waiting_review"] > 0 {
+		phase = "review"
+	} else if sessionCounts["working"] > 0 || sessionCounts["running"] > 0 {
+		phase = "implementation"
+	} else if len(tasks) > 0 && taskCounts["done"] == len(tasks) {
+		phase = "completed"
+	}
 
 	return map[string]any{
 		"project":        project,
 		"task_counts":    taskCounts,
 		"session_counts": sessionCounts,
+		"phase":          phase,
+		"queue_depth":    queueDepth,
+		"blockers":       blockers,
 		"worktree_count": len(worktrees),
 		"tasks_total":    len(tasks),
 		"sessions_total": len(sessions),
