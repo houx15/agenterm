@@ -214,6 +214,153 @@ textarea {
   padding: 0.8rem;
 }
 
+.dashboard-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.dashboard-section {
+  background: rgba(9, 13, 23, 0.75);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+
+.dashboard-section-title {
+  margin-bottom: 0.7rem;
+}
+
+.dashboard-section-title h3 {
+  margin: 0;
+}
+
+.dashboard-project-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.project-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #111a2f;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 0.75rem;
+  cursor: pointer;
+  min-height: 120px;
+}
+
+.project-card:hover {
+  border-color: var(--accent);
+}
+
+.project-card p {
+  margin: 0.35rem 0;
+  color: var(--text-secondary);
+}
+
+.project-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.project-card-head small {
+  color: var(--text-dim);
+}
+
+.project-card-new {
+  border-style: dashed;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.dashboard-session-groups {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dashboard-session-group h4 {
+  margin: 0 0 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.dashboard-session-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+}
+
+.session-grid-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0f172a;
+  color: var(--text-primary);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 0.35rem;
+  min-height: 56px;
+  cursor: pointer;
+}
+
+.session-grid-item:hover {
+  border-color: var(--accent);
+}
+
+.activity-feed-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.activity-feed-list li {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #10172a;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.activity-feed-list small {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.dashboard-empty-state {
+  background: rgba(9, 13, 23, 0.75);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.dashboard-empty-state h3 {
+  margin-top: 0;
+}
+
+.dashboard-error {
+  margin: 0;
+  color: var(--error);
+}
+
+.dashboard-project-detail p {
+  margin: 0.3rem 0;
+}
+
+.dashboard-project-detail ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1rem;
+  color: var(--text-secondary);
+}
+
 .sessions-grid {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -402,6 +549,10 @@ textarea {
 
   .sessions-panel {
     max-height: 180px;
+  }
+
+  .activity-feed-list li {
+    flex-direction: column;
   }
 }
 

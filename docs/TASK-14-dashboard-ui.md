@@ -75,11 +75,11 @@ Build the Dashboard page showing: project overview cards, active session status 
 - Auto-refresh every 30s as fallback
 
 ## Acceptance Criteria
-- [ ] Dashboard shows all active projects with progress
-- [ ] Session grid shows all active sessions with status
-- [ ] Activity feed shows recent events
-- [ ] Clicking project/session navigates to detail view
-- [ ] Real-time updates via WebSocket
+- [x] Dashboard shows all active projects with progress
+- [x] Session grid shows all active sessions with status
+- [x] Activity feed shows recent events
+- [x] Clicking project/session navigates to detail view
+- [x] Real-time updates via WebSocket
 
 ## Notes
 - Keep it simple initially — can be enhanced later

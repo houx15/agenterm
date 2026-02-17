@@ -1,5 +1,12 @@
 const TOKEN_STORAGE_KEY = 'agenterm_token'
 
+export interface CreateProjectInput {
+  name: string
+  repo_path: string
+  playbook?: string
+  status?: string
+}
+
 export function getToken(): string {
   const urlToken = new URLSearchParams(window.location.search).get('token')
   if (urlToken) {
@@ -39,4 +46,23 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
 
   return (await response.json()) as T
+}
+
+export function listProjects<T>() {
+  return apiFetch<T>('/api/projects')
+}
+
+export function listSessions<T>() {
+  return apiFetch<T>('/api/sessions')
+}
+
+export function listProjectTasks<T>(projectID: string) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/tasks`)
+}
+
+export function createProject<T>(input: CreateProjectInput) {
+  return apiFetch<T>('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 }
