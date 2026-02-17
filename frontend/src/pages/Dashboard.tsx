@@ -14,31 +14,47 @@ interface ProjectSummary {
   activeAgents: number
 }
 
+function normalizeStatus(status: string): string {
+  return (status || '').trim().toLowerCase()
+}
+
 function isDoneTask(status: string): boolean {
-  return ['done', 'completed', 'success'].includes((status || '').toLowerCase())
+  return ['done', 'completed', 'success'].includes(normalizeStatus(status))
+}
+
+function isActiveSession(status: string): boolean {
+  return normalizeStatus(status) !== 'completed'
+}
+
+function isSessionStoppedStatus(status: string): boolean {
+  return ['idle', 'disconnected', 'completed', 'stopped', 'terminated'].includes(normalizeStatus(status))
 }
 
 function buildActivityFromData(projects: Project[], tasksByProject: Record<string, Task[]>, sessions: Session[]): DashboardActivity[] {
   const items: DashboardActivity[] = []
 
   for (const session of sessions) {
+    const normalizedStatus = normalizeStatus(session.status)
+    const isStopped = isSessionStoppedStatus(session.status)
+
     items.push({
-      id: `session-${session.id}`,
-      timestamp: session.created_at,
-      text: `${session.agent_type} session started (${session.role})`,
+      id: `session-${session.id}-${session.last_activity_at || session.created_at}`,
+      timestamp: session.last_activity_at || session.created_at,
+      text: isStopped
+        ? `${session.agent_type} session ${session.id.slice(0, 6)} moved to ${normalizedStatus || 'idle'}`
+        : `${session.agent_type} session started (${session.role})`,
     })
   }
 
   for (const project of projects) {
     const projectTasks = tasksByProject[project.id] ?? []
     for (const task of projectTasks) {
-      if (isDoneTask(task.status)) {
-        items.push({
-          id: `task-done-${task.id}`,
-          timestamp: task.updated_at,
-          text: `${task.title} completed in ${project.name}`,
-        })
-      }
+      const normalizedTaskStatus = normalizeStatus(task.status) || 'unknown'
+      items.push({
+        id: `task-status-${task.id}-${task.updated_at}`,
+        timestamp: task.updated_at,
+        text: `${task.title} is ${normalizedTaskStatus} in ${project.name}`,
+      })
     }
   }
 
@@ -54,10 +70,12 @@ function buildLiveActivityFromMessage(lastMessage: { type: string; [key: string]
 
   const now = new Date().toISOString()
   if (lastMessage.type === 'status') {
+    const nextStatus = normalizeStatus(String(lastMessage.status ?? 'unknown'))
+    const stopText = isSessionStoppedStatus(nextStatus) ? 'stopped/idle' : 'started/running'
     return {
       id: `live-status-${String(lastMessage.window ?? 'unknown')}-${Date.now()}`,
       timestamp: now,
-      text: `Session ${String(lastMessage.window ?? '')} changed to ${String(lastMessage.status ?? 'unknown')}`,
+      text: `Session ${String(lastMessage.window ?? '')} ${stopText} (${nextStatus || 'unknown'})`,
     }
   }
 
@@ -71,6 +89,16 @@ function buildLiveActivityFromMessage(lastMessage: { type: string; [key: string]
   }
 
   if (lastMessage.type === 'output' && typeof lastMessage.text === 'string' && lastMessage.text.trim()) {
+    const trimmed = lastMessage.text.trim()
+
+    if (/\b(git\s+commit|commit)\b/i.test(trimmed)) {
+      return {
+        id: `live-commit-${Date.now()}`,
+        timestamp: now,
+        text: `Commit activity detected in ${String(lastMessage.window ?? 'session')}`,
+      }
+    }
+
     return {
       id: `live-output-${Date.now()}`,
       timestamp: now,
@@ -144,6 +172,8 @@ export default function Dashboard() {
     setActivity((prev) => [live, ...prev].slice(0, 12))
   }, [app.lastMessage])
 
+  const activeSessions = useMemo(() => sessions.filter((session) => isActiveSession(session.status)), [sessions])
+
   const projectByTaskID = useMemo(() => {
     const map: Record<string, string> = {}
     for (const project of projects) {
@@ -159,7 +189,7 @@ export default function Dashboard() {
       const tasks = tasksByProject[project.id] ?? []
       const doneTasks = tasks.filter((task) => isDoneTask(task.status)).length
 
-      const activeAgents = sessions.filter((session) => {
+      const activeAgents = activeSessions.filter((session) => {
         if (!session.task_id) {
           return false
         }
@@ -173,12 +203,12 @@ export default function Dashboard() {
         activeAgents,
       }
     })
-  }, [projects, sessions, tasksByProject])
+  }, [activeSessions, projects, tasksByProject])
 
   const groupedSessions = useMemo(() => {
     const grouped: Record<string, { session: Session; projectName: string }[]> = {}
 
-    for (const session of sessions) {
+    for (const session of activeSessions) {
       const projectName = session.task_id ? (projectByTaskID[session.task_id] ?? 'Unassigned') : 'Unassigned'
       if (!grouped[projectName]) {
         grouped[projectName] = []
@@ -187,7 +217,24 @@ export default function Dashboard() {
     }
 
     return grouped
-  }, [projectByTaskID, sessions])
+  }, [activeSessions, projectByTaskID])
+
+  const resourceSummary = useMemo(() => {
+    const allTasks = Object.values(tasksByProject).flat()
+    const doneTasks = allTasks.filter((task) => isDoneTask(task.status)).length
+    const runningSessions = activeSessions.filter((session) => ['running', 'working'].includes(normalizeStatus(session.status))).length
+    const idleSessions = activeSessions.filter((session) => ['idle', 'waiting', 'human_takeover'].includes(normalizeStatus(session.status))).length
+    const taskCompletionRate = allTasks.length > 0 ? Math.round((doneTasks / allTasks.length) * 100) : 0
+
+    return {
+      totalTasks: allTasks.length,
+      doneTasks,
+      activeSessions: activeSessions.length,
+      runningSessions,
+      idleSessions,
+      taskCompletionRate,
+    }
+  }, [activeSessions, tasksByProject])
 
   const selectedSummary = projectSummaries.find((summary) => summary.project.id === selectedProjectID)
 
@@ -253,6 +300,40 @@ export default function Dashboard() {
                 />
               ))}
               <ProjectCard isNewCard onClick={handleCreateProject} />
+            </div>
+          </section>
+
+          <section className="dashboard-section">
+            <div className="dashboard-section-title">
+              <h3>Resource Summary</h3>
+            </div>
+            <div className="dashboard-resource-grid">
+              <article className="dashboard-resource-card">
+                <small>Active Sessions</small>
+                <strong>{resourceSummary.activeSessions}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Running Sessions</small>
+                <strong>{resourceSummary.runningSessions}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Idle Sessions</small>
+                <strong>{resourceSummary.idleSessions}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Tasks Done</small>
+                <strong>
+                  {resourceSummary.doneTasks}/{resourceSummary.totalTasks}
+                </strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Completion</small>
+                <strong>{resourceSummary.taskCompletionRate}%</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Socket</small>
+                <strong>{app.connected ? 'Connected' : 'Offline'}</strong>
+              </article>
             </div>
           </section>
 

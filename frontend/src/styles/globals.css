@@ -295,6 +295,30 @@ textarea {
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
 }
 
+.dashboard-resource-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.dashboard-resource-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #111a2f;
+  padding: 0.65rem 0.7rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.dashboard-resource-card small {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.dashboard-resource-card strong {
+  font-size: 1.05rem;
+}
+
 .session-grid-item {
   border: 1px solid var(--border);
   border-radius: 8px;
