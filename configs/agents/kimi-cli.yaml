@@ -1,0 +1,18 @@
+id: kimi-cli
+name: Kimi CLI
+command: kimi
+resume_command: kimi --resume
+headless_command: kimi --headless
+capabilities:
+  - coding
+  - research
+  - review
+languages:
+  - go
+  - javascript
+  - python
+cost_tier: low
+speed_tier: medium
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: optional

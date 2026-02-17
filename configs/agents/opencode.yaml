@@ -1,0 +1,18 @@
+id: opencode
+name: OpenCode
+command: opencode
+resume_command: opencode resume
+headless_command: opencode run --yes
+capabilities:
+  - coding
+  - review
+  - orchestration
+languages:
+  - go
+  - typescript
+  - python
+cost_tier: low
+speed_tier: fast
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: supported

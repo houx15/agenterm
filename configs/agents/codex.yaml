@@ -1,0 +1,19 @@
+id: codex
+name: OpenAI Codex CLI
+command: codex
+resume_command: codex resume
+headless_command: codex exec --auto-edit
+capabilities:
+  - coding
+  - review
+  - automation
+languages:
+  - go
+  - typescript
+  - python
+  - rust
+cost_tier: medium
+speed_tier: fast
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: supported

@@ -15,6 +15,7 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/parser"
+	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
 	"github.com/user/agenterm/internal/tmux"
 )
@@ -48,6 +49,11 @@ func main() {
 
 	gw := tmux.New(cfg.TmuxSession)
 	psr := parser.New()
+	agentRegistry, err := registry.NewRegistry(cfg.AgentsDir)
+	if err != nil {
+		slog.Error("failed to initialize agent registry", "dir", cfg.AgentsDir, "error", err)
+		os.Exit(1)
+	}
 	h := hub.New(cfg.Token, func(windowID, keys string) {
 		if err := gw.SendKeys(windowID, keys); err != nil {
 			slog.Error("failed to send keys", "window", windowID, "error", err)
@@ -78,7 +84,7 @@ func main() {
 		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
-	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token, cfg.TmuxSession)
+	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token, cfg.TmuxSession, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

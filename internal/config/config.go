@@ -18,6 +18,7 @@ type Config struct {
 	PrintToken  bool
 	DefaultDir  string
 	DBPath      string
+	AgentsDir   string
 }
 
 func Load() (*Config, error) {
@@ -32,6 +33,7 @@ func Load() (*Config, error) {
 		DefaultDir:  filepath.Join(homeDir, "08Coding"),
 		ConfigPath:  filepath.Join(homeDir, ".config", "agenterm", "config"),
 		DBPath:      filepath.Join(homeDir, ".config", "agenterm", "agenterm.db"),
+		AgentsDir:   filepath.Join(homeDir, ".config", "agenterm", "agents"),
 	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
@@ -43,6 +45,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.Token, "token", cfg.Token, "authentication token (auto-generated if empty)")
 	flag.StringVar(&cfg.DefaultDir, "dir", cfg.DefaultDir, "default directory for new windows")
 	flag.StringVar(&cfg.DBPath, "db-path", cfg.DBPath, "path to SQLite database")
+	flag.StringVar(&cfg.AgentsDir, "agents-dir", cfg.AgentsDir, "directory for agent YAML configs")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
 
@@ -96,6 +99,8 @@ func (c *Config) loadFromFile() error {
 			c.DefaultDir = value
 		case "DBPath":
 			c.DBPath = value
+		case "AgentsDir":
+			c.AgentsDir = value
 		}
 	}
 	return nil
@@ -106,7 +111,10 @@ func (c *Config) saveToFile() error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	data := fmt.Sprintf("Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\n", c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath)
+	data := fmt.Sprintf(
+		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\n",
+		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir,
+	)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }
 

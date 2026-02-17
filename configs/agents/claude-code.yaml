@@ -1,0 +1,18 @@
+id: claude-code
+name: Claude Code
+command: claude --model sonnet
+resume_command: claude --resume
+headless_command: claude --print --dangerously-skip-permissions
+capabilities:
+  - coding
+  - review
+  - debugging
+languages:
+  - go
+  - typescript
+  - python
+cost_tier: high
+speed_tier: medium
+supports_session_resume: true
+supports_headless: true
+auto_accept_mode: optional
