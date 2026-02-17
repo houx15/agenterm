@@ -48,6 +48,9 @@ export default function Sidebar({
         <NavLink to="/sessions" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           Sessions
         </NavLink>
+        <NavLink to="/pm-chat" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
+          PM Chat
+        </NavLink>
         <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           Settings
         </NavLink>

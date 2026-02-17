@@ -583,6 +583,231 @@ textarea {
   padding: 1rem;
 }
 
+.pm-chat-page {
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.pm-chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pm-chat-header h2 {
+  margin: 0;
+}
+
+.project-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.project-selector select {
+  background: #0e1628;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+
+.pm-chat-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 0.8rem;
+  min-height: 0;
+  height: calc(100vh - 150px);
+}
+
+.pm-dag-panel,
+.pm-chat-panel {
+  background: rgba(9, 13, 23, 0.75);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-height: 0;
+}
+
+.pm-dag-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pm-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.pm-panel-header h3 {
+  margin: 0;
+}
+
+.pm-panel-header small {
+  color: var(--text-secondary);
+}
+
+.pm-dag-list {
+  overflow: auto;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pm-task-node {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #0f172a;
+  padding: 0.6rem;
+}
+
+.pm-task-node.clickable {
+  cursor: pointer;
+}
+
+.pm-task-node.clickable:hover {
+  border-color: var(--accent);
+}
+
+.pm-task-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pm-task-status {
+  text-transform: lowercase;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.pm-task-deps,
+.pm-task-meta {
+  margin: 0.45rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.pm-task-node.pending {
+  border-color: #4b5563;
+}
+
+.pm-task-node.running {
+  border-color: #3b82f6;
+}
+
+.pm-task-node.reviewing {
+  border-color: #eab308;
+}
+
+.pm-task-node.done {
+  border-color: #10b981;
+}
+
+.pm-task-node.failed {
+  border-color: #ef4444;
+}
+
+.pm-chat-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pm-chat-messages {
+  flex: 1;
+  overflow: auto;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pm-chat-message {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pm-chat-message.user {
+  justify-items: end;
+}
+
+.pm-chat-bubble {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  max-width: min(760px, 100%);
+  white-space: pre-wrap;
+}
+
+.pm-chat-message.user .pm-chat-bubble {
+  background: var(--bg-bubble-input);
+}
+
+.pm-chat-message.assistant .pm-chat-bubble {
+  background: var(--bg-bubble-output);
+}
+
+.pm-chat-message.tool .pm-chat-bubble {
+  background: var(--bg-bubble-code);
+  font-size: 0.9rem;
+}
+
+.pm-chat-message.error .pm-chat-bubble {
+  background: var(--bg-bubble-error);
+}
+
+.pm-confirm-row {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.pm-inline-task-link {
+  border: 0;
+  border-bottom: 1px dashed var(--accent);
+  color: var(--accent);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pm-streaming-indicator {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.pm-chat-input-row {
+  border-top: 1px solid var(--border);
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pm-chat-input-row textarea {
+  resize: none;
+  min-height: 70px;
+  max-height: 180px;
+  background: #090f1a;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem;
+}
+
+.pm-chat-input-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -621,6 +846,15 @@ textarea {
 
   .activity-feed-list li {
     flex-direction: column;
+  }
+
+  .pm-chat-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .pm-dag-panel {
+    max-height: 260px;
   }
 }
 
