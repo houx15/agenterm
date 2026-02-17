@@ -110,9 +110,22 @@ func (r *Registry) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
-	path := filepath.Join(r.dir, id+".yaml")
-	if err := os.Remove(path); err != nil {
+
+	deleted := false
+	for _, ext := range []string{".yaml", ".yml"} {
+		path := filepath.Join(r.dir, id+ext)
+		err := os.Remove(path)
+		if err == nil {
+			deleted = true
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		return fmt.Errorf("delete agent config %q: %w", path, err)
+	}
+	if !deleted {
+		return fmt.Errorf("delete agent config %q: %w", filepath.Join(r.dir, id+".yaml"), os.ErrNotExist)
 	}
 
 	r.mu.Lock()

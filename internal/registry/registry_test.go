@@ -90,3 +90,32 @@ func TestRegistrySaveValidation(t *testing.T) {
 		t.Fatalf("expected invalid id error")
 	}
 }
+
+func TestRegistryDeleteSupportsYMLExtension(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := []byte("id: custom-yml\nname: Custom YML\ncommand: run\n")
+	if err := os.WriteFile(filepath.Join(dir, "custom-yml.yml"), content, 0o644); err != nil {
+		t.Fatalf("write yml: %v", err)
+	}
+
+	r, err := NewRegistry(dir)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	if r.Get("custom-yml") == nil {
+		t.Fatalf("expected custom-yml to be loaded")
+	}
+
+	if err := r.Delete("custom-yml"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if r.Get("custom-yml") != nil {
+		t.Fatalf("expected custom-yml to be deleted from cache")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "custom-yml.yml")); !os.IsNotExist(err) {
+		t.Fatalf("expected .yml file removed, stat err = %v", err)
+	}
+}
