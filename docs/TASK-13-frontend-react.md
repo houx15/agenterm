@@ -139,14 +139,14 @@ var Assets embed.FS
 - SPA routing works (refresh on /sessions doesn't 404)
 
 ## Acceptance Criteria
-- [ ] React app builds to static files embeddable in Go
-- [ ] Sidebar navigation between Dashboard/Sessions/Settings
-- [ ] WebSocket connection with auto-reconnect
-- [ ] Terminal component renders xterm.js with full I/O
-- [ ] Chat view shows classified messages with action buttons
-- [ ] Dark theme matching current design
-- [ ] Mobile responsive (sidebar collapses)
-- [ ] Dev mode: `npm run dev` with proxy to Go backend
+- [x] React app builds to static files embeddable in Go
+- [x] Sidebar navigation between Dashboard/Sessions/Settings
+- [x] WebSocket connection with auto-reconnect
+- [x] Terminal component renders xterm.js with full I/O
+- [x] Chat view shows classified messages with action buttons
+- [x] Dark theme matching current design
+- [x] Mobile responsive (sidebar collapses)
+- [x] Dev mode: `npm run dev` with proxy to Go backend
 
 ## Notes
 - Keep the frontend lightweight — no heavy state management (React context is enough)
