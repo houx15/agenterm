@@ -56,9 +56,10 @@ func TestProtocolMarshalOutputMessage(t *testing.T) {
 
 func TestProtocolMarshalClientMessage(t *testing.T) {
 	msg := ClientMessage{
-		Type:   "input",
-		Window: "@0",
-		Keys:   "ls -la\n",
+		Type:      "input",
+		SessionID: "demo-session",
+		Window:    "@0",
+		Keys:      "ls -la\n",
 	}
 
 	data, err := json.Marshal(msg)
@@ -77,8 +78,27 @@ func TestProtocolMarshalClientMessage(t *testing.T) {
 	if decoded.Window != "@0" {
 		t.Errorf("window mismatch: got %q", decoded.Window)
 	}
+	if decoded.SessionID != "demo-session" {
+		t.Errorf("session mismatch: got %q", decoded.SessionID)
+	}
 	if decoded.Keys != "ls -la\n" {
 		t.Errorf("keys mismatch: got %q", decoded.Keys)
+	}
+}
+
+func TestTerminalInputRoutesSessionID(t *testing.T) {
+	h := New("token", nil)
+	calls := 0
+	h.SetOnTerminalInputWithSession(func(sessionID string, windowID string, keys string) {
+		calls++
+		if sessionID != "s-1" || windowID != "@9" || keys != "pwd\n" {
+			t.Fatalf("unexpected callback payload: session=%q window=%q keys=%q", sessionID, windowID, keys)
+		}
+	})
+
+	h.handleTerminalInput("s-1", "@9", "pwd\n")
+	if calls != 1 {
+		t.Fatalf("expected callback to be called once, got %d", calls)
 	}
 }
 

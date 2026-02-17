@@ -20,10 +20,15 @@ type Hub struct {
 	unregister       chan *Client
 	broadcast        chan []byte
 	onInput          func(windowID string, keys string)
+	onInputBySession func(sessionID string, windowID string, keys string)
 	onTerminalInput  func(windowID string, keys string)
+	onTerminalBySess func(sessionID string, windowID string, keys string)
 	onTerminalResize func(windowID string, cols int, rows int)
+	onResizeBySess   func(sessionID string, windowID string, cols int, rows int)
 	onNewWindow      func(name string)
+	onNewBySession   func(sessionID string, name string)
 	onKillWindow     func(windowID string)
+	onKillBySession  func(sessionID string, windowID string)
 	token            string
 	defaultDir       string
 	mu               sync.RWMutex
@@ -199,7 +204,16 @@ func (h *Hub) BroadcastTerminal(msg TerminalDataMessage) {
 }
 
 func (h *Hub) BroadcastStatus(windowID string, status string) {
-	msg := StatusMessage{Type: "status", Window: windowID, Status: status}
+	h.BroadcastStatusForSession("", windowID, status)
+}
+
+func (h *Hub) BroadcastStatusForSession(sessionID string, windowID string, status string) {
+	msg := StatusMessage{
+		Type:      "status",
+		SessionID: sessionID,
+		Window:    windowID,
+		Status:    status,
+	}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("error marshaling status message: %v", err)
@@ -231,33 +245,53 @@ func (h *Hub) ClientCount() int {
 	return len(h.clients)
 }
 
-func (h *Hub) handleInput(windowID string, keys string) {
+func (h *Hub) handleInput(sessionID string, windowID string, keys string) {
+	if h.onInputBySession != nil {
+		h.onInputBySession(sessionID, windowID, keys)
+		return
+	}
 	if h.onInput != nil {
 		h.onInput(windowID, keys)
 	}
 }
 
-func (h *Hub) handleTerminalInput(windowID string, keys string) {
+func (h *Hub) handleTerminalInput(sessionID string, windowID string, keys string) {
+	if h.onTerminalBySess != nil {
+		h.onTerminalBySess(sessionID, windowID, keys)
+		return
+	}
 	if h.onTerminalInput != nil {
 		h.onTerminalInput(windowID, keys)
 		return
 	}
-	h.handleInput(windowID, keys)
+	h.handleInput(sessionID, windowID, keys)
 }
 
-func (h *Hub) handleTerminalResize(windowID string, cols int, rows int) {
+func (h *Hub) handleTerminalResize(sessionID string, windowID string, cols int, rows int) {
+	if h.onResizeBySess != nil {
+		h.onResizeBySess(sessionID, windowID, cols, rows)
+		return
+	}
 	if h.onTerminalResize != nil {
 		h.onTerminalResize(windowID, cols, rows)
 	}
 }
 
-func (h *Hub) handleNewWindow(name string) {
+func (h *Hub) handleNewWindow(sessionID string, name string) {
+	if h.onNewBySession != nil {
+		h.onNewBySession(sessionID, name)
+		return
+	}
 	if h.onNewWindow != nil {
 		h.onNewWindow(name)
 	}
 }
 
-func (h *Hub) handleKillWindow(windowID string) {
+func (h *Hub) handleKillWindow(sessionID string, windowID string) {
+	if h.onKillBySession != nil {
+		h.onKillBySession(sessionID, windowID)
+		return
+	}
 	if h.onKillWindow != nil {
 		h.onKillWindow(windowID)
 	}
@@ -275,8 +309,28 @@ func (h *Hub) SetOnTerminalInput(fn func(windowID string, keys string)) {
 	h.onTerminalInput = fn
 }
 
+func (h *Hub) SetOnInputWithSession(fn func(sessionID string, windowID string, keys string)) {
+	h.onInputBySession = fn
+}
+
+func (h *Hub) SetOnTerminalInputWithSession(fn func(sessionID string, windowID string, keys string)) {
+	h.onTerminalBySess = fn
+}
+
 func (h *Hub) SetOnTerminalResize(fn func(windowID string, cols int, rows int)) {
 	h.onTerminalResize = fn
+}
+
+func (h *Hub) SetOnTerminalResizeWithSession(fn func(sessionID string, windowID string, cols int, rows int)) {
+	h.onResizeBySess = fn
+}
+
+func (h *Hub) SetOnNewWindowWithSession(fn func(sessionID string, name string)) {
+	h.onNewBySession = fn
+}
+
+func (h *Hub) SetOnKillWindowWithSession(fn func(sessionID string, windowID string)) {
+	h.onKillBySession = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

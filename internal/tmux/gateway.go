@@ -26,6 +26,8 @@ type Gateway struct {
 	paneToWindow map[string]string
 	mu           sync.RWMutex
 	wg           sync.WaitGroup
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 func New(session string) *Gateway {
@@ -255,17 +257,33 @@ func (g *Gateway) handleEvent(event Event) {
 }
 
 func (g *Gateway) Stop() error {
-	if g.stdin != nil {
-		g.stdin.Close()
-	}
-	if g.process != nil && g.process.Process != nil {
-		g.process.Process.Kill()
-	}
-	g.wg.Wait()
-	if g.process != nil {
-		g.process.Wait()
-	}
-	return nil
+	g.closeOnce.Do(func() {
+		if g.stdin != nil {
+			if err := g.stdin.Close(); err != nil {
+				g.closeErr = err
+			}
+			g.stdin = nil
+		}
+
+		if g.process != nil && g.process.Process != nil {
+			_ = g.process.Process.Kill()
+		}
+
+		g.wg.Wait()
+
+		if g.process != nil {
+			_ = g.process.Wait()
+		}
+	})
+	return g.closeErr
+}
+
+func (g *Gateway) Close() error {
+	return g.Stop()
+}
+
+func (g *Gateway) SessionName() string {
+	return g.session
 }
 
 func (g *Gateway) Events() <-chan Event {

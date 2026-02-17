@@ -53,21 +53,21 @@ func (c *Client) readPump(ctx context.Context) {
 		switch msg.Type {
 		case "input":
 			if msg.Window != "" && msg.Keys != "" {
-				c.hub.handleInput(msg.Window, msg.Keys)
+				c.hub.handleInput(msg.SessionID, msg.Window, msg.Keys)
 			}
 		case "terminal_input":
 			if msg.Window != "" && msg.Keys != "" {
-				c.hub.handleTerminalInput(msg.Window, msg.Keys)
+				c.hub.handleTerminalInput(msg.SessionID, msg.Window, msg.Keys)
 			}
 		case "terminal_resize":
 			if msg.Window != "" && msg.Cols > 0 && msg.Rows > 0 {
-				c.hub.handleTerminalResize(msg.Window, msg.Cols, msg.Rows)
+				c.hub.handleTerminalResize(msg.SessionID, msg.Window, msg.Cols, msg.Rows)
 			}
 		case "subscribe":
 		case "new_window":
-			c.hub.handleNewWindow(msg.Name)
+			c.hub.handleNewWindow(msg.SessionID, msg.Name)
 		case "kill_window":
-			c.hub.handleKillWindow(msg.Window)
+			c.hub.handleKillWindow(msg.SessionID, msg.Window)
 		default:
 			c.hub.SendError(c, "unknown message type: "+msg.Type)
 		}

@@ -10,16 +10,18 @@ type RateLimiter struct {
 	mu       sync.Mutex
 	pending  map[string]*pendingOutput
 	interval time.Duration
-	onFlush  func(windowID string, msg OutputMessage)
+	onFlush  func(key string, msg OutputMessage)
 }
 
 type pendingOutput struct {
-	texts   []string
-	class   string
-	ids     []string
-	ts      int64
-	actions []ActionMessage
-	timer   *time.Timer
+	sessionID string
+	windowID  string
+	texts     []string
+	class     string
+	ids       []string
+	ts        int64
+	actions   []ActionMessage
+	timer     *time.Timer
 }
 
 func NewRateLimiter(interval time.Duration, onFlush func(string, OutputMessage)) *RateLimiter {
@@ -34,14 +36,16 @@ func (r *RateLimiter) Add(msg OutputMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	windowID := msg.Window
-	p, exists := r.pending[windowID]
+	key := rateLimitKey(msg.SessionID, msg.Window)
+	p, exists := r.pending[key]
 	if !exists {
 		p = &pendingOutput{
-			class: msg.Class,
-			ts:    msg.Ts,
+			sessionID: msg.SessionID,
+			windowID:  msg.Window,
+			class:     msg.Class,
+			ts:        msg.Ts,
 		}
-		r.pending[windowID] = p
+		r.pending[key] = p
 	}
 
 	p.texts = append(p.texts, msg.Text)
@@ -54,32 +58,33 @@ func (r *RateLimiter) Add(msg OutputMessage) {
 
 	if p.timer == nil {
 		p.timer = time.AfterFunc(r.interval, func() {
-			r.flushWindow(windowID)
+			r.flushWindow(key)
 		})
 	}
 }
 
-func (r *RateLimiter) flushWindow(windowID string) {
+func (r *RateLimiter) flushWindow(key string) {
 	r.mu.Lock()
-	p, exists := r.pending[windowID]
+	p, exists := r.pending[key]
 	if !exists {
 		r.mu.Unlock()
 		return
 	}
-	delete(r.pending, windowID)
+	delete(r.pending, key)
 	r.mu.Unlock()
 
 	if r.onFlush != nil && len(p.texts) > 0 {
 		msg := OutputMessage{
-			Type:    "output",
-			Window:  windowID,
-			Text:    strings.Join(p.texts, ""),
-			Class:   p.class,
-			ID:      strings.Join(p.ids, ","),
-			Ts:      p.ts,
-			Actions: p.actions,
+			Type:      "output",
+			SessionID: p.sessionID,
+			Window:    p.windowID,
+			Text:      strings.Join(p.texts, ""),
+			Class:     p.class,
+			ID:        strings.Join(p.ids, ","),
+			Ts:        p.ts,
+			Actions:   p.actions,
 		}
-		r.onFlush(windowID, msg)
+		r.onFlush(key, msg)
 	}
 }
 
@@ -94,4 +99,8 @@ func (r *RateLimiter) FlushAll() {
 	for _, w := range windows {
 		r.flushWindow(w)
 	}
+}
+
+func rateLimitKey(sessionID string, windowID string) string {
+	return sessionID + "::" + windowID
 }

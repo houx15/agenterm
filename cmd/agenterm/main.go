@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,242 @@ import (
 )
 
 var version = "0.1.0"
+
+type sessionRuntime struct {
+	gateway *tmux.Gateway
+	parser  *parser.Parser
+}
+
+type runtimeState struct {
+	cfg            *config.Config
+	manager        *tmux.Manager
+	hub            *hub.Hub
+	mu             sync.RWMutex
+	sessions       map[string]*sessionRuntime
+	windowToSessID map[string]string
+}
+
+func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub) *runtimeState {
+	return &runtimeState{
+		cfg:            cfg,
+		manager:        manager,
+		hub:            h,
+		sessions:       make(map[string]*sessionRuntime),
+		windowToSessID: make(map[string]string),
+	}
+}
+
+func (s *runtimeState) resolveSessionID(sessionID string, windowID string) string {
+	if sessionID != "" {
+		return sessionID
+	}
+	if windowID != "" {
+		s.mu.RLock()
+		mapped := s.windowToSessID[windowID]
+		s.mu.RUnlock()
+		if mapped != "" {
+			return mapped
+		}
+	}
+	return s.cfg.TmuxSession
+}
+
+func (s *runtimeState) ensureSession(ctx context.Context, sessionID string) (*sessionRuntime, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = s.cfg.TmuxSession
+	}
+
+	s.mu.RLock()
+	if rt, ok := s.sessions[sessionID]; ok {
+		s.mu.RUnlock()
+		return rt, nil
+	}
+	s.mu.RUnlock()
+
+	gw, err := s.manager.AttachSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	rt := &sessionRuntime{gateway: gw, parser: parser.New()}
+
+	s.mu.Lock()
+	if existing, ok := s.sessions[sessionID]; ok {
+		s.mu.Unlock()
+		rt.parser.Close()
+		return existing, nil
+	}
+	s.sessions[sessionID] = rt
+	s.mu.Unlock()
+
+	s.registerWindows(sessionID, gw.ListWindows())
+	s.broadcastWindows()
+	s.startSessionLoops(ctx, sessionID, rt)
+
+	return rt, nil
+}
+
+func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, rt *sessionRuntime) {
+	go func() {
+		for event := range rt.gateway.Events() {
+			switch event.Type {
+			case tmux.EventOutput:
+				if event.WindowID != "" {
+					s.setWindowSession(event.WindowID, sessionID)
+					s.hub.BroadcastTerminal(hub.TerminalDataMessage{
+						Type:      "terminal_data",
+						SessionID: sessionID,
+						Window:    event.WindowID,
+						Text:      event.Data,
+					})
+				}
+				rt.parser.Feed(event.WindowID, event.Data)
+			case tmux.EventWindowAdd, tmux.EventWindowClose, tmux.EventWindowRenamed:
+				s.registerWindows(sessionID, rt.gateway.ListWindows())
+				s.broadcastWindows()
+			}
+		}
+	}()
+
+	go func() {
+		for msg := range rt.parser.Messages() {
+			s.hub.BroadcastOutput(hub.OutputMessage{
+				Type:      "output",
+				SessionID: sessionID,
+				Window:    msg.WindowID,
+				Text:      msg.Text,
+				Class:     string(msg.Class),
+				Actions:   convertActions(msg.Actions),
+				ID:        msg.ID,
+				Ts:        msg.Timestamp.Unix(),
+			})
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				windows := rt.gateway.ListWindows()
+				s.registerWindows(sessionID, windows)
+				for _, w := range windows {
+					status := rt.parser.Status(w.ID)
+					s.hub.BroadcastStatusForSession(sessionID, w.ID, string(status))
+				}
+			}
+		}
+	}()
+}
+
+func (s *runtimeState) setWindowSession(windowID string, sessionID string) {
+	s.mu.Lock()
+	s.windowToSessID[windowID] = sessionID
+	s.mu.Unlock()
+}
+
+func (s *runtimeState) registerWindows(sessionID string, windows []tmux.Window) {
+	s.mu.Lock()
+	for _, w := range windows {
+		s.windowToSessID[w.ID] = sessionID
+	}
+	s.mu.Unlock()
+}
+
+func (s *runtimeState) broadcastWindows() {
+	s.mu.RLock()
+	all := make([]hub.WindowInfo, 0)
+	for sessionID, rt := range s.sessions {
+		all = append(all, convertWindows(sessionID, rt.gateway.ListWindows())...)
+	}
+	s.mu.RUnlock()
+	s.hub.BroadcastWindows(all)
+}
+
+func (s *runtimeState) sendKeys(ctx context.Context, sessionID string, windowID string, keys string) error {
+	targetSession := s.resolveSessionID(sessionID, windowID)
+	rt, err := s.ensureSession(ctx, targetSession)
+	if err != nil {
+		return err
+	}
+	return rt.gateway.SendKeys(windowID, keys)
+}
+
+func (s *runtimeState) sendRaw(ctx context.Context, sessionID string, windowID string, keys string) error {
+	targetSession := s.resolveSessionID(sessionID, windowID)
+	rt, err := s.ensureSession(ctx, targetSession)
+	if err != nil {
+		return err
+	}
+	return rt.gateway.SendRaw(windowID, keys)
+}
+
+func (s *runtimeState) resizeWindow(ctx context.Context, sessionID string, windowID string, cols int, rows int) error {
+	targetSession := s.resolveSessionID(sessionID, windowID)
+	rt, err := s.ensureSession(ctx, targetSession)
+	if err != nil {
+		return err
+	}
+	return rt.gateway.ResizeWindow(windowID, cols, rows)
+}
+
+func (s *runtimeState) newWindow(ctx context.Context, sessionID string, name string) error {
+	targetSession := s.resolveSessionID(sessionID, "")
+	rt, err := s.ensureSession(ctx, targetSession)
+	if err != nil {
+		return err
+	}
+	if err := rt.gateway.NewWindow(name, s.cfg.DefaultDir); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	s.registerWindows(targetSession, rt.gateway.ListWindows())
+	s.broadcastWindows()
+	return nil
+}
+
+func (s *runtimeState) killWindow(ctx context.Context, sessionID string, windowID string) error {
+	targetSession := s.resolveSessionID(sessionID, windowID)
+	rt, err := s.ensureSession(ctx, targetSession)
+	if err != nil {
+		return err
+	}
+	if err := rt.gateway.KillWindow(windowID); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	s.broadcastWindows()
+	return nil
+}
+
+func (s *runtimeState) close() {
+	s.mu.Lock()
+	parsers := make([]*parser.Parser, 0, len(s.sessions))
+	for _, rt := range s.sessions {
+		parsers = append(parsers, rt.parser)
+	}
+	s.sessions = make(map[string]*sessionRuntime)
+	s.windowToSessID = make(map[string]string)
+	s.mu.Unlock()
+
+	s.manager.Close()
+	for _, p := range parsers {
+		p.Close()
+	}
+}
+
+func (s *runtimeState) defaultSessionWindows() []tmux.Window {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if rt, ok := s.sessions[s.cfg.TmuxSession]; ok {
+		return rt.gateway.ListWindows()
+	}
+	return nil
+}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
@@ -46,65 +283,69 @@ func main() {
 		}
 	}()
 
-	gw := tmux.New(cfg.TmuxSession)
-	psr := parser.New()
-	h := hub.New(cfg.Token, func(windowID, keys string) {
-		if err := gw.SendKeys(windowID, keys); err != nil {
-			slog.Error("failed to send keys", "window", windowID, "error", err)
+	manager := tmux.NewManager(cfg.DefaultDir)
+	h := hub.New(cfg.Token, nil)
+	state := newRuntimeState(cfg, manager, h)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	if _, err := state.ensureSession(ctx, cfg.TmuxSession); err != nil {
+		slog.Error("failed to attach default tmux session", "session", cfg.TmuxSession, "error", err)
+		os.Exit(1)
+	}
+
+	h.SetOnInputWithSession(func(sessionID string, windowID string, keys string) {
+		if err := state.sendKeys(ctx, sessionID, windowID, keys); err != nil {
+			slog.Error("failed to send keys", "session", sessionID, "window", windowID, "error", err)
 		}
 	})
-	h.SetOnTerminalInput(func(windowID, keys string) {
-		if err := gw.SendRaw(windowID, keys); err != nil {
-			slog.Error("failed to send raw input", "window", windowID, "error", err)
+	h.SetOnTerminalInputWithSession(func(sessionID string, windowID string, keys string) {
+		if err := state.sendRaw(ctx, sessionID, windowID, keys); err != nil {
+			slog.Error("failed to send raw input", "session", sessionID, "window", windowID, "error", err)
 		}
 	})
-	h.SetOnTerminalResize(func(windowID string, cols int, rows int) {
-		if err := gw.ResizeWindow(windowID, cols, rows); err != nil {
-			slog.Error("failed to resize terminal", "window", windowID, "cols", cols, "rows", rows, "error", err)
+	h.SetOnTerminalResizeWithSession(func(sessionID string, windowID string, cols int, rows int) {
+		if err := state.resizeWindow(ctx, sessionID, windowID, cols, rows); err != nil {
+			slog.Error("failed to resize terminal", "session", sessionID, "window", windowID, "cols", cols, "rows", rows, "error", err)
 		}
 	})
-	h.SetOnNewWindow(func(name string) {
-		if err := gw.NewWindow(name, cfg.DefaultDir); err != nil {
-			slog.Error("failed to create window", "error", err)
+	h.SetOnNewWindowWithSession(func(sessionID string, name string) {
+		if err := state.newWindow(ctx, sessionID, name); err != nil {
+			slog.Error("failed to create window", "session", sessionID, "error", err)
 		}
-		time.Sleep(100 * time.Millisecond)
-		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
-	h.SetOnKillWindow(func(windowID string) {
-		if err := gw.KillWindow(windowID); err != nil {
-			slog.Error("failed to kill window", "error", err)
+	h.SetOnKillWindowWithSession(func(sessionID string, windowID string) {
+		if err := state.killWindow(ctx, sessionID, windowID); err != nil {
+			slog.Error("failed to kill window", "session", sessionID, "window", windowID, "error", err)
 		}
-		time.Sleep(100 * time.Millisecond)
-		h.BroadcastWindows(convertWindows(gw.ListWindows()))
 	})
 	h.SetDefaultDir(cfg.DefaultDir)
-	apiRouter := api.NewRouter(appDB.SQL(), gw, h, cfg.Token, cfg.TmuxSession)
+
+	defaultGateway, err := manager.GetGateway(cfg.TmuxSession)
+	if err != nil {
+		slog.Error("failed to resolve default gateway", "session", cfg.TmuxSession, "error", err)
+		os.Exit(1)
+	}
+
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, h, cfg.Token, cfg.TmuxSession)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	if err := gw.Start(ctx); err != nil {
-		slog.Error("Failed to connect to tmux", "error", err)
-		os.Exit(1)
-	}
-
 	go h.Run(ctx)
-	h.BroadcastWindows(convertWindows(gw.ListWindows()))
-	go processEvents(ctx, gw, psr, h)
+	state.broadcastWindows()
 
-	printStartupBanner(cfg, gw.ListWindows())
+	printStartupBanner(cfg, state.defaultSessionWindows())
 
 	if err := srv.Start(ctx); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
 
-	gracefulShutdown(gw, psr, h)
+	gracefulShutdown(state, h)
 }
 
 func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
@@ -130,62 +371,14 @@ func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
 	fmt.Println("\nCtrl+C to stop")
 }
 
-func processEvents(ctx context.Context, gw *tmux.Gateway, psr *parser.Parser, h *hub.Hub) {
-	go func() {
-		for event := range gw.Events() {
-			switch event.Type {
-			case tmux.EventOutput:
-				if event.WindowID != "" {
-					h.BroadcastTerminal(hub.TerminalDataMessage{
-						Type:   "terminal_data",
-						Window: event.WindowID,
-						Text:   event.Data,
-					})
-				}
-				psr.Feed(event.WindowID, event.Data)
-			case tmux.EventWindowAdd, tmux.EventWindowClose, tmux.EventWindowRenamed:
-				h.BroadcastWindows(convertWindows(gw.ListWindows()))
-			}
-		}
-	}()
-
-	go func() {
-		for msg := range psr.Messages() {
-			h.BroadcastOutput(hub.OutputMessage{
-				Type:    "output",
-				Window:  msg.WindowID,
-				Text:    msg.Text,
-				Class:   string(msg.Class),
-				Actions: convertActions(msg.Actions),
-				ID:      msg.ID,
-				Ts:      msg.Timestamp.Unix(),
-			})
-		}
-	}()
-
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			windows := gw.ListWindows()
-			for _, w := range windows {
-				status := psr.Status(w.ID)
-				h.BroadcastStatus(w.ID, string(status))
-			}
-		}
-	}
-}
-
-func convertWindows(windows []tmux.Window) []hub.WindowInfo {
+func convertWindows(sessionID string, windows []tmux.Window) []hub.WindowInfo {
 	result := make([]hub.WindowInfo, len(windows))
 	for i, w := range windows {
 		result[i] = hub.WindowInfo{
-			ID:     w.ID,
-			Name:   w.Name,
-			Status: string(parser.StatusIdle),
+			ID:        w.ID,
+			SessionID: sessionID,
+			Name:      w.Name,
+			Status:    string(parser.StatusIdle),
 		}
 	}
 	return result
@@ -202,16 +395,11 @@ func convertActions(actions []parser.QuickAction) []hub.ActionMessage {
 	return result
 }
 
-func gracefulShutdown(gw *tmux.Gateway, psr *parser.Parser, h *hub.Hub) {
+func gracefulShutdown(state *runtimeState, h *hub.Hub) {
 	slog.Info("shutting down...")
 
 	h.FlushPendingOutput()
-
-	if err := gw.Stop(); err != nil {
-		slog.Error("gateway stop error", "error", err)
-	}
-
-	psr.Close()
+	state.close()
 
 	slog.Info("agenterm stopped")
 }

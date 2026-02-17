@@ -5,19 +5,21 @@ type ServerMessage struct {
 }
 
 type OutputMessage struct {
-	Type    string          `json:"type"`
-	Window  string          `json:"window"`
-	Text    string          `json:"text"`
-	Class   string          `json:"class"`
-	Actions []ActionMessage `json:"actions,omitempty"`
-	ID      string          `json:"id"`
-	Ts      int64           `json:"ts"`
+	Type      string          `json:"type"`
+	SessionID string          `json:"session_id,omitempty"`
+	Window    string          `json:"window"`
+	Text      string          `json:"text"`
+	Class     string          `json:"class"`
+	Actions   []ActionMessage `json:"actions,omitempty"`
+	ID        string          `json:"id"`
+	Ts        int64           `json:"ts"`
 }
 
 type TerminalDataMessage struct {
-	Type   string `json:"type"`
-	Window string `json:"window"`
-	Text   string `json:"text"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	Window    string `json:"window"`
+	Text      string `json:"text"`
 }
 
 type ActionMessage struct {
@@ -31,24 +33,27 @@ type WindowsMessage struct {
 }
 
 type WindowInfo struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	ID        string `json:"id"`
+	SessionID string `json:"session_id,omitempty"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
 }
 
 type StatusMessage struct {
-	Type   string `json:"type"`
-	Window string `json:"window"`
-	Status string `json:"status"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	Window    string `json:"window"`
+	Status    string `json:"status"`
 }
 
 type ClientMessage struct {
-	Type   string `json:"type"`
-	Window string `json:"window"`
-	Keys   string `json:"keys"`
-	Name   string `json:"name,omitempty"`
-	Cols   int    `json:"cols,omitempty"`
-	Rows   int    `json:"rows,omitempty"`
+	Type      string `json:"type"`
+	SessionID string `json:"session_id,omitempty"`
+	Window    string `json:"window"`
+	Keys      string `json:"keys"`
+	Name      string `json:"name,omitempty"`
+	Cols      int    `json:"cols,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
 }
 
 type NewWindowMessage struct {

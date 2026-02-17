@@ -17,6 +17,9 @@ func TestGatewayNew(t *testing.T) {
 	if g.session != "test-session" {
 		t.Errorf("session = %q, want 'test-session'", g.session)
 	}
+	if got := g.SessionName(); got != "test-session" {
+		t.Errorf("SessionName() = %q, want test-session", got)
+	}
 }
 
 func TestGatewayListWindowsEmpty(t *testing.T) {

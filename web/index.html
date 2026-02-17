@@ -862,6 +862,19 @@
             return `<span class="model">${escapeHtml(name)}</span>`;
         }
 
+        function windowKey(sessionId, windowId) {
+            return `${sessionId || ''}::${windowId || ''}`;
+        }
+
+        function parseWindowKey(key) {
+            const idx = key.indexOf('::');
+            if (idx < 0) return { session_id: '', window: key };
+            return {
+                session_id: key.slice(0, idx),
+                window: key.slice(idx + 2),
+            };
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -890,15 +903,16 @@
 
             empty.style.display = 'none';
             list.innerHTML = state.windows.map(win => {
-                const messages = state.messages[win.id] || [];
+                const key = windowKey(win.session_id || '', win.id);
+                const messages = state.messages[key] || [];
                 const lastMessage = messages[messages.length - 1];
                 const preview = lastMessage ? lastMessage.text.slice(0, 50) : '';
-                const unread = state.unread[win.id] || 0;
-                const isActive = win.id === state.activeWindow;
+                const unread = state.unread[key] || 0;
+                const isActive = key === state.activeWindow;
 
                 return `
-                    <div class="session-card ${isActive ? 'active' : ''}" data-id="${win.id}">
-                        <button class="kill-btn" data-id="${win.id}" title="Kill window">×</button>
+                    <div class="session-card ${isActive ? 'active' : ''}" data-key="${key}">
+                        <button class="kill-btn" data-key="${key}" title="Kill window">×</button>
                         <div class="session-header">
                             <span class="status-dot ${win.status || 'idle'}"></span>
                             <span class="session-name">${parseSessionName(win.name)}</span>
@@ -915,15 +929,15 @@
             list.querySelectorAll('.kill-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    const id = btn.dataset.id;
-                    showKillModal(id);
+                    const key = btn.dataset.key;
+                    showKillModal(key);
                 });
             });
 
             list.querySelectorAll('.session-card').forEach(card => {
                 card.addEventListener('click', () => {
-                    const id = card.dataset.id;
-                    setActiveWindow(id);
+                    const key = card.dataset.key;
+                    setActiveWindow(key);
                 });
             });
         }
@@ -947,7 +961,12 @@
 
         killModalConfirm.addEventListener('click', () => {
             if (windowToKill) {
-                connection.send({ type: 'kill_window', window: windowToKill });
+                const target = parseWindowKey(windowToKill);
+                connection.send({
+                    type: 'kill_window',
+                    session_id: target.session_id,
+                    window: target.window
+                });
             }
             hideKillModal();
         });
@@ -996,9 +1015,11 @@
                 }
                 terminal.onData((data) => {
                     if (!state.activeWindow) return;
+                    const target = parseWindowKey(state.activeWindow);
                     connection.send({
                         type: 'terminal_input',
-                        window: state.activeWindow,
+                        session_id: target.session_id,
+                        window: target.window,
                         keys: data,
                     });
                 });
@@ -1013,13 +1034,14 @@
             queueTerminalResize();
         }
 
-        function appendRawOutput(windowId, text) {
+        function appendRawOutput(sessionId, windowId, text) {
+            const key = windowKey(sessionId || '', windowId || '');
             if (!windowId || !text) return;
-            const current = state.rawBuffers[windowId] || '';
+            const current = state.rawBuffers[key] || '';
             const next = current + text;
             const maxLen = 300000;
-            state.rawBuffers[windowId] = next.length > maxLen ? next.slice(next.length - maxLen) : next;
-            if (terminal && state.activeWindow === windowId && getViewMode(windowId) === 'raw') {
+            state.rawBuffers[key] = next.length > maxLen ? next.slice(next.length - maxLen) : next;
+            if (terminal && state.activeWindow === key && getViewMode(key) === 'raw') {
                 terminal.write(text);
             }
         }
@@ -1040,9 +1062,11 @@
         function sendTerminalResize() {
             if (!terminal || !state.activeWindow || getViewMode(state.activeWindow) !== 'raw') return;
             if (!terminal.cols || !terminal.rows) return;
+            const target = parseWindowKey(state.activeWindow);
             connection.send({
                 type: 'terminal_resize',
-                window: state.activeWindow,
+                session_id: target.session_id,
+                window: target.window,
                 cols: terminal.cols,
                 rows: terminal.rows,
             });
@@ -1077,7 +1101,7 @@
             state.activeWindow = id;
             state.unread[id] = 0;
 
-            const win = state.windows.find(w => w.id === id);
+            const win = state.windows.find(w => windowKey(w.session_id || '', w.id) === id);
             const nameEl = document.getElementById('active-session-name');
             if (win) {
                 nameEl.innerHTML = parseSessionName(win.name);
@@ -1170,11 +1194,13 @@
 
         function sendInput(text, showBubble = true) {
             if (!state.activeWindow || !text) return;
+            const target = parseWindowKey(state.activeWindow);
 
             if (getViewMode(state.activeWindow) === 'raw') {
                 connection.send({
                     type: 'terminal_input',
-                    window: state.activeWindow,
+                    session_id: target.session_id,
+                    window: target.window,
                     keys: text
                 });
                 return;
@@ -1182,7 +1208,8 @@
 
             const message = {
                 type: 'input',
-                window: state.activeWindow,
+                session_id: target.session_id,
+                window: target.window,
                 keys: text
             };
 
@@ -1215,9 +1242,9 @@
             switch (data.type) {
                 case 'windows':
                     state.windows = data.list || [];
-                    const activeStillExists = state.activeWindow && state.windows.some(w => w.id === state.activeWindow);
+                    const activeStillExists = state.activeWindow && state.windows.some(w => windowKey(w.session_id || '', w.id) === state.activeWindow);
                     if (!activeStillExists && state.windows.length > 0) {
-                        setActiveWindow(state.windows[0].id);
+                        setActiveWindow(windowKey(state.windows[0].session_id || '', state.windows[0].id));
                     } else if (!activeStillExists && state.windows.length === 0) {
                         state.activeWindow = null;
                         renderMessages();
@@ -1229,38 +1256,40 @@
 
                 case 'terminal_data':
                     if (data.window) {
-                        appendRawOutput(data.window, data.text || '');
+                        appendRawOutput(data.session_id || '', data.window, data.text || '');
                     }
                     break;
 
                 case 'output':
-                    const windowId = data.window || state.activeWindow;
-                    if (!windowId) {
+                    const windowId = data.window;
+                    const outputKey = windowId ? windowKey(data.session_id || '', windowId) : state.activeWindow;
+                    if (!outputKey) {
                         break;
                     }
-                    if (!state.messages[windowId]) {
-                        state.messages[windowId] = [];
+                    if (!state.messages[outputKey]) {
+                        state.messages[outputKey] = [];
                     }
 
-                    state.messages[windowId].push({
+                    state.messages[outputKey].push({
                         text: data.text,
                         class: data.class || 'output',
                         actions: data.actions,
                         timestamp: Date.now()
                     });
 
-                    if (windowId !== state.activeWindow) {
-                        state.unread[windowId] = (state.unread[windowId] || 0) + 1;
+                    if (outputKey !== state.activeWindow) {
+                        state.unread[outputKey] = (state.unread[outputKey] || 0) + 1;
                     }
 
                     renderSidebar();
-                    if (windowId === state.activeWindow && getViewMode(windowId) === 'stream') {
+                    if (outputKey === state.activeWindow && getViewMode(outputKey) === 'stream') {
                         renderMessages();
                     }
                     break;
 
                 case 'status':
-                    const win = state.windows.find(w => w.id === data.window);
+                    const statusKey = windowKey(data.session_id || '', data.window || '');
+                    const win = state.windows.find(w => windowKey(w.session_id || '', w.id) === statusKey);
                     if (win) {
                         win.status = data.status;
                         renderSidebar();
@@ -1338,8 +1367,10 @@
 
         modalCreate.addEventListener('click', () => {
             const name = modalInput.value.trim();
+            const active = state.activeWindow ? parseWindowKey(state.activeWindow) : { session_id: '', window: '' };
             const message = {
                 type: 'new_window',
+                session_id: active.session_id,
                 name: name || ''
             };
             connection.send(message);
