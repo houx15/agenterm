@@ -1,10 +1,14 @@
-.PHONY: build run clean web-build
+.PHONY: build run clean web-build frontend-build
 
-build:
+build: frontend-build
 	go build -o bin/agenterm ./cmd/agenterm
 
 run:
 	go run ./cmd/agenterm
+
+frontend-build:
+	npm --prefix frontend install
+	npm --prefix frontend run build
 
 web-build:
 	npm --prefix web install
