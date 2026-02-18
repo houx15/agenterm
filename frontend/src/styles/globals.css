@@ -672,6 +672,50 @@ textarea {
   gap: 0.5rem;
 }
 
+.settings-phase-editor {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.settings-phase-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.settings-phase-editor-modes {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.settings-phase-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+}
+
+.settings-phase-table th,
+.settings-phase-table td {
+  border: 1px solid var(--border);
+  padding: 0.45rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.settings-phase-table th {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.settings-phase-table input {
+  width: 100%;
+}
+
+.settings-phase-add {
+  justify-self: flex-start;
+}
+
 .settings-message {
   margin: 0;
   color: var(--text-secondary);

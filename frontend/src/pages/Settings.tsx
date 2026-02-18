@@ -12,6 +12,7 @@ import {
 import type { AgentConfig, Playbook, PlaybookPhase } from '../api/types'
 
 type TabKey = 'agents' | 'playbooks'
+type PhaseEditorMode = 'table' | 'raw'
 
 const DEFAULT_AGENT: AgentConfig = {
   id: '',
@@ -48,6 +49,38 @@ function stringifyPhases(phases: PlaybookPhase[]): string {
   return JSON.stringify(phases, null, 2)
 }
 
+function parseRawPhases(value: string): { phases: PlaybookPhase[]; error?: string } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return { phases: [], error: 'Phases must be valid JSON.' }
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { phases: [], error: 'Raw phases must be a JSON array.' }
+  }
+
+  const phases: PlaybookPhase[] = []
+  for (let i = 0; i < parsed.length; i += 1) {
+    const item = parsed[i]
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { phases: [], error: `Phase ${i + 1} must be an object.` }
+    }
+    const record = item as Record<string, unknown>
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    const agent = typeof record.agent === 'string' ? record.agent.trim() : ''
+    const role = typeof record.role === 'string' ? record.role.trim() : ''
+    const description = typeof record.description === 'string' ? record.description : ''
+    if (!name || !agent || !role) {
+      return { phases: [], error: `Phase ${i + 1} requires non-empty name, agent, and role.` }
+    }
+    phases.push({ name, agent, role, description })
+  }
+
+  return { phases }
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('agents')
   const [agents, setAgents] = useState<AgentConfig[]>([])
@@ -57,6 +90,7 @@ export default function Settings() {
   const [agentDraft, setAgentDraft] = useState<AgentConfig>(DEFAULT_AGENT)
   const [playbookDraft, setPlaybookDraft] = useState<Playbook>(DEFAULT_PLAYBOOK)
   const [phasesEditor, setPhasesEditor] = useState<string>(stringifyPhases(DEFAULT_PLAYBOOK.phases))
+  const [phaseEditorMode, setPhaseEditorMode] = useState<PhaseEditorMode>('table')
   const [loading, setLoading] = useState<boolean>(true)
   const [busy, setBusy] = useState<boolean>(false)
   const [message, setMessage] = useState<string>('')
@@ -136,6 +170,45 @@ export default function Settings() {
     setMessage('')
   }
 
+  function setDraftPhases(phases: PlaybookPhase[]) {
+    setPlaybookDraft((prev) => ({ ...prev, phases }))
+    setPhasesEditor(stringifyPhases(phases))
+  }
+
+  function updatePhase(index: number, patch: Partial<PlaybookPhase>) {
+    const next = playbookDraft.phases.map((phase, i) => (i === index ? { ...phase, ...patch } : phase))
+    setDraftPhases(next)
+  }
+
+  function addPhase() {
+    const next = [...playbookDraft.phases, { name: '', agent: '', role: '', description: '' }]
+    setDraftPhases(next)
+  }
+
+  function removePhase(index: number) {
+    const next = playbookDraft.phases.filter((_, i) => i !== index)
+    setDraftPhases(next.length > 0 ? next : [{ name: '', agent: '', role: '', description: '' }])
+  }
+
+  function switchPhaseEditorMode(mode: PhaseEditorMode) {
+    if (mode === phaseEditorMode) {
+      return
+    }
+    if (mode === 'raw') {
+      setPhasesEditor(stringifyPhases(playbookDraft.phases))
+      setPhaseEditorMode('raw')
+      return
+    }
+    const parsed = parseRawPhases(phasesEditor)
+    if (parsed.error) {
+      setMessage(parsed.error)
+      return
+    }
+    setDraftPhases(parsed.phases)
+    setPhaseEditorMode('table')
+    setMessage('')
+  }
+
   async function saveAgent() {
     setBusy(true)
     setMessage('')
@@ -190,7 +263,15 @@ export default function Settings() {
     setBusy(true)
     setMessage('')
     try {
-      const phases = JSON.parse(phasesEditor) as PlaybookPhase[]
+      let phases = playbookDraft.phases
+      if (phaseEditorMode === 'raw') {
+        const parsed = parseRawPhases(phasesEditor)
+        if (parsed.error) {
+          setMessage(parsed.error)
+          return
+        }
+        phases = parsed.phases
+      }
       const payload: Playbook = {
         ...playbookDraft,
         phases,
@@ -200,12 +281,12 @@ export default function Settings() {
         setPlaybooks((prev) => [...prev.filter((item) => item.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
         setSelectedPlaybookID(created.id)
         setPlaybookDraft(created)
-        setPhasesEditor(stringifyPhases(created.phases))
+        setDraftPhases(created.phases)
       } else {
         const updated = await updatePlaybook<Playbook>(selectedPlaybookID, payload)
         setPlaybooks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
         setPlaybookDraft(updated)
-        setPhasesEditor(stringifyPhases(updated.phases))
+        setDraftPhases(updated.phases)
       }
       setMessage('Playbook saved.')
     } catch (error) {
@@ -404,10 +485,70 @@ export default function Settings() {
                 }
               />
             </label>
-            <label>
-              Phase Editor (JSON array)
-              <textarea className="settings-code" value={phasesEditor} onChange={(event) => setPhasesEditor(event.target.value)} />
-            </label>
+            <div className="settings-phase-editor">
+              <div className="settings-phase-editor-head">
+                <span>Phases</span>
+                <div className="settings-phase-editor-modes">
+                  <button
+                    type="button"
+                    className={`secondary-btn ${phaseEditorMode === 'table' ? 'active' : ''}`}
+                    onClick={() => switchPhaseEditorMode('table')}
+                  >
+                    Table
+                  </button>
+                  <button
+                    type="button"
+                    className={`secondary-btn ${phaseEditorMode === 'raw' ? 'active' : ''}`}
+                    onClick={() => switchPhaseEditorMode('raw')}
+                  >
+                    Raw JSON
+                  </button>
+                </div>
+              </div>
+              {phaseEditorMode === 'table' ? (
+                <>
+                  <table className="settings-phase-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Agent</th>
+                        <th>Role</th>
+                        <th>Description</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {playbookDraft.phases.map((phase, index) => (
+                        <tr key={`${index}-${phase.name}-${phase.agent}`}>
+                          <td>
+                            <input value={phase.name} onChange={(event) => updatePhase(index, { name: event.target.value })} />
+                          </td>
+                          <td>
+                            <input value={phase.agent} onChange={(event) => updatePhase(index, { agent: event.target.value })} />
+                          </td>
+                          <td>
+                            <input value={phase.role} onChange={(event) => updatePhase(index, { role: event.target.value })} />
+                          </td>
+                          <td>
+                            <input value={phase.description} onChange={(event) => updatePhase(index, { description: event.target.value })} />
+                          </td>
+                          <td>
+                            <button type="button" className="action-btn danger" onClick={() => removePhase(index)}>
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button type="button" className="secondary-btn settings-phase-add" onClick={addPhase}>
+                    + Add Phase
+                  </button>
+                </>
+              ) : (
+                <textarea className="settings-code" value={phasesEditor} onChange={(event) => setPhasesEditor(event.target.value)} />
+              )}
+            </div>
             <div className="settings-actions">
               <button type="button" className="primary-btn" disabled={busy} onClick={() => void savePlaybook()}>
                 Save Playbook
