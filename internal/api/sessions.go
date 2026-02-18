@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -12,7 +13,7 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/db"
-	"github.com/user/agenterm/internal/session"
+	sessionpkg "github.com/user/agenterm/internal/session"
 	"github.com/user/agenterm/internal/tmux"
 )
 
@@ -57,7 +58,7 @@ func (h *handler) createSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.lifecycle != nil {
-		sess, err := h.lifecycle.CreateSession(r.Context(), session.CreateSessionRequest{
+		sess, err := h.lifecycle.CreateSession(r.Context(), sessionpkg.CreateSessionRequest{
 			TaskID:    taskID,
 			AgentType: req.AgentType,
 			Role:      req.Role,
@@ -244,6 +245,14 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workDir := h.resolveSessionWorkDir(r.Context(), session)
+	if err := sessionpkg.ValidateCommandPolicy(req.Text, workDir); err != nil {
+		if policyErr, ok := err.(*sessionpkg.CommandPolicyError); ok {
+			sessionpkg.AuditCommandPolicyViolation(workDir, session.ID, req.Text, policyErr)
+		}
+		jsonError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	gw, err := h.gatewayForSession(session.TmuxSessionName)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
@@ -264,6 +273,27 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *handler) resolveSessionWorkDir(ctx context.Context, sess *db.Session) string {
+	if h == nil || sess == nil || strings.TrimSpace(sess.TaskID) == "" {
+		return ""
+	}
+	task, err := h.taskRepo.Get(ctx, sess.TaskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	project, err := h.projectRepo.Get(ctx, task.ProjectID)
+	if err != nil || project == nil {
+		return ""
+	}
+	if strings.TrimSpace(task.WorktreeID) != "" {
+		wt, err := h.worktreeRepo.Get(ctx, task.WorktreeID)
+		if err == nil && wt != nil && strings.TrimSpace(wt.Path) != "" {
+			return wt.Path
+		}
+	}
+	return project.RepoPath
 }
 
 func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
@@ -572,8 +602,10 @@ func mapSessionError(err error) (int, string) {
 		return http.StatusOK, ""
 	}
 	switch {
-	case session.IsNotFound(err):
+	case sessionpkg.IsNotFound(err):
 		return http.StatusNotFound, err.Error()
+	case sessionpkg.IsCommandPolicyError(err):
+		return http.StatusForbidden, err.Error()
 	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "unknown agent type"):
 		return http.StatusBadRequest, err.Error()
 	default:

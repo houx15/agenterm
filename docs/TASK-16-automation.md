@@ -1,10 +1,10 @@
 # Task: automation
 
 ## Context
-The SPEC defines several automation mechanisms that make the system autonomous: auto-commit hooks, idle/completion detection, and the coordinator flow (coder → reviewer → feedback loop). These automations reduce the need for human intervention in the standard development workflow.
+The SPEC defines several automation mechanisms that make the system autonomous: auto-commit, idle/completion detection, and the coordinator flow (coder → reviewer → feedback loop). These automations reduce the need for human intervention in the standard development workflow.
 
 ## Objective
-Implement auto-commit hooks, the coordinator coder↔reviewer flow, and the human takeover mechanism as described in SPEC Sections 5.2-5.4.
+Implement auto-commit, the coordinator coder↔reviewer flow, and the human takeover mechanism as described in SPEC Sections 5.2-5.4.
 
 ## Dependencies
 - Depends on: TASK-12 (session-lifecycle), TASK-11 (worktree-management), TASK-15 (orchestrator)
@@ -16,9 +16,7 @@ Implement auto-commit hooks, the coordinator coder↔reviewer flow, and the huma
 ### Files to Create
 - `internal/automation/autocommit.go` — Auto-commit: periodic check + commit for worktrees
 - `internal/automation/coordinator.go` — Coordinator: monitors coder output, sends diffs to reviewer, relays feedback
-- `internal/automation/hooks.go` — Generate Claude Code hook configs for worktrees
-- `scripts/auto-commit.sh` — Shell script for auto-commit (injected into worktrees)
-- `scripts/on-agent-stop.sh` — Shell script for agent completion (injected into worktrees)
+- `internal/automation/hooks.go` — Hook policy adapter (non-intrusive/no mutation by default)
 
 ### Files to Modify
 - `internal/session/monitor.go` — Enhanced idle detection with marker file and git commit checks
@@ -49,22 +47,13 @@ func (ac *AutoCommitter) Run(ctx context.Context) {
 }
 ```
 
-### Step 2: Claude Code hooks generation
-When creating a session with agent_type=claude-code, auto-inject:
-```json
-{
-  "hooks": {
-    "PostToolUse": [{
-      "matcher": "Write|Edit",
-      "hooks": [{"type": "command", "command": ".orchestra/hooks/auto-commit.sh"}]
-    }],
-    "Stop": [{
-      "hooks": [{"type": "command", "command": ".orchestra/hooks/on-agent-stop.sh"}]
-    }]
-  }
-}
-```
-Write this to `<worktree>/.claude/settings.json`.
+### Step 2: Claude Code hook policy (non-intrusive)
+Do not mutate tool-managed hook files (including `<worktree>/.claude/settings.json`) during session creation.
+
+Hook strategy is user/tool-owned:
+- Users may configure hooks in their own tooling.
+- Orchestrator/automation should operate through commands, git state, and session monitor signals.
+- `internal/automation/hooks.go` should remain safe/no-op unless an explicit future opt-in policy is introduced.
 
 ### Step 3: Coordinator flow
 ```go
@@ -115,13 +104,14 @@ Add to session monitor:
 - Check if agent process has exited (tmux window closed)
 
 ## Acceptance Criteria
-- [ ] Auto-commit runs periodically for active worktrees
-- [ ] Claude Code hooks injected on session creation
-- [ ] Coordinator detects review-ready commits and sends to reviewer
-- [ ] Reviewer feedback relayed back to coder
-- [ ] Human takeover pauses all automation for the session
-- [ ] Returning control resumes automation
-- [ ] Completion detection works with marker files and git commits
+- [x] Auto-commit runs periodically for active worktrees
+- [x] Session creation does not mutate `.claude/settings.json` or other tool-managed hook files
+- [x] Automation pipeline still operates via commands and repository/session signals without requiring injected hooks
+- [x] Coordinator detects review-ready commits and sends to reviewer
+- [x] Reviewer feedback relayed back to coder
+- [x] Human takeover pauses all automation for the session
+- [x] Returning control resumes automation
+- [x] Completion detection works with marker files and git commits
 
 ## Notes
 - Auto-commit should NOT commit if there's a merge conflict

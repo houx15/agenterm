@@ -32,6 +32,8 @@ type Hub struct {
 	onNewSessionByID func(sessionID string, name string)
 	onKillWindow     func(windowID string)
 	onKillBySession  func(sessionID string, windowID string)
+	onTerminalAttach func(sessionID string)
+	onTerminalDetach func(sessionID string)
 	onOrchestrator   func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)
 	token            string
 	defaultDir       string
@@ -42,6 +44,8 @@ type Hub struct {
 	batchEnabled     bool
 	ctxWrap          *ctxWrapper
 	running          atomic.Bool
+	attachMu         sync.Mutex
+	attachedSessions map[string]int
 }
 
 type ctxWrapper struct {
@@ -55,14 +59,15 @@ type clientRegistration struct {
 
 func New(token string, onInput func(string, string)) *Hub {
 	h := &Hub{
-		clients:      make(map[string]*Client),
-		register:     make(chan *clientRegistration, 16),
-		unregister:   make(chan *Client, 16),
-		broadcast:    make(chan hubBroadcast, 256),
-		onInput:      onInput,
-		token:        token,
-		batchEnabled: true,
-		ctxWrap:      &ctxWrapper{ctx: context.Background()},
+		clients:          make(map[string]*Client),
+		register:         make(chan *clientRegistration, 16),
+		unregister:       make(chan *Client, 16),
+		broadcast:        make(chan hubBroadcast, 256),
+		onInput:          onInput,
+		token:            token,
+		batchEnabled:     true,
+		ctxWrap:          &ctxWrapper{ctx: context.Background()},
+		attachedSessions: make(map[string]int),
 	}
 	h.rateLimiter = NewRateLimiter(defaultBatchInterval, func(windowID string, msg OutputMessage) {
 		h.sendBroadcast(msg)
@@ -404,6 +409,44 @@ func (h *Hub) handleKillWindow(sessionID string, windowID string) {
 	}
 }
 
+func (h *Hub) handleTerminalAttach(sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	shouldNotify := false
+	h.attachMu.Lock()
+	h.attachedSessions[sessionID]++
+	if h.attachedSessions[sessionID] == 1 {
+		shouldNotify = true
+	}
+	h.attachMu.Unlock()
+
+	if shouldNotify && h.onTerminalAttach != nil {
+		h.onTerminalAttach(sessionID)
+	}
+}
+
+func (h *Hub) handleTerminalDetach(sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	shouldNotify := false
+	h.attachMu.Lock()
+	count := h.attachedSessions[sessionID]
+	switch {
+	case count <= 1:
+		delete(h.attachedSessions, sessionID)
+		shouldNotify = count == 1
+	default:
+		h.attachedSessions[sessionID] = count - 1
+	}
+	h.attachMu.Unlock()
+
+	if shouldNotify && h.onTerminalDetach != nil {
+		h.onTerminalDetach(sessionID)
+	}
+}
+
 func (h *Hub) SetOnNewWindow(fn func(name string)) {
 	h.onNewWindow = fn
 }
@@ -450,6 +493,14 @@ func (h *Hub) SetOnKillWindowWithSession(fn func(sessionID string, windowID stri
 
 func (h *Hub) SetOnOrchestratorChat(fn func(ctx context.Context, projectID string, message string) (<-chan OrchestratorServerMessage, error)) {
 	h.onOrchestrator = fn
+}
+
+func (h *Hub) SetOnTerminalAttach(fn func(sessionID string)) {
+	h.onTerminalAttach = fn
+}
+
+func (h *Hub) SetOnTerminalDetach(fn func(sessionID string)) {
+	h.onTerminalDetach = fn
 }
 
 func (h *Hub) SetDefaultDir(dir string) {

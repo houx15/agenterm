@@ -105,6 +105,8 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/projects/{id}/worktrees", handler.createWorktree)
 	mux.HandleFunc("GET /api/worktrees/{id}/git-status", handler.getWorktreeGitStatus)
 	mux.HandleFunc("GET /api/worktrees/{id}/git-log", handler.getWorktreeGitLog)
+	mux.HandleFunc("POST /api/worktrees/{id}/merge", handler.mergeWorktree)
+	mux.HandleFunc("POST /api/worktrees/{id}/resolve-conflict", handler.resolveWorktreeConflict)
 	mux.HandleFunc("DELETE /api/worktrees/{id}", handler.deleteWorktree)
 
 	mux.HandleFunc("POST /api/tasks/{id}/sessions", handler.createSession)

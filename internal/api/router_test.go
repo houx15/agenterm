@@ -381,6 +381,164 @@ func TestWorktreeGitEndpoints(t *testing.T) {
 	}
 }
 
+func TestWorktreeMergeEndpointAndResolveConflict(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+	repo := initGitRepo(t)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+		}
+	}
+	getBranch := func() string {
+		cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git current branch failed: %v\n%s", err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+	defaultBranch := getBranch()
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "Repo", "repo_path": repo,
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "Task merge", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	wtPath := filepath.Join(repo, ".worktrees", "merge-task")
+	createWT := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/worktrees", map[string]any{
+		"branch_name": "feature/merge-task",
+		"path":        wtPath,
+		"task_id":     taskID,
+	}, true)
+	if createWT.Code != http.StatusCreated {
+		t.Fatalf("create worktree status=%d body=%s", createWT.Code, createWT.Body.String())
+	}
+	var wt map[string]any
+	decodeBody(t, createWT, &wt)
+	worktreeID := wt["id"].(string)
+
+	// Create mergeable change in worktree branch.
+	if err := os.WriteFile(filepath.Join(wtPath, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatalf("write feature file: %v", err)
+	}
+	runWT := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wtPath
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git(wt) %v failed: %v\n%s", args, err, string(out))
+		}
+	}
+	runWT("add", "feature.txt")
+	runWT("commit", "-m", "feature work")
+
+	mergeResp := apiRequest(t, h, http.MethodPost, "/api/worktrees/"+worktreeID+"/merge", map[string]any{
+		"target_branch": defaultBranch,
+	}, true)
+	if mergeResp.Code != http.StatusOK {
+		t.Fatalf("merge status=%d body=%s", mergeResp.Code, mergeResp.Body.String())
+	}
+	var mergeBody map[string]any
+	decodeBody(t, mergeResp, &mergeBody)
+	if mergeBody["status"] != "merged" {
+		t.Fatalf("merge status=%v want merged", mergeBody["status"])
+	}
+
+	// Prepare base file for conflict scenario.
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write shared base: %v", err)
+	}
+	run("add", "shared.txt")
+	run("commit", "-m", "base shared")
+
+	createTask2 := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "Task conflict", "description": "D",
+	}, true)
+	var task2 map[string]any
+	decodeBody(t, createTask2, &task2)
+	taskID2 := task2["id"].(string)
+	createWT2 := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/worktrees", map[string]any{
+		"branch_name": "feature/conflict",
+		"path":        filepath.Join(repo, ".worktrees", "conflict-task"),
+		"task_id":     taskID2,
+	}, true)
+	if createWT2.Code != http.StatusCreated {
+		t.Fatalf("create worktree2 status=%d body=%s", createWT2.Code, createWT2.Body.String())
+	}
+	var wt2 map[string]any
+	decodeBody(t, createWT2, &wt2)
+	worktreeID2 := wt2["id"].(string)
+	wtPath2 := filepath.Join(repo, ".worktrees", "conflict-task")
+	runWT2 := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wtPath2
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git(wt2) %v failed: %v\n%s", args, err, string(out))
+		}
+	}
+	if err := os.WriteFile(filepath.Join(wtPath2, "shared.txt"), []byte("feature-change\n"), 0o644); err != nil {
+		t.Fatalf("write shared in wt2: %v", err)
+	}
+	runWT2("add", "shared.txt")
+	runWT2("commit", "-m", "feature conflict")
+	if err := os.WriteFile(filepath.Join(repo, "shared.txt"), []byte("main-change\n"), 0o644); err != nil {
+		t.Fatalf("write shared in main: %v", err)
+	}
+	run("add", "shared.txt")
+	run("commit", "-m", "main conflict")
+
+	mergeConflict := apiRequest(t, h, http.MethodPost, "/api/worktrees/"+worktreeID2+"/merge", map[string]any{
+		"target_branch": defaultBranch,
+	}, true)
+	if mergeConflict.Code != http.StatusOK {
+		t.Fatalf("merge conflict status=%d body=%s", mergeConflict.Code, mergeConflict.Body.String())
+	}
+	var mergeConflictBody map[string]any
+	decodeBody(t, mergeConflict, &mergeConflictBody)
+	if mergeConflictBody["status"] != "conflict" {
+		t.Fatalf("merge conflict status=%v want conflict", mergeConflictBody["status"])
+	}
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID2+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusCreated {
+		t.Fatalf("create coder session status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+
+	resolveResp := apiRequest(t, h, http.MethodPost, "/api/worktrees/"+worktreeID2+"/resolve-conflict", map[string]any{
+		"message": "resolve and resubmit",
+	}, true)
+	if resolveResp.Code != http.StatusOK {
+		t.Fatalf("resolve conflict status=%d body=%s", resolveResp.Code, resolveResp.Body.String())
+	}
+	var resolveBody map[string]any
+	decodeBody(t, resolveResp, &resolveBody)
+	if resolveBody["status"] != "resolution_requested" {
+		t.Fatalf("resolve status=%v want resolution_requested", resolveBody["status"])
+	}
+	if resolveBody["session_id"] != session["id"] {
+		t.Fatalf("resolve session_id=%v want %v", resolveBody["session_id"], session["id"])
+	}
+}
+
 func TestWorktreeRejectsPathOutsideProjectRepo(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
 	repo := initGitRepo(t)
@@ -497,6 +655,16 @@ func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
 	}
 	if len(gw.sentRaw) == 0 {
 		t.Fatalf("expected command to be sent to gateway")
+	}
+	beforeBlocked := len(gw.sentRaw)
+	blocked := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/send", map[string]any{
+		"text": "rm -rf /tmp/unsafe\\n",
+	}, true)
+	if blocked.Code != http.StatusForbidden {
+		t.Fatalf("blocked send status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+	if len(gw.sentRaw) != beforeBlocked {
+		t.Fatalf("blocked command should not be forwarded to gateway")
 	}
 
 	take := apiRequest(t, h, http.MethodPatch, "/api/sessions/"+sessionID+"/takeover", map[string]any{

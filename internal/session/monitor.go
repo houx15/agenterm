@@ -47,6 +47,10 @@ type Monitor struct {
 	lastClass  string
 	lastText   string
 	buffer     *ringBuffer
+
+	lastCompletionCheck time.Time
+	markerDoneCached    bool
+	readyCommitCached   bool
 }
 
 func NewMonitor(cfg MonitorConfig) *Monitor {
@@ -140,10 +144,11 @@ func (m *Monitor) detectStatus() string {
 	if m.isIdle() {
 		return "idle"
 	}
-	if m.isMarkerDone() {
+	m.refreshCompletionSignals(false)
+	if m.isMarkerDoneCached() {
 		return "completed"
 	}
-	if m.hasReadyForReviewCommit() {
+	if m.hasReadyForReviewCommitCached() {
 		return "waiting_review"
 	}
 	return "working"
@@ -194,13 +199,46 @@ func (m *Monitor) hasReadyForReviewCommit() bool {
 }
 
 func (m *Monitor) statusOnSessionExit() string {
-	if m.isMarkerDone() {
+	m.refreshCompletionSignals(true)
+	if m.isMarkerDoneCached() {
 		return "completed"
 	}
-	if m.hasReadyForReviewCommit() {
+	if m.hasReadyForReviewCommitCached() {
 		return "waiting_review"
 	}
 	return "failed"
+}
+
+func (m *Monitor) refreshCompletionSignals(force bool) {
+	if strings.TrimSpace(m.workDir) == "" {
+		return
+	}
+	now := time.Now().UTC()
+	m.mu.RLock()
+	lastCheck := m.lastCompletionCheck
+	m.mu.RUnlock()
+	if !force && !lastCheck.IsZero() && now.Sub(lastCheck) < 5*time.Second {
+		return
+	}
+	marker := m.isMarkerDone()
+	ready := m.hasReadyForReviewCommit()
+	m.mu.Lock()
+	m.lastCompletionCheck = now
+	m.markerDoneCached = marker
+	m.readyCommitCached = ready
+	m.mu.Unlock()
+}
+
+func (m *Monitor) isMarkerDoneCached() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.markerDoneCached
+}
+
+func (m *Monitor) hasReadyForReviewCommitCached() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.readyCommitCached
 }
 
 func (m *Monitor) persistStatus(ctx context.Context, status string) {

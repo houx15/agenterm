@@ -149,6 +149,73 @@ func TestBroadcastToClientsRespectsSessionSubscription(t *testing.T) {
 	}
 }
 
+func TestSubscribeFiresAttachAndDetach(t *testing.T) {
+	h := New("token", nil)
+	attached := []string{}
+	detached := []string{}
+	h.SetOnTerminalAttach(func(sessionID string) { attached = append(attached, sessionID) })
+	h.SetOnTerminalDetach(func(sessionID string) { detached = append(detached, sessionID) })
+
+	c := &Client{
+		id:            "c1",
+		hub:           h,
+		send:          make(chan []byte, 1),
+		subscribeAll:  true,
+		subscriptions: make(map[string]struct{}),
+		attached:      make(map[string]struct{}),
+	}
+
+	c.subscribe("s-1")
+	c.subscribe("s-1")
+	c.detachAll()
+
+	if len(attached) != 1 || attached[0] != "s-1" {
+		t.Fatalf("attached=%v want [s-1]", attached)
+	}
+	if len(detached) != 1 || detached[0] != "s-1" {
+		t.Fatalf("detached=%v want [s-1]", detached)
+	}
+}
+
+func TestSubscribeDetachWaitsForLastAttachedClient(t *testing.T) {
+	h := New("token", nil)
+	attached := []string{}
+	detached := []string{}
+	h.SetOnTerminalAttach(func(sessionID string) { attached = append(attached, sessionID) })
+	h.SetOnTerminalDetach(func(sessionID string) { detached = append(detached, sessionID) })
+
+	c1 := &Client{
+		id:            "c1",
+		hub:           h,
+		send:          make(chan []byte, 1),
+		subscribeAll:  true,
+		subscriptions: make(map[string]struct{}),
+		attached:      make(map[string]struct{}),
+	}
+	c2 := &Client{
+		id:            "c2",
+		hub:           h,
+		send:          make(chan []byte, 1),
+		subscribeAll:  true,
+		subscriptions: make(map[string]struct{}),
+		attached:      make(map[string]struct{}),
+	}
+
+	c1.subscribe("s-1")
+	c2.subscribe("s-1")
+	c1.detachAll()
+	if len(attached) != 1 || attached[0] != "s-1" {
+		t.Fatalf("attached=%v want [s-1]", attached)
+	}
+	if len(detached) != 0 {
+		t.Fatalf("detached=%v want [] before last client detaches", detached)
+	}
+	c2.detachAll()
+	if len(detached) != 1 || detached[0] != "s-1" {
+		t.Fatalf("detached=%v want [s-1]", detached)
+	}
+}
+
 func TestTokenAuthentication(t *testing.T) {
 	validToken := "secret-token-123"
 
