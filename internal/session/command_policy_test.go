@@ -35,6 +35,23 @@ func TestEnforceCommandPolicyBlocksRmRfAbsolute(t *testing.T) {
 	}
 }
 
+func TestEnforceCommandPolicyBlocksQuotedRmRfAbsolute(t *testing.T) {
+	root := t.TempDir()
+	cases := []string{
+		"rm -rf '/tmp/data'\n",
+		"rm -rf \"/tmp/data\"\n",
+	}
+	for _, tc := range cases {
+		err := enforceCommandPolicy(tc, root)
+		if err == nil {
+			t.Fatalf("expected quoted rm -rf absolute to be blocked: %q", tc)
+		}
+		if !IsCommandPolicyError(err) {
+			t.Fatalf("expected command policy error, got %T for %q", err, tc)
+		}
+	}
+}
+
 func TestEnforceCommandPolicyBlocksWrappedRmRfAbsolute(t *testing.T) {
 	root := t.TempDir()
 	cases := []string{

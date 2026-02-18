@@ -110,10 +110,11 @@ func blockAbsoluteRecursiveRemove(command string, fields []string) error {
 		return nil
 	}
 	for _, arg := range args {
-		if strings.HasPrefix(arg, "-") || !looksLikePath(arg) {
+		normalized := normalizePathToken(arg)
+		if strings.HasPrefix(normalized, "-") || !looksLikePath(normalized) {
 			continue
 		}
-		if filepath.IsAbs(strings.TrimSpace(arg)) {
+		if filepath.IsAbs(normalized) {
 			return &CommandPolicyError{
 				Rule:    "no_rm_rf_absolute",
 				Detail:  "recursive rm with absolute path is blocked",
@@ -199,7 +200,7 @@ func validatePathScope(command string, allowedRoot string, paths []string) error
 	}
 	root = canonicalPathForPolicy(root)
 	for _, p := range paths {
-		p = strings.TrimSpace(p)
+		p = normalizePathToken(p)
 		if p == "" {
 			continue
 		}
@@ -236,25 +237,32 @@ func extractPathTokens(raw string, fields []string) []string {
 		}
 		if strings.HasPrefix(f, "-") {
 			parts := strings.SplitN(f, "=", 2)
-			if len(parts) == 2 && looksLikePath(parts[1]) {
-				paths = append(paths, parts[1])
+			if len(parts) == 2 {
+				pathPart := normalizePathToken(parts[1])
+				if looksLikePath(pathPart) {
+					paths = append(paths, pathPart)
+				}
 			}
 			continue
 		}
-		if looksLikePath(f) {
-			paths = append(paths, f)
+		pathPart := normalizePathToken(f)
+		if looksLikePath(pathPart) {
+			paths = append(paths, pathPart)
 		}
 	}
 	for _, m := range redirectPattern.FindAllStringSubmatch(raw, -1) {
-		if len(m) > 1 && looksLikePath(m[1]) {
-			paths = append(paths, m[1])
+		if len(m) > 1 {
+			pathPart := normalizePathToken(m[1])
+			if looksLikePath(pathPart) {
+				paths = append(paths, pathPart)
+			}
 		}
 	}
 	return paths
 }
 
 func looksLikePath(token string) bool {
-	token = strings.TrimSpace(token)
+	token = normalizePathToken(token)
 	if token == "" {
 		return false
 	}
@@ -266,6 +274,18 @@ func looksLikePath(token string) bool {
 		strings.HasPrefix(token, "~") ||
 		strings.Contains(token, "/") ||
 		strings.Contains(token, "\\")
+}
+
+func normalizePathToken(token string) string {
+	token = strings.TrimSpace(token)
+	for len(token) >= 2 {
+		if (token[0] == '\'' && token[len(token)-1] == '\'') || (token[0] == '"' && token[len(token)-1] == '"') {
+			token = strings.TrimSpace(token[1 : len(token)-1])
+			continue
+		}
+		break
+	}
+	return token
 }
 
 func canonicalPathForPolicy(path string) string {
