@@ -199,7 +199,10 @@ func (h *Hub) HandleOrchestratorWebSocket(w http.ResponseWriter, r *http.Request
 	for {
 		_, data, err := conn.Read(r.Context())
 		if err != nil {
-			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
+			status := websocket.CloseStatus(err)
+			if status != websocket.StatusNormalClosure &&
+				status != websocket.StatusGoingAway &&
+				status != websocket.StatusNoStatusRcvd {
 				log.Printf("orchestrator websocket read error: %v", err)
 			}
 			return

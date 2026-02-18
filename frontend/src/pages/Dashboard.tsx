@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createProject, listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { OutputMessage, Project, ServerMessage, Session, Task, WindowsMessage } from '../api/types'
+import {
+  createProject,
+  listAgents,
+  listPlaybooks,
+  listProjects,
+  listProjectTasks,
+  listSessions,
+  updateProjectOrchestrator,
+} from '../api/client'
+import type {
+  AgentConfig,
+  OutputMessage,
+  Playbook,
+  Project,
+  ProjectOrchestratorProfile,
+  ServerMessage,
+  Session,
+  Task,
+  WindowsMessage,
+} from '../api/types'
 import { useAppContext } from '../App'
 import ActivityFeed, { type DashboardActivity } from '../components/ActivityFeed'
-import ProjectCard from '../components/ProjectCard'
-import SessionGrid from '../components/SessionGrid'
+import CreateProjectModal from '../components/CreateProjectModal'
+import { FolderPlus, MessageSquareText } from '../components/Lucide'
 
 interface ProjectSummary {
   project: Project
   tasks: Task[]
   doneTasks: number
-  activeAgents: number
+  sessionCount: number
+  workingSessionCount: number
 }
 
 function normalizeStatus(status: string): string {
@@ -26,8 +45,22 @@ function isActiveProject(status: string): boolean {
   return !['inactive', 'archived', 'completed', 'done', 'paused', 'closed'].includes(normalizeStatus(status))
 }
 
-function isActiveSession(status: string): boolean {
-  return !['completed', 'stopped', 'terminated'].includes(normalizeStatus(status))
+function isWorkingSession(status: string): boolean {
+  return ['working', 'running', 'executing', 'active', 'busy'].includes(normalizeStatus(status))
+}
+
+function needsResponseSession(status: string): boolean {
+  return ['waiting', 'human_takeover', 'blocked', 'needs_input', 'reviewing'].includes(normalizeStatus(status))
+}
+
+function isIdleSession(status: string): boolean {
+  return ['idle', 'disconnected', 'sleeping', 'paused'].includes(normalizeStatus(status))
+}
+
+function isBusyAgentSession(status: string): boolean {
+  return !['idle', 'disconnected', 'sleeping', 'paused', 'completed', 'failed', 'stopped', 'terminated', 'closed', 'dead'].includes(
+    normalizeStatus(status),
+  )
 }
 
 function isSessionStoppedStatus(status: string): boolean {
@@ -119,11 +152,15 @@ export default function Dashboard() {
 
   const [projects, setProjects] = useState<Project[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
+  const [agents, setAgents] = useState<AgentConfig[]>([])
   const [tasksByProject, setTasksByProject] = useState<Record<string, Task[]>>({})
   const [activity, setActivity] = useState<DashboardActivity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showInactiveProjects, setShowInactiveProjects] = useState(false)
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const [creatingProject, setCreatingProject] = useState(false)
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([])
+  const [modelOptions, setModelOptions] = useState<string[]>([])
 
   const syncTimerRef = useRef<number | null>(null)
 
@@ -185,6 +222,32 @@ export default function Dashboard() {
     }, 30000)
     return () => window.clearInterval(intervalID)
   }, [loadDashboard])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadCreateOptions() {
+      try {
+        const [agentsData, playbooksData] = await Promise.all([listAgents<AgentConfig[]>(), listPlaybooks<Playbook[]>()])
+        if (cancelled) {
+          return
+        }
+        setAgents(agentsData)
+        setPlaybooks(playbooksData)
+        const models = Array.from(new Set(agentsData.map((agent) => (agent.model || '').trim()).filter(Boolean))).sort((a, b) =>
+          a.localeCompare(b),
+        )
+        setModelOptions(models)
+      } catch {
+        // non-blocking for dashboard rendering
+      }
+    }
+
+    void loadCreateOptions()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const live = buildLiveActivityFromMessage(app.lastMessage)
@@ -266,7 +329,7 @@ export default function Dashboard() {
     }
   }, [app.lastMessage, scheduleSync])
 
-  const activeSessions = useMemo(() => sessions.filter((session) => isActiveSession(session.status)), [sessions])
+  const allWindows = useMemo(() => app.windows, [app.windows])
 
   const projectByTaskID = useMemo(() => {
     const map: Record<string, string> = {}
@@ -278,100 +341,164 @@ export default function Dashboard() {
     return map
   }, [projects, tasksByProject])
 
+  const windowProjectNameByID = useMemo(() => {
+    const mapping: Record<string, string> = {}
+    for (const session of sessions) {
+      if (!session.tmux_window_id || !session.task_id) {
+        continue
+      }
+      mapping[session.tmux_window_id] = projectByTaskID[session.task_id] ?? 'Unassigned'
+    }
+    return mapping
+  }, [projectByTaskID, sessions])
+
   const projectSummaries = useMemo<ProjectSummary[]>(() => {
     return projects.map((project) => {
       const tasks = tasksByProject[project.id] ?? []
       const doneTasks = tasks.filter((task) => isDoneTask(task.status)).length
-
-      const activeAgents = activeSessions.filter((session) => {
-        if (!session.task_id) {
-          return false
-        }
-        return tasks.some((task) => task.id === session.task_id)
-      }).length
+      const projectWindows = allWindows.filter((windowItem) => windowProjectNameByID[windowItem.id] === project.name)
 
       return {
         project,
         tasks,
         doneTasks,
-        activeAgents,
+        sessionCount: projectWindows.length,
+        workingSessionCount: projectWindows.filter((windowItem) => isWorkingSession(windowItem.status)).length,
       }
     })
-  }, [activeSessions, projects, tasksByProject])
+  }, [allWindows, projects, tasksByProject, windowProjectNameByID])
 
-  const activeProjectSummaries = useMemo(
-    () => projectSummaries.filter((summary) => isActiveProject(summary.project.status)),
+  const sortedProjectSummaries = useMemo(
+    () =>
+      [...projectSummaries].sort((a, b) => {
+        const aActive = isActiveProject(a.project.status)
+        const bActive = isActiveProject(b.project.status)
+        if (aActive !== bActive) {
+          return aActive ? -1 : 1
+        }
+        return a.project.name.localeCompare(b.project.name)
+      }),
     [projectSummaries],
   )
 
-  const inactiveProjectSummaries = useMemo(
-    () => projectSummaries.filter((summary) => !isActiveProject(summary.project.status)),
-    [projectSummaries],
-  )
+  const sessionStatusSummary = useMemo(() => {
+    const total = allWindows.length
+    const working = allWindows.filter((windowItem) => isWorkingSession(windowItem.status)).length
+    const needsResponse = allWindows.filter((windowItem) => needsResponseSession(windowItem.status)).length
+    const idle = allWindows.filter((windowItem) => isIdleSession(windowItem.status)).length
+    return { total, working, needsResponse, idle }
+  }, [allWindows])
 
-  const groupedSessions = useMemo(() => {
-    const grouped: Record<string, { session: Session; projectName: string }[]> = {}
+  const agentTeamSummary = useMemo(() => {
+    const byType: Array<[string, { capacity: number; assigned: number; orchestrator: number; idle: number; overflow: number }]> = []
 
-    for (const session of activeSessions) {
-      const projectName = session.task_id ? (projectByTaskID[session.task_id] ?? 'Unassigned') : 'Unassigned'
-      if (!grouped[projectName]) {
-        grouped[projectName] = []
-      }
-      grouped[projectName].push({ session, projectName })
+    let totalCapacity = 0
+    let totalBusy = 0
+    let totalOrchestrator = 0
+    let totalAssigned = 0
+
+    for (const agent of agents) {
+      const capacity = Math.max(1, agent.max_parallel_agents ?? 1)
+      const busySessions = sessions.filter((session) => session.agent_type === agent.id && isBusyAgentSession(session.status))
+      const orchestrator = busySessions.filter((session) => normalizeStatus(session.role) === 'orchestrator').length
+      const assigned = busySessions.filter((session) => normalizeStatus(session.role) !== 'orchestrator').length
+      const busy = assigned + orchestrator
+      const overflow = Math.max(0, busy - capacity)
+      const idle = Math.max(0, capacity - busy)
+
+      totalCapacity += capacity
+      totalBusy += Math.min(capacity, busy)
+      totalAssigned += assigned
+      totalOrchestrator += orchestrator
+
+      byType.push([agent.id, { capacity, assigned, orchestrator, idle, overflow }])
     }
 
-    return grouped
-  }, [activeSessions, projectByTaskID])
-
-  const resourceSummary = useMemo(() => {
-    const allTasks = Object.values(tasksByProject).flat()
-    const doneTasks = allTasks.filter((task) => isDoneTask(task.status)).length
-    const runningSessions = activeSessions.filter((session) => ['running', 'working'].includes(normalizeStatus(session.status))).length
-    const idleSessions = activeSessions.filter((session) => ['idle', 'waiting', 'human_takeover'].includes(normalizeStatus(session.status))).length
-    const taskCompletionRate = allTasks.length > 0 ? Math.round((doneTasks / allTasks.length) * 100) : 0
+    const workingRatio = totalCapacity > 0 ? Math.round((totalBusy / totalCapacity) * 100) : 0
 
     return {
-      totalTasks: allTasks.length,
-      doneTasks,
-      activeSessions: activeSessions.length,
-      runningSessions,
-      idleSessions,
-      taskCompletionRate,
+      configuredAgents: agents.length,
+      totalCapacity,
+      totalBusy,
+      totalAssigned,
+      totalOrchestrator,
+      totalIdle: Math.max(0, totalCapacity - totalBusy),
+      workingRatio,
+      byType: byType.sort(([a], [b]) => a.localeCompare(b)),
     }
-  }, [activeSessions, tasksByProject])
+  }, [agents, sessions])
 
-  const handleCreateProject = async () => {
-    const name = window.prompt('Project name')?.trim()
-    if (!name) {
-      return
-    }
-    const repoPath = window.prompt('Repository path (absolute)')?.trim()
-    if (!repoPath) {
-      return
-    }
+  const handleCreateProject = () => {
+    setCreateProjectOpen(true)
+  }
 
+  const submitCreateProject = async (values: {
+    name: string
+    repoPath: string
+    orchestratorAgentID: string
+    playbook: string
+    orchestratorModel: string
+    workers: number
+  }) => {
+    setCreatingProject(true)
+    setError('')
     try {
-      await createProject<Project>({ name, repo_path: repoPath, status: 'active' })
+      const created = await createProject<Project>({
+        name: values.name,
+        repo_path: values.repoPath,
+        playbook: values.playbook || undefined,
+        status: 'active',
+      })
+
+      if (values.orchestratorModel || values.workers > 0) {
+        try {
+          await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
+            default_model: values.orchestratorModel || undefined,
+            max_parallel: values.workers,
+          })
+        } catch (patchErr) {
+          setError(
+            patchErr instanceof Error
+              ? `Project created, but orchestrator settings were not applied: ${patchErr.message}`
+              : 'Project created, but orchestrator settings were not applied',
+          )
+        }
+      }
+
       await loadDashboard()
+      setCreateProjectOpen(false)
       setActivity((prev) => [
         {
           id: `project-created-${Date.now()}`,
           timestamp: new Date().toISOString(),
-          text: `${name} created`,
+          text: `${values.name} created`,
         },
         ...prev,
       ])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project')
+    } finally {
+      setCreatingProject(false)
     }
   }
 
   return (
     <section className="page-block dashboard-page">
-      <h2>Dashboard</h2>
+      <div className="dashboard-hero">
+        <h2>Dashboard</h2>
+        <div className="dashboard-hero-actions">
+          <button className="secondary-btn" onClick={() => navigate('/pm-chat')} type="button">
+            <MessageSquareText size={14} />
+            <span>Open PM Chat</span>
+          </button>
+          <button className="primary-btn" onClick={handleCreateProject} type="button">
+            <FolderPlus size={14} />
+            <span>New Project</span>
+          </button>
+        </div>
+      </div>
 
       {error && <p className="dashboard-error">{error}</p>}
-
       {loading && <p className="empty-text">Loading dashboard...</p>}
 
       {!loading && projectSummaries.length === 0 && (
@@ -388,93 +515,109 @@ export default function Dashboard() {
         <>
           <section className="dashboard-section">
             <div className="dashboard-section-title">
-              <h3>Projects ({activeProjectSummaries.length} active)</h3>
+              <h3>Project List</h3>
             </div>
-            <div className="dashboard-project-grid">
-              {activeProjectSummaries.map((summary) => (
-                <ProjectCard
-                  activeAgents={summary.activeAgents}
-                  doneTasks={summary.doneTasks}
-                  key={summary.project.id}
-                  onClick={() => navigate(`/projects/${summary.project.id}`)}
-                  project={summary.project}
-                  totalTasks={summary.tasks.length}
-                />
-              ))}
-              <ProjectCard isNewCard onClick={handleCreateProject} />
-            </div>
-
-            {inactiveProjectSummaries.length > 0 && (
-              <div className="dashboard-inactive-projects">
-                <button className="secondary-btn" onClick={() => setShowInactiveProjects((prev) => !prev)} type="button">
-                  {showInactiveProjects ? 'Hide' : 'Show'} inactive projects ({inactiveProjectSummaries.length})
-                </button>
-
-                {showInactiveProjects && (
-                  <div className="dashboard-project-grid dashboard-project-grid-inactive">
-                    {inactiveProjectSummaries.map((summary) => (
-                      <ProjectCard
-                        activeAgents={summary.activeAgents}
-                        doneTasks={summary.doneTasks}
-                        key={summary.project.id}
-                        onClick={() => navigate(`/projects/${summary.project.id}`)}
-                        project={summary.project}
-                        totalTasks={summary.tasks.length}
-                      />
-                    ))}
-                  </div>
-                )}
+            <div className="dashboard-project-list">
+              <div className="dashboard-project-list-head">
+                <span>Project</span>
+                <span>Working Dir</span>
+                <span>Status</span>
+                <span>Sessions</span>
+                <span>Tasks</span>
               </div>
-            )}
+              {sortedProjectSummaries.map((summary) => (
+                <button
+                  className="dashboard-project-list-row"
+                  key={summary.project.id}
+                  onClick={() => navigate(`/pm-chat?project=${encodeURIComponent(summary.project.id)}`)}
+                  type="button"
+                >
+                  <strong>{summary.project.name}</strong>
+                  <span>{summary.project.repo_path}</span>
+                  <span>{summary.project.status}</span>
+                  <span>
+                    {summary.workingSessionCount}/{summary.sessionCount} working
+                  </span>
+                  <span>
+                    {summary.doneTasks}/{summary.tasks.length} done
+                  </span>
+                </button>
+              ))}
+            </div>
           </section>
 
           <section className="dashboard-section">
             <div className="dashboard-section-title">
-              <h3>Resource Summary</h3>
+              <h3>Agent Team</h3>
             </div>
             <div className="dashboard-resource-grid">
               <article className="dashboard-resource-card">
-                <small>Active Sessions</small>
-                <strong>{resourceSummary.activeSessions}</strong>
+                <small>Configured Agents</small>
+                <strong>{agentTeamSummary.configuredAgents}</strong>
               </article>
               <article className="dashboard-resource-card">
-                <small>Running Sessions</small>
-                <strong>{resourceSummary.runningSessions}</strong>
+                <small>Total Capacity</small>
+                <strong>{agentTeamSummary.totalCapacity}</strong>
               </article>
               <article className="dashboard-resource-card">
-                <small>Idle Sessions</small>
-                <strong>{resourceSummary.idleSessions}</strong>
+                <small>Assigned</small>
+                <strong>{agentTeamSummary.totalAssigned}</strong>
               </article>
               <article className="dashboard-resource-card">
-                <small>Tasks Done</small>
-                <strong>
-                  {resourceSummary.doneTasks}/{resourceSummary.totalTasks}
-                </strong>
+                <small>Orchestrator</small>
+                <strong>{agentTeamSummary.totalOrchestrator}</strong>
               </article>
               <article className="dashboard-resource-card">
-                <small>Completion</small>
-                <strong>{resourceSummary.taskCompletionRate}%</strong>
+                <small>Idle</small>
+                <strong>{agentTeamSummary.totalIdle}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Working Ratio</small>
+                <strong>{agentTeamSummary.workingRatio}%</strong>
               </article>
               <article className="dashboard-resource-card">
                 <small>Socket</small>
                 <strong>{app.connected ? 'Connected' : 'Offline'}</strong>
               </article>
             </div>
+            {agentTeamSummary.byType.length > 0 && (
+              <div className="dashboard-agent-breakdown">
+                {agentTeamSummary.byType.map(([agentType, stat]) => (
+                  <article className="dashboard-agent-card" key={agentType}>
+                    <strong>{agentType}</strong>
+                    <small>{stat.capacity} capacity</small>
+                    <small>{stat.assigned} assigned</small>
+                    <small>{stat.orchestrator} orchestrator</small>
+                    <small>{stat.idle} idle</small>
+                    {stat.overflow > 0 && <small>+{stat.overflow} overflow</small>}
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="dashboard-section">
             <div className="dashboard-section-title">
-              <h3>Active Sessions</h3>
+              <h3>Session Status</h3>
             </div>
-            <SessionGrid
-              groupedSessions={groupedSessions}
-              onSessionClick={(session) => {
-                if (session.tmux_window_id) {
-                  app.setActiveWindow(session.tmux_window_id)
-                }
-                navigate('/sessions')
-              }}
-            />
+            <div className="dashboard-resource-grid">
+              <article className="dashboard-resource-card">
+                <small>Total Sessions</small>
+                <strong>{sessionStatusSummary.total}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Working</small>
+                <strong>{sessionStatusSummary.working}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Needs Response</small>
+                <strong>{sessionStatusSummary.needsResponse}</strong>
+              </article>
+              <article className="dashboard-resource-card">
+                <small>Idle</small>
+                <strong>{sessionStatusSummary.idle}</strong>
+              </article>
+            </div>
           </section>
 
           <section className="dashboard-section">
@@ -485,6 +628,16 @@ export default function Dashboard() {
           </section>
         </>
       )}
+
+      <CreateProjectModal
+        agents={agents}
+        busy={creatingProject}
+        modelOptions={modelOptions}
+        onClose={() => setCreateProjectOpen(false)}
+        onSubmit={submitCreateProject}
+        open={createProjectOpen}
+        playbooks={playbooks}
+      />
     </section>
   )
 }

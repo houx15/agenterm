@@ -269,9 +269,9 @@ func (o *Orchestrator) listSessionsByProject(ctx context.Context, projectID stri
 func isActiveSessionStatus(status string) bool {
 	status = strings.TrimSpace(strings.ToLower(status))
 	switch status {
-	case "completed", "failed":
+	case "", "idle", "disconnected", "sleeping", "paused", "completed", "failed", "stopped", "terminated", "closed", "dead":
 		return false
 	default:
-		return status != ""
+		return true
 	}
 }

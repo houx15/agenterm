@@ -154,9 +154,6 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if strings.TrimSpace(userMessage) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
-	if strings.TrimSpace(o.apiKey) == "" {
-		return nil, fmt.Errorf("llm api key is not configured")
-	}
 
 	state, err := o.loadProjectState(ctx, projectID)
 	if err != nil {
@@ -472,7 +469,9 @@ func (o *Orchestrator) createMessage(ctx context.Context, req anthropicRequest) 
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("x-api-key", o.apiKey)
+	if strings.TrimSpace(o.apiKey) != "" {
+		httpReq.Header.Set("x-api-key", o.apiKey)
+	}
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := o.httpClient.Do(httpReq)

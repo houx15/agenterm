@@ -84,6 +84,18 @@ export function createProject<T>(input: CreateProjectInput) {
   })
 }
 
+export interface UpdateProjectOrchestratorInput {
+  default_model?: string
+  max_parallel?: number
+}
+
+export function updateProjectOrchestrator<T>(projectID: string, input: UpdateProjectOrchestratorInput) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/orchestrator`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
 export function listAgents<T>() {
   return apiFetch<T>('/api/agents')
 }

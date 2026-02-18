@@ -2,6 +2,7 @@ export type SessionStatus = 'working' | 'waiting' | 'idle' | 'disconnected' | st
 
 export interface WindowInfo {
   id: string
+  session_id?: string
   name: string
   status: SessionStatus
 }
@@ -60,7 +61,8 @@ export type ServerMessage =
   | ErrorMessage
 
 export interface ClientMessage {
-  type: 'input' | 'terminal_input' | 'terminal_resize' | 'new_window' | 'kill_window'
+  type: 'input' | 'terminal_input' | 'terminal_resize' | 'new_session' | 'new_window' | 'kill_window'
+  session_id?: string
   window?: string
   keys?: string
   cols?: number
@@ -120,6 +122,19 @@ export interface Project {
   repo_path: string
   status: string
   playbook?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectOrchestratorProfile {
+  id: string
+  project_id: string
+  workflow_id: string
+  default_provider: string
+  default_model: string
+  max_parallel: number
+  review_policy: string
+  notify_on_blocked: boolean
   created_at: string
   updated_at: string
 }

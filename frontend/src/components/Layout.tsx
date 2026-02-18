@@ -1,12 +1,29 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import { Menu } from './Lucide'
 import { useAppContext } from '../App'
 
 export default function Layout() {
   const app = useAppContext()
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768)
   const location = useLocation()
+
+  const titleByPath: Record<string, string> = {
+    '/': 'Dashboard',
+    '/sessions': 'Sessions',
+    '/pm-chat': 'PM Chat',
+    '/settings': 'Settings',
+  }
+  const topbarTitle = location.pathname.startsWith('/projects/') ? 'Project Detail' : titleByPath[location.pathname] ?? location.pathname.slice(1)
+  const topbarSubtitle =
+    location.pathname === '/sessions'
+      ? app.activeWindow ?? 'Select a session'
+      : location.pathname === '/pm-chat'
+        ? 'Plan, monitor, and steer execution'
+        : app.connected
+          ? 'Realtime sync online'
+          : 'Realtime sync offline'
 
   useEffect(() => {
     const onResize = () => {
@@ -33,19 +50,11 @@ export default function Layout() {
         onClick={() => setSidebarOpen((v) => !v)}
         type="button"
       >
-        menu
+        <Menu size={16} />
       </button>
 
       <div className={`sidebar-container ${sidebarOpen ? 'open' : ''}`.trim()}>
-        <Sidebar
-          windows={app.windows}
-          activeWindow={app.activeWindow}
-          unread={app.unreadByWindow}
-          onSelectWindow={app.setActiveWindow}
-          onNewWindow={() => app.send({ type: 'new_window', name: '' })}
-          onKillWindow={(windowID) => app.send({ type: 'kill_window', window: windowID })}
-          closeOnNavigate={closeOnMobile}
-        />
+        <Sidebar closeOnNavigate={closeOnMobile} />
       </div>
       <button
         aria-hidden={!sidebarOpen}
@@ -59,8 +68,8 @@ export default function Layout() {
       <main className="content-shell" onClick={closeOnMobile}>
         <header className="topbar">
           <div className={`connection-indicator ${app.connected ? '' : app.connectionStatus}`.trim()} />
-          <strong>{location.pathname === '/' ? 'Dashboard' : location.pathname.slice(1)}</strong>
-          <span className="topbar-subtitle">{app.activeWindow ?? 'no active session'}</span>
+          <strong>{topbarTitle}</strong>
+          <span className="topbar-subtitle">{topbarSubtitle}</span>
         </header>
         <Outlet />
       </main>

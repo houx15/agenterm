@@ -11,6 +11,7 @@ import {
 } from '../api/client'
 import type { AgentConfig, Playbook, PlaybookPhase } from '../api/types'
 import { loadASRSettings, saveASRSettings } from '../settings/asr'
+import Modal from '../components/Modal'
 
 type TabKey = 'agents' | 'playbooks' | 'asr'
 type PhaseEditorMode = 'table' | 'raw'
@@ -46,8 +47,33 @@ function parseCSV(value: string): string[] {
     .filter(Boolean)
 }
 
+function clampParallelAgents(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1
+  }
+  return Math.min(64, Math.max(1, Math.trunc(value)))
+}
+
 function stringifyPhases(phases: PlaybookPhase[]): string {
   return JSON.stringify(phases, null, 2)
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+function normalizePlaybook(input: Playbook): Playbook {
+  return {
+    ...input,
+    match: {
+      languages: toStringArray(input.match?.languages),
+      project_patterns: toStringArray(input.match?.project_patterns),
+    },
+    phases: Array.isArray(input.phases) ? input.phases : DEFAULT_PLAYBOOK.phases,
+  }
 }
 
 function parseRawPhases(value: string): { phases: PlaybookPhase[]; error?: string } {
@@ -97,6 +123,7 @@ export default function Settings() {
   const [message, setMessage] = useState<string>('')
   const [asrSettings, setAsrSettings] = useState(() => loadASRSettings())
   const [asrSaved, setAsrSaved] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'agent' | 'playbook'; id: string; name: string } | null>(null)
 
   const isNewAgent = selectedAgentID === ''
   const isNewPlaybook = selectedPlaybookID === ''
@@ -110,16 +137,17 @@ export default function Settings() {
         if (cancelled) {
           return
         }
+        const normalizedPlaybooks = playbooksData.map(normalizePlaybook)
         setAgents(agentsData)
-        setPlaybooks(playbooksData)
+        setPlaybooks(normalizedPlaybooks)
         if (agentsData.length > 0) {
           setSelectedAgentID(agentsData[0].id)
           setAgentDraft(agentsData[0])
         }
-        if (playbooksData.length > 0) {
-          setSelectedPlaybookID(playbooksData[0].id)
-          setPlaybookDraft(playbooksData[0])
-          setPhasesEditor(stringifyPhases(playbooksData[0].phases))
+        if (normalizedPlaybooks.length > 0) {
+          setSelectedPlaybookID(normalizedPlaybooks[0].id)
+          setPlaybookDraft(normalizedPlaybooks[0])
+          setPhasesEditor(stringifyPhases(normalizedPlaybooks[0].phases))
         }
       } catch (error) {
         setMessage(error instanceof Error ? error.message : 'Failed to load settings')
@@ -142,6 +170,17 @@ export default function Settings() {
   function startNewAgent() {
     setSelectedAgentID('')
     setAgentDraft(DEFAULT_AGENT)
+    setMessage('')
+  }
+
+  function cancelNewAgent() {
+    if (agents.length > 0) {
+      setSelectedAgentID(agents[0].id)
+      setAgentDraft(agents[0])
+    } else {
+      setSelectedAgentID('')
+      setAgentDraft(DEFAULT_AGENT)
+    }
     setMessage('')
   }
 
@@ -238,9 +277,6 @@ export default function Settings() {
     if (!selectedAgentID || !selectedAgent) {
       return
     }
-    if (!window.confirm(`Delete agent ${selectedAgent.name}?`)) {
-      return
-    }
 
     setBusy(true)
     setMessage('')
@@ -280,13 +316,13 @@ export default function Settings() {
         phases,
       }
       if (isNewPlaybook) {
-        const created = await createPlaybook<Playbook>(payload)
+        const created = normalizePlaybook(await createPlaybook<Playbook>(payload))
         setPlaybooks((prev) => [...prev.filter((item) => item.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
         setSelectedPlaybookID(created.id)
         setPlaybookDraft(created)
         setDraftPhases(created.phases)
       } else {
-        const updated = await updatePlaybook<Playbook>(selectedPlaybookID, payload)
+        const updated = normalizePlaybook(await updatePlaybook<Playbook>(selectedPlaybookID, payload))
         setPlaybooks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
         setPlaybookDraft(updated)
         setDraftPhases(updated.phases)
@@ -305,9 +341,6 @@ export default function Settings() {
 
   async function removePlaybook() {
     if (!selectedPlaybookID || !selectedPlaybook) {
-      return
-    }
-    if (!window.confirm(`Delete playbook ${selectedPlaybook.name}?`)) {
       return
     }
 
@@ -339,6 +372,36 @@ export default function Settings() {
     })
     setAsrSaved(true)
     window.setTimeout(() => setAsrSaved(false), 1500)
+  }
+
+  function requestRemoveAgent() {
+    if (!selectedAgentID || !selectedAgent) {
+      return
+    }
+    setDeleteTarget({ kind: 'agent', id: selectedAgentID, name: selectedAgent.name })
+  }
+
+  function requestRemovePlaybook() {
+    if (!selectedPlaybookID || !selectedPlaybook) {
+      return
+    }
+    setDeleteTarget({ kind: 'playbook', id: selectedPlaybookID, name: selectedPlaybook.name })
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) {
+      return
+    }
+    const pending = deleteTarget
+    setDeleteTarget(null)
+
+    if (pending.kind === 'agent' && pending.id === selectedAgentID) {
+      await removeAgent()
+      return
+    }
+    if (pending.kind === 'playbook' && pending.id === selectedPlaybookID) {
+      await removePlaybook()
+    }
   }
 
   if (loading) {
@@ -373,6 +436,12 @@ export default function Settings() {
             <button type="button" className="primary-btn" onClick={startNewAgent}>
               + New Agent
             </button>
+            {isNewAgent && (
+              <button type="button" className="session-row active">
+                <strong>{agentDraft.name.trim() || 'New Agent (Draft)'}</strong>
+                <small>{agentDraft.id.trim() || 'unsaved'}</small>
+              </button>
+            )}
             {agents.map((item) => (
               <button
                 key={item.id}
@@ -408,25 +477,40 @@ export default function Settings() {
               <input value={agentDraft.model ?? ''} onChange={(event) => setAgentDraft((prev) => ({ ...prev, model: event.target.value }))} />
             </label>
             <label>
-              Languages (comma-separated)
+              Max Parallel Agents
               <input
-                value={(agentDraft.languages ?? []).join(', ')}
-                onChange={(event) => setAgentDraft((prev) => ({ ...prev, languages: parseCSV(event.target.value) }))}
+                min={1}
+                max={64}
+                type="number"
+                value={agentDraft.max_parallel_agents ?? 1}
+                onChange={(event) =>
+                  setAgentDraft((prev) => ({
+                    ...prev,
+                    max_parallel_agents: clampParallelAgents(Number(event.target.value || 1)),
+                  }))
+                }
               />
             </label>
             <label>
-              Capabilities (comma-separated)
-              <input
-                value={(agentDraft.capabilities ?? []).join(', ')}
-                onChange={(event) => setAgentDraft((prev) => ({ ...prev, capabilities: parseCSV(event.target.value) }))}
+              Agent Bio
+              <textarea
+                rows={4}
+                value={agentDraft.notes ?? ''}
+                onChange={(event) => setAgentDraft((prev) => ({ ...prev, notes: event.target.value }))}
+                placeholder="Describe this agent like an employee profile: strengths, stack, preferred tasks, constraints."
               />
             </label>
             <div className="settings-actions">
               <button type="button" className="primary-btn" disabled={busy} onClick={() => void saveAgent()}>
                 Save Agent
               </button>
+              {isNewAgent ? (
+                <button type="button" className="secondary-btn" disabled={busy} onClick={cancelNewAgent}>
+                  Cancel
+                </button>
+              ) : null}
               {!isNewAgent ? (
-                <button type="button" className="action-btn danger" disabled={busy} onClick={() => void removeAgent()}>
+                <button type="button" className="action-btn danger" disabled={busy} onClick={requestRemoveAgent}>
                   Delete Agent
                 </button>
               ) : null}
@@ -479,11 +563,11 @@ export default function Settings() {
             <label>
               Match Languages (comma-separated)
               <input
-                value={playbookDraft.match.languages.join(', ')}
+                value={(playbookDraft.match?.languages ?? []).join(', ')}
                 onChange={(event) =>
                   setPlaybookDraft((prev) => ({
                     ...prev,
-                    match: { ...prev.match, languages: parseCSV(event.target.value) },
+                    match: { ...(prev.match ?? DEFAULT_PLAYBOOK.match), languages: parseCSV(event.target.value) },
                   }))
                 }
               />
@@ -491,11 +575,11 @@ export default function Settings() {
             <label>
               Match Project Patterns (comma-separated)
               <input
-                value={playbookDraft.match.project_patterns.join(', ')}
+                value={(playbookDraft.match?.project_patterns ?? []).join(', ')}
                 onChange={(event) =>
                   setPlaybookDraft((prev) => ({
                     ...prev,
-                    match: { ...prev.match, project_patterns: parseCSV(event.target.value) },
+                    match: { ...(prev.match ?? DEFAULT_PLAYBOOK.match), project_patterns: parseCSV(event.target.value) },
                   }))
                 }
               />
@@ -569,7 +653,7 @@ export default function Settings() {
                 Save Playbook
               </button>
               {!isNewPlaybook ? (
-                <button type="button" className="action-btn danger" disabled={busy} onClick={() => void removePlaybook()}>
+                <button type="button" className="action-btn danger" disabled={busy} onClick={requestRemovePlaybook}>
                   Delete Playbook
                 </button>
               ) : null}
@@ -610,6 +694,18 @@ export default function Settings() {
           </div>
         </div>
       )}
+
+      <Modal onClose={() => setDeleteTarget(null)} open={!!deleteTarget} title="Confirm Delete">
+        <p>Delete {deleteTarget?.kind} &quot;{deleteTarget?.name}&quot;? This cannot be undone.</p>
+        <div className="settings-actions">
+          <button className="secondary-btn" onClick={() => setDeleteTarget(null)} type="button">
+            Cancel
+          </button>
+          <button className="action-btn danger" onClick={() => void confirmDelete()} type="button">
+            Delete
+          </button>
+        </div>
+      </Modal>
     </section>
   )
 }

@@ -73,14 +73,19 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 		b.WriteString("- none\\n")
 	} else {
 		for _, a := range agents {
-			b.WriteString(fmt.Sprintf("- %s (%s): capabilities=%s, languages=%s, speed=%s, cost=%s\\n",
-				a.ID,
-				a.Name,
-				strings.Join(a.Capabilities, "/"),
-				strings.Join(a.Languages, "/"),
-				a.SpeedTier,
-				a.CostTier,
-			))
+			line := fmt.Sprintf("- %s (%s): model=%s, max_parallel=%d, speed=%s, cost=%s",
+				a.ID, a.Name, a.Model, a.MaxParallelAgents, a.SpeedTier, a.CostTier)
+			bio := strings.TrimSpace(a.Notes)
+			if bio != "" {
+				line += ", bio=" + bio
+			}
+			if len(a.Capabilities) > 0 {
+				line += ", capabilities=" + strings.Join(a.Capabilities, "/")
+			}
+			if len(a.Languages) > 0 {
+				line += ", languages=" + strings.Join(a.Languages, "/")
+			}
+			b.WriteString(line + "\\n")
 		}
 	}
 	b.WriteString("\\n")
