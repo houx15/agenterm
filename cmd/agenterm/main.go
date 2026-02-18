@@ -428,6 +428,19 @@ func main() {
 			return result, nil
 		},
 	})
+	mergeController := automation.NewMergeController(automation.MergeControllerConfig{
+		Interval:     10 * time.Second,
+		TaskRepo:     taskRepo,
+		WorktreeRepo: worktreeRepo,
+		ProjectRepo:  projectRepo,
+		SessionRepo:  sessionRepo,
+		SendCommand: func(callCtx context.Context, sessionID string, text string) error {
+			if lifecycleManager == nil {
+				return fmt.Errorf("session manager unavailable")
+			}
+			return lifecycleManager.SendCommand(callCtx, sessionID, text)
+		},
+	})
 
 	resolveSessionWorktree := func(callCtx context.Context, sessionID string) string {
 		if sessionID == "" {
@@ -544,9 +557,29 @@ func main() {
 			"commit_hash": commitHash,
 		})
 	})
+	mergeController.SetOnMerged(func(projectID, taskID, worktreeID, sourceBranch, targetBranch, commitHash string) {
+		h.BroadcastProjectEvent(projectID, "worktree_merge_succeeded", map[string]any{
+			"task_id":       taskID,
+			"worktree_id":   worktreeID,
+			"source_branch": sourceBranch,
+			"target_branch": targetBranch,
+			"commit_hash":   commitHash,
+		})
+	})
+	mergeController.SetOnConflict(func(projectID, taskID, worktreeID, sourceBranch, targetBranch, commitHash string, files []string) {
+		h.BroadcastProjectEvent(projectID, "worktree_merge_conflict", map[string]any{
+			"task_id":          taskID,
+			"worktree_id":      worktreeID,
+			"source_branch":    sourceBranch,
+			"target_branch":    targetBranch,
+			"commit_hash":      commitHash,
+			"conflicted_files": files,
+		})
+	})
 	go eventTrigger.Start(ctx, 15*time.Second)
 	go autoCommitter.Run(ctx)
 	go coordinator.Run(ctx)
+	go mergeController.Run(ctx)
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()

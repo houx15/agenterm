@@ -6,9 +6,16 @@ import (
 )
 
 func TestParseReviewDecisionApproved(t *testing.T) {
-	dec := parseReviewDecision("LGTM, looks good")
+	dec := parseReviewDecision("VERDICT: APPROVED\nLooks good")
 	if !dec.approved {
 		t.Fatalf("expected approved decision")
+	}
+}
+
+func TestParseReviewDecisionDoesNotApproveNegation(t *testing.T) {
+	dec := parseReviewDecision("This is not approved yet; please fix tests")
+	if dec.approved {
+		t.Fatalf("did not expect approved")
 	}
 }
 

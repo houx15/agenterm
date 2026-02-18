@@ -44,6 +44,8 @@ type Hub struct {
 	batchEnabled     bool
 	ctxWrap          *ctxWrapper
 	running          atomic.Bool
+	attachMu         sync.Mutex
+	attachedSessions map[string]int
 }
 
 type ctxWrapper struct {
@@ -57,14 +59,15 @@ type clientRegistration struct {
 
 func New(token string, onInput func(string, string)) *Hub {
 	h := &Hub{
-		clients:      make(map[string]*Client),
-		register:     make(chan *clientRegistration, 16),
-		unregister:   make(chan *Client, 16),
-		broadcast:    make(chan hubBroadcast, 256),
-		onInput:      onInput,
-		token:        token,
-		batchEnabled: true,
-		ctxWrap:      &ctxWrapper{ctx: context.Background()},
+		clients:          make(map[string]*Client),
+		register:         make(chan *clientRegistration, 16),
+		unregister:       make(chan *Client, 16),
+		broadcast:        make(chan hubBroadcast, 256),
+		onInput:          onInput,
+		token:            token,
+		batchEnabled:     true,
+		ctxWrap:          &ctxWrapper{ctx: context.Background()},
+		attachedSessions: make(map[string]int),
 	}
 	h.rateLimiter = NewRateLimiter(defaultBatchInterval, func(windowID string, msg OutputMessage) {
 		h.sendBroadcast(msg)
@@ -407,13 +410,39 @@ func (h *Hub) handleKillWindow(sessionID string, windowID string) {
 }
 
 func (h *Hub) handleTerminalAttach(sessionID string) {
-	if h.onTerminalAttach != nil {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	shouldNotify := false
+	h.attachMu.Lock()
+	h.attachedSessions[sessionID]++
+	if h.attachedSessions[sessionID] == 1 {
+		shouldNotify = true
+	}
+	h.attachMu.Unlock()
+
+	if shouldNotify && h.onTerminalAttach != nil {
 		h.onTerminalAttach(sessionID)
 	}
 }
 
 func (h *Hub) handleTerminalDetach(sessionID string) {
-	if h.onTerminalDetach != nil {
+	if strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	shouldNotify := false
+	h.attachMu.Lock()
+	count := h.attachedSessions[sessionID]
+	switch {
+	case count <= 1:
+		delete(h.attachedSessions, sessionID)
+		shouldNotify = count == 1
+	default:
+		h.attachedSessions[sessionID] = count - 1
+	}
+	h.attachMu.Unlock()
+
+	if shouldNotify && h.onTerminalDetach != nil {
 		h.onTerminalDetach(sessionID)
 	}
 }

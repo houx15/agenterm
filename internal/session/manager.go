@@ -250,6 +250,13 @@ func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text strin
 	if session.TmuxWindowID == "" {
 		return fmt.Errorf("session has no tmux window")
 	}
+	workDir := sm.resolveWorkDirForSession(ctx, session)
+	if err := enforceCommandPolicy(text, workDir); err != nil {
+		if policyErr, ok := err.(*CommandPolicyError); ok {
+			auditCommandPolicyViolation(workDir, sessionID, text, policyErr)
+		}
+		return err
+	}
 
 	gw, err := sm.gatewayForSession(session.TmuxSessionName)
 	if err != nil {

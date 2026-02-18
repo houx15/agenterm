@@ -208,11 +208,12 @@ func (c *Coordinator) MonitorCoderSession(ctx context.Context, coderSessionID st
 			diff, _ := diffForCommit(ctx, workDir, commitHash)
 			taskBody, _ := os.ReadFile(taskPath)
 			reviewPrompt := buildReviewPrompt(string(taskBody), diff)
+			// Capture the lower bound before sending to avoid missing fast reviewer output.
+			since := time.Now().UTC()
 			if err := c.sendCommand(ctx, reviewerSessionID, reviewPrompt+"\n"); err != nil {
 				continue
 			}
 
-			since := time.Now().UTC()
 			decision := c.waitForReviewerDecision(ctx, reviewerSessionID, since)
 			if decision.approved {
 				c.markTaskCompleted(ctx, taskID)
@@ -307,9 +308,12 @@ func diffForCommit(ctx context.Context, workDir string, commitHash string) (stri
 
 func buildReviewPrompt(taskContent string, diff string) string {
 	var b strings.Builder
-	b.WriteString("Review this implementation. Reply with one of:\n")
-	b.WriteString("- APPROVED or LGTM if acceptable\n")
-	b.WriteString("- Detailed requested changes otherwise\n\n")
+	b.WriteString("Review this implementation.\n")
+	b.WriteString("Reply with a first-line verdict in this exact format:\n")
+	b.WriteString("VERDICT: APPROVED\n")
+	b.WriteString("or\n")
+	b.WriteString("VERDICT: CHANGES_REQUESTED\n\n")
+	b.WriteString("Then provide concise rationale and required changes.\n\n")
 	b.WriteString("TASK.md:\n")
 	b.WriteString(taskContent)
 	b.WriteString("\n\nDiff:\n")
@@ -323,9 +327,24 @@ type reviewDecision struct {
 }
 
 func parseReviewDecision(text string) reviewDecision {
-	normalized := strings.ToUpper(text)
-	if strings.Contains(normalized, "APPROVED") || strings.Contains(normalized, "LGTM") {
-		return reviewDecision{approved: true}
+	lines := splitNonEmptyLines(text)
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		upper := strings.ToUpper(line)
+		if !strings.HasPrefix(upper, "VERDICT:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(upper, "VERDICT:"))
+		if value == "APPROVED" || value == "LGTM" {
+			return reviewDecision{approved: true}
+		}
+		break
+	}
+	for _, raw := range lines {
+		upper := strings.ToUpper(strings.TrimSpace(raw))
+		if upper == "APPROVED" || upper == "LGTM" {
+			return reviewDecision{approved: true}
+		}
 	}
 	cleaned := strings.TrimSpace(text)
 	if cleaned == "" {

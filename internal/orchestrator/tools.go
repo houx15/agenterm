@@ -263,6 +263,59 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "merge_worktree",
+			Description: "Merge a worktree branch into the project's default or specified target branch",
+			Parameters: map[string]Param{
+				"worktree_id":   {Type: "string", Description: "Worktree id", Required: true},
+				"target_branch": {Type: "string", Description: "Optional explicit target branch"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				worktreeID, err := requiredString(args, "worktree_id")
+				if err != nil {
+					return nil, err
+				}
+				targetBranch, _ := optionalString(args, "target_branch")
+				body := map[string]any{}
+				if strings.TrimSpace(targetBranch) != "" {
+					body["target_branch"] = targetBranch
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodPost, "/api/worktrees/"+worktreeID+"/merge", nil, body, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "resolve_merge_conflict",
+			Description: "Request coder conflict resolution workflow for a worktree merge conflict",
+			Parameters: map[string]Param{
+				"worktree_id": {Type: "string", Description: "Worktree id", Required: true},
+				"session_id":  {Type: "string", Description: "Optional coder session id"},
+				"message":     {Type: "string", Description: "Optional instruction to send to coder"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				worktreeID, err := requiredString(args, "worktree_id")
+				if err != nil {
+					return nil, err
+				}
+				sessionID, _ := optionalString(args, "session_id")
+				message, _ := optionalString(args, "message")
+				body := map[string]any{}
+				if strings.TrimSpace(sessionID) != "" {
+					body["session_id"] = sessionID
+				}
+				if strings.TrimSpace(message) != "" {
+					body["message"] = message
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodPost, "/api/worktrees/"+worktreeID+"/resolve-conflict", nil, body, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "create_session",
 			Description: "Create a coding session for task",
 			Parameters: map[string]Param{

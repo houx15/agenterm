@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,72 +23,17 @@ type hookEntry struct {
 	Command string `json:"command"`
 }
 
-const autoCommitScript = `#!/usr/bin/env bash
-set -euo pipefail
-
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "${repo_root}" ]]; then
-  exit 0
-fi
-
-if git -C "${repo_root}" diff --name-only --diff-filter=U | grep -q .; then
-  exit 0
-fi
-
-if [[ -z "$(git -C "${repo_root}" status --porcelain)" ]]; then
-  exit 0
-fi
-
-git -C "${repo_root}" add -A
-if git -C "${repo_root}" diff --cached --quiet; then
-  exit 0
-fi
-
-git -C "${repo_root}" commit -m "[auto] tool-write checkpoint" >/dev/null 2>&1 || true
-`
-
-const onAgentStopScript = `#!/usr/bin/env bash
-set -euo pipefail
-
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -z "${repo_root}" ]]; then
-  exit 0
-fi
-
-mkdir -p "${repo_root}/.orchestra"
-: > "${repo_root}/.orchestra/done"
-
-if [[ -n "$(git -C "${repo_root}" status --porcelain)" ]]; then
-  git -C "${repo_root}" add -A
-  if ! git -C "${repo_root}" diff --cached --quiet; then
-    git -C "${repo_root}" commit -m "[READY_FOR_REVIEW] agent completed run" >/dev/null 2>&1 || true
-  fi
-fi
-`
+const (
+	autoCommitCommand  = "bash scripts/auto-commit.sh"
+	onAgentStopCommand = "bash scripts/on-agent-stop.sh"
+)
 
 func EnsureClaudeCodeAutomation(workDir string) error {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		return fmt.Errorf("workdir is required")
 	}
-	if err := ensureHookScripts(workDir); err != nil {
-		return err
-	}
 	return ensureClaudeSettings(workDir)
-}
-
-func ensureHookScripts(workDir string) error {
-	hooksDir := filepath.Join(workDir, ".orchestra", "hooks")
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("create hooks dir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "auto-commit.sh"), []byte(autoCommitScript), 0o755); err != nil {
-		return fmt.Errorf("write auto-commit hook: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(hooksDir, "on-agent-stop.sh"), []byte(onAgentStopScript), 0o755); err != nil {
-		return fmt.Errorf("write on-agent-stop hook: %w", err)
-	}
-	return nil
 }
 
 func ensureClaudeSettings(workDir string) error {
@@ -95,34 +41,77 @@ func ensureClaudeSettings(workDir string) error {
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create .claude dir: %w", err)
 	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
 
-	settings := claudeSettings{
-		Hooks: map[string][]hookRule{
-			"PostToolUse": {
-				{
-					Matcher: "Write|Edit",
-					Hooks: []hookEntry{
-						{Type: "command", Command: ".orchestra/hooks/auto-commit.sh"},
-					},
-				},
-			},
-			"Stop": {
-				{
-					Hooks: []hookEntry{
-						{Type: "command", Command: ".orchestra/hooks/on-agent-stop.sh"},
-					},
-				},
-			},
-		},
+	root := map[string]json.RawMessage{}
+	if raw, err := os.ReadFile(settingsPath); err == nil && strings.TrimSpace(string(raw)) != "" {
+		if err := json.Unmarshal(raw, &root); err != nil {
+			return fmt.Errorf("parse existing claude settings: %w", err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read claude settings: %w", err)
 	}
 
-	data, err := json.MarshalIndent(settings, "", "  ")
+	settings := claudeSettings{Hooks: map[string][]hookRule{}}
+	if existingHooksRaw, ok := root["hooks"]; ok && len(existingHooksRaw) > 0 && string(existingHooksRaw) != "null" {
+		if err := json.Unmarshal(existingHooksRaw, &settings.Hooks); err != nil {
+			return fmt.Errorf("parse existing claude hooks: %w", err)
+		}
+	}
+	settings.Hooks["PostToolUse"] = upsertHookRule(
+		settings.Hooks["PostToolUse"],
+		"Write|Edit",
+		hookEntry{Type: "command", Command: autoCommitCommand},
+	)
+	settings.Hooks["Stop"] = upsertHookRule(
+		settings.Hooks["Stop"],
+		"",
+		hookEntry{Type: "command", Command: onAgentStopCommand},
+	)
+
+	hooksRaw, err := json.Marshal(settings.Hooks)
+	if err != nil {
+		return fmt.Errorf("marshal claude hooks: %w", err)
+	}
+	root["hooks"] = hooksRaw
+
+	rawRoot, err := json.Marshal(root)
 	if err != nil {
 		return fmt.Errorf("marshal claude settings: %w", err)
 	}
-	data = append(data, '\n')
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), data, 0o644); err != nil {
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, rawRoot, "", "  "); err != nil {
+		return fmt.Errorf("format claude settings: %w", err)
+	}
+	pretty.WriteByte('\n')
+	if err := os.WriteFile(settingsPath, pretty.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("write claude settings: %w", err)
 	}
 	return nil
+}
+
+func upsertHookRule(rules []hookRule, matcher string, entry hookEntry) []hookRule {
+	for i := range rules {
+		if strings.TrimSpace(rules[i].Matcher) != strings.TrimSpace(matcher) {
+			continue
+		}
+		if !containsHookEntry(rules[i].Hooks, entry) {
+			rules[i].Hooks = append(rules[i].Hooks, entry)
+		}
+		return rules
+	}
+	return append(rules, hookRule{
+		Matcher: matcher,
+		Hooks:   []hookEntry{entry},
+	})
+}
+
+func containsHookEntry(entries []hookEntry, target hookEntry) bool {
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Type) == strings.TrimSpace(target.Type) &&
+			strings.TrimSpace(entry.Command) == strings.TrimSpace(target.Command) {
+			return true
+		}
+	}
+	return false
 }
