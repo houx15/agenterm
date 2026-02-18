@@ -43,11 +43,20 @@ export interface ErrorMessage {
   message: string
 }
 
+export interface ProjectEventMessage {
+  type: 'project_event'
+  project_id: string
+  event: string
+  data?: unknown
+  ts?: number
+}
+
 export type ServerMessage =
   | OutputMessage
   | TerminalDataMessage
   | WindowsMessage
   | StatusMessage
+  | ProjectEventMessage
   | ErrorMessage
 
 export interface ClientMessage {
@@ -58,6 +67,52 @@ export interface ClientMessage {
   rows?: number
   name?: string
 }
+
+export interface OrchestratorClientMessage {
+  type: 'chat'
+  project_id: string
+  message: string
+}
+
+export interface OrchestratorHistoryMessage {
+  id: string
+  project_id: string
+  role: string
+  content: string
+  created_at: string
+}
+
+export interface OrchestratorServerTokenMessage {
+  type: 'token'
+  text?: string
+}
+
+export interface OrchestratorServerToolCallMessage {
+  type: 'tool_call'
+  name?: string
+  args?: Record<string, unknown>
+}
+
+export interface OrchestratorServerToolResultMessage {
+  type: 'tool_result'
+  result?: unknown
+}
+
+export interface OrchestratorServerDoneMessage {
+  type: 'done'
+}
+
+export interface OrchestratorServerErrorMessage {
+  type: 'error'
+  error?: string
+}
+
+export type OrchestratorServerMessage =
+  | OrchestratorServerTokenMessage
+  | OrchestratorServerToolCallMessage
+  | OrchestratorServerToolResultMessage
+  | OrchestratorServerDoneMessage
+  | OrchestratorServerErrorMessage
 
 export interface Project {
   id: string

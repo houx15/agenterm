@@ -43,6 +43,7 @@ type handler struct {
 	taskRepo                *db.TaskRepo
 	worktreeRepo            *db.WorktreeRepo
 	sessionRepo             *db.SessionRepo
+	historyRepo             *db.OrchestratorHistoryRepo
 	projectOrchestratorRepo *db.ProjectOrchestratorRepo
 	workflowRepo            *db.WorkflowRepo
 	roleBindingRepo         *db.RoleBindingRepo
@@ -55,6 +56,7 @@ type handler struct {
 	lifecycle               *session.Manager
 	hub                     *hub.Hub
 	orchestrator            *orchestrator.Orchestrator
+	asrTranscriber          asrTranscriber
 	tmuxSession             string
 
 	outputMu    sync.Mutex
@@ -70,6 +72,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		taskRepo:                db.NewTaskRepo(conn),
 		worktreeRepo:            db.NewWorktreeRepo(conn),
 		sessionRepo:             db.NewSessionRepo(conn),
+		historyRepo:             db.NewOrchestratorHistoryRepo(conn),
 		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
 		workflowRepo:            db.NewWorkflowRepo(conn),
 		roleBindingRepo:         db.NewRoleBindingRepo(conn),
@@ -82,6 +85,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		lifecycle:               lifecycle,
 		hub:                     hubInst,
 		orchestrator:            orchestratorInst,
+		asrTranscriber:          newVolcASRTranscriber(),
 		tmuxSession:             tmuxSession,
 		outputState:             make(map[string]*windowOutputState),
 	}
@@ -124,7 +128,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("DELETE /api/playbooks/{id}", handler.deletePlaybook)
 
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
+	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
+	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
 	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)

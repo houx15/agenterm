@@ -27,7 +27,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   if (options.auth !== false && token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  if (!headers.has('Content-Type') && options.body) {
+  if (!headers.has('Content-Type') && options.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -52,8 +52,25 @@ export function listProjects<T>() {
   return apiFetch<T>('/api/projects')
 }
 
-export function listSessions<T>() {
-  return apiFetch<T>('/api/sessions')
+interface ListSessionsParams {
+  status?: string
+  taskID?: string
+  projectID?: string
+}
+
+export function listSessions<T>(params: ListSessionsParams = {}) {
+  const search = new URLSearchParams()
+  if (params.status) {
+    search.set('status', params.status)
+  }
+  if (params.taskID) {
+    search.set('task_id', params.taskID)
+  }
+  if (params.projectID) {
+    search.set('project_id', params.projectID)
+  }
+  const query = search.toString()
+  return apiFetch<T>(query ? `/api/sessions?${query}` : '/api/sessions')
 }
 
 export function listProjectTasks<T>(projectID: string) {
@@ -112,5 +129,32 @@ export function updatePlaybook<T>(id: string, input: unknown) {
 export function deletePlaybook(id: string) {
   return apiFetch<void>(`/api/playbooks/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+  })
+}
+
+export function listOrchestratorHistory<T>(projectID: string, limit = 50) {
+  const params = new URLSearchParams()
+  params.set('project_id', projectID)
+  params.set('limit', String(limit))
+  return apiFetch<T>(`/api/orchestrator/history?${params.toString()}`)
+}
+
+export interface ASRTranscribeInput {
+  appID: string
+  accessKey: string
+  sampleRate?: number
+  audio: Blob
+}
+
+export function transcribeASR<T>(input: ASRTranscribeInput) {
+  const form = new FormData()
+  form.set('app_id', input.appID)
+  form.set('access_key', input.accessKey)
+  form.set('sample_rate', String(input.sampleRate ?? 16000))
+  form.set('audio', input.audio, 'speech.pcm')
+
+  return apiFetch<T>('/api/asr/transcribe', {
+    method: 'POST',
+    body: form,
   })
 }

@@ -81,13 +81,13 @@ function useOrchestratorWS(projectId: string) {
 ```
 
 ## Acceptance Criteria
-- [ ] Task DAG renders with correct dependencies
-- [ ] Chat streams orchestrator responses in real-time
-- [ ] Tool calls visible inline in chat
-- [ ] Tasks in DAG update status in real-time
-- [ ] Clicking task navigates to session terminal
-- [ ] Project selector switches context
-- [ ] Mobile responsive (DAG collapses to list on small screens)
+- [x] Task DAG renders with correct dependencies
+- [x] Chat streams orchestrator responses in real-time
+- [x] Tool calls visible inline in chat
+- [x] Tasks in DAG update status in real-time
+- [x] Clicking task navigates to session terminal
+- [x] Project selector switches context
+- [x] Mobile responsive (DAG collapses to list on small screens)
 
 ## Notes
 - The DAG doesn't need to be complex — even a simple vertical list with arrows for dependencies works as v1

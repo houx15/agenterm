@@ -788,6 +788,34 @@ func TestOrchestratorEndpoints(t *testing.T) {
 		t.Fatalf("chat status=%d body=%s", chat.Code, chat.Body.String())
 	}
 
+	history := apiRequest(t, h, http.MethodGet, "/api/orchestrator/history?project_id="+project.ID+"&limit=10", nil, true)
+	if history.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%s", history.Code, history.Body.String())
+	}
+	var historyItems []map[string]any
+	decodeBody(t, history, &historyItems)
+	if len(historyItems) < 2 {
+		t.Fatalf("history len=%d want >=2", len(historyItems))
+	}
+	firstRole, _ := historyItems[0]["role"].(string)
+	lastRole, _ := historyItems[len(historyItems)-1]["role"].(string)
+	if firstRole != "user" {
+		t.Fatalf("history first role=%q want user", firstRole)
+	}
+	if lastRole != "assistant" {
+		t.Fatalf("history last role=%q want assistant", lastRole)
+	}
+
+	historyMissingProject := apiRequest(t, h, http.MethodGet, "/api/orchestrator/history", nil, true)
+	if historyMissingProject.Code != http.StatusBadRequest {
+		t.Fatalf("history missing project status=%d body=%s", historyMissingProject.Code, historyMissingProject.Body.String())
+	}
+
+	historyInvalidLimit := apiRequest(t, h, http.MethodGet, "/api/orchestrator/history?project_id="+project.ID+"&limit=0", nil, true)
+	if historyInvalidLimit.Code != http.StatusBadRequest {
+		t.Fatalf("history invalid limit status=%d body=%s", historyInvalidLimit.Code, historyInvalidLimit.Body.String())
+	}
+
 	report := apiRequest(t, h, http.MethodGet, "/api/orchestrator/report?project_id="+project.ID, nil, true)
 	if report.Code != http.StatusOK {
 		t.Fatalf("report status=%d body=%s", report.Code, report.Body.String())

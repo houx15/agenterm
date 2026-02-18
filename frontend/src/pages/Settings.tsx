@@ -10,8 +10,9 @@ import {
   updatePlaybook,
 } from '../api/client'
 import type { AgentConfig, Playbook, PlaybookPhase } from '../api/types'
+import { loadASRSettings, saveASRSettings } from '../settings/asr'
 
-type TabKey = 'agents' | 'playbooks'
+type TabKey = 'agents' | 'playbooks' | 'asr'
 type PhaseEditorMode = 'table' | 'raw'
 
 const DEFAULT_AGENT: AgentConfig = {
@@ -94,6 +95,8 @@ export default function Settings() {
   const [loading, setLoading] = useState<boolean>(true)
   const [busy, setBusy] = useState<boolean>(false)
   const [message, setMessage] = useState<string>('')
+  const [asrSettings, setAsrSettings] = useState(() => loadASRSettings())
+  const [asrSaved, setAsrSaved] = useState(false)
 
   const isNewAgent = selectedAgentID === ''
   const isNewPlaybook = selectedPlaybookID === ''
@@ -329,6 +332,15 @@ export default function Settings() {
     }
   }
 
+  function saveASR() {
+    saveASRSettings({
+      appID: asrSettings.appID.trim(),
+      accessKey: asrSettings.accessKey.trim(),
+    })
+    setAsrSaved(true)
+    window.setTimeout(() => setAsrSaved(false), 1500)
+  }
+
   if (loading) {
     return (
       <section className="page-block settings-page">
@@ -347,6 +359,9 @@ export default function Settings() {
         </button>
         <button type="button" className={`secondary-btn ${activeTab === 'playbooks' ? 'active' : ''}`} onClick={() => setActiveTab('playbooks')}>
           Playbooks
+        </button>
+        <button type="button" className={`secondary-btn ${activeTab === 'asr' ? 'active' : ''}`} onClick={() => setActiveTab('asr')}>
+          ASR
         </button>
       </div>
 
@@ -418,7 +433,7 @@ export default function Settings() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'playbooks' ? (
         <div className="settings-grid">
           <aside className="settings-list">
             <button type="button" className="primary-btn" onClick={startNewPlaybook}>
@@ -559,6 +574,39 @@ export default function Settings() {
                 </button>
               ) : null}
             </div>
+          </div>
+        </div>
+      ) : (
+        <div className="settings-card">
+          <h3>Volcengine ASR</h3>
+          <p>Configure speech-to-text credentials for PM Chat microphone input.</p>
+
+          <label className="settings-field" htmlFor="asr-app-id">
+            <span>App ID</span>
+            <input
+              id="asr-app-id"
+              value={asrSettings.appID}
+              onChange={(event) => setAsrSettings((prev) => ({ ...prev, appID: event.target.value }))}
+              placeholder="volc app id"
+            />
+          </label>
+
+          <label className="settings-field" htmlFor="asr-access-key">
+            <span>Access Key</span>
+            <input
+              id="asr-access-key"
+              type="password"
+              value={asrSettings.accessKey}
+              onChange={(event) => setAsrSettings((prev) => ({ ...prev, accessKey: event.target.value }))}
+              placeholder="volc access key"
+            />
+          </label>
+
+          <div className="settings-actions">
+            <button className="primary-btn" type="button" onClick={saveASR}>
+              Save
+            </button>
+            {asrSaved && <small>Saved</small>}
           </div>
         </div>
       )}

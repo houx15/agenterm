@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/user/agenterm/internal/orchestrator"
@@ -56,6 +57,33 @@ func (h *handler) chatOrchestrator(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, resp)
+}
+
+func (h *handler) listOrchestratorHistory(w http.ResponseWriter, r *http.Request) {
+	if h.historyRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "orchestrator history unavailable")
+		return
+	}
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	if projectID == "" {
+		jsonError(w, http.StatusBadRequest, "project_id is required")
+		return
+	}
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			jsonError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	items, err := h.historyRepo.ListByProject(r.Context(), projectID, limit)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, items)
 }
 
 func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) {
