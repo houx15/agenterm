@@ -22,6 +22,10 @@ const DEFAULT_AGENT: AgentConfig = {
   model: 'default',
   command: '',
   max_parallel_agents: 1,
+  supports_orchestrator: false,
+  orchestrator_provider: 'anthropic',
+  orchestrator_api_key: '',
+  orchestrator_api_base: '',
   capabilities: [],
   languages: [],
   cost_tier: 'medium',
@@ -491,6 +495,56 @@ export default function Settings() {
                 }
               />
             </label>
+            <label className="settings-field-checkbox">
+              <span>Can Act As Orchestrator</span>
+              <input
+                checked={!!agentDraft.supports_orchestrator}
+                onChange={(event) =>
+                  setAgentDraft((prev) => ({
+                    ...prev,
+                    supports_orchestrator: event.target.checked,
+                    orchestrator_provider: prev.orchestrator_provider || 'anthropic',
+                  }))
+                }
+                type="checkbox"
+              />
+            </label>
+            {agentDraft.supports_orchestrator && (
+              <>
+                <label>
+                  Orchestrator Format
+                  <select
+                    value={agentDraft.orchestrator_provider ?? 'anthropic'}
+                    onChange={(event) =>
+                      setAgentDraft((prev) => ({
+                        ...prev,
+                        orchestrator_provider: event.target.value as 'anthropic' | 'openai',
+                      }))
+                    }
+                  >
+                    <option value="anthropic">anthropic</option>
+                    <option value="openai">openai</option>
+                  </select>
+                </label>
+                <label>
+                  Orchestrator API Key
+                  <input
+                    type="password"
+                    value={agentDraft.orchestrator_api_key ?? ''}
+                    onChange={(event) => setAgentDraft((prev) => ({ ...prev, orchestrator_api_key: event.target.value }))}
+                    placeholder="sk-..."
+                  />
+                </label>
+                <label>
+                  Orchestrator API Endpoint
+                  <input
+                    value={agentDraft.orchestrator_api_base ?? ''}
+                    onChange={(event) => setAgentDraft((prev) => ({ ...prev, orchestrator_api_base: event.target.value }))}
+                    placeholder="https://api.anthropic.com/v1/messages"
+                  />
+                </label>
+              </>
+            )}
             <label>
               Agent Bio
               <textarea

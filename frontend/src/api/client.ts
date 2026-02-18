@@ -85,6 +85,7 @@ export function createProject<T>(input: CreateProjectInput) {
 }
 
 export interface UpdateProjectOrchestratorInput {
+  default_provider?: string
   default_model?: string
   max_parallel?: number
 }

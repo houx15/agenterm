@@ -171,6 +171,10 @@ export interface AgentConfig {
   model?: string
   command: string
   max_parallel_agents?: number
+  supports_orchestrator?: boolean
+  orchestrator_provider?: 'anthropic' | 'openai' | string
+  orchestrator_api_key?: string
+  orchestrator_api_base?: string
   resume_command?: string
   headless_command?: string
   capabilities: string[]

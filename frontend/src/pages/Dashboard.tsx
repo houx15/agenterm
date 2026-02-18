@@ -436,6 +436,7 @@ export default function Dashboard() {
     name: string
     repoPath: string
     orchestratorAgentID: string
+    orchestratorProvider: string
     playbook: string
     orchestratorModel: string
     workers: number
@@ -453,6 +454,7 @@ export default function Dashboard() {
       if (values.orchestratorModel || values.workers > 0) {
         try {
           await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
+            default_provider: values.orchestratorProvider || undefined,
             default_model: values.orchestratorModel || undefined,
             max_parallel: values.workers,
           })

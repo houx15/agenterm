@@ -18,7 +18,9 @@ import (
 
 const (
 	defaultModel             = "claude-sonnet-4-5"
+	defaultOpenAIModel       = "gpt-4o-mini"
 	defaultAnthropicURL      = "https://api.anthropic.com/v1/messages"
+	defaultOpenAIURL         = "https://api.openai.com/v1/chat/completions"
 	defaultMaxToolRounds     = 10
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
@@ -81,6 +83,13 @@ type Orchestrator struct {
 	maxToolRounds     int
 	maxHistory        int
 	globalMaxParallel int
+}
+
+type llmConfig struct {
+	Provider string
+	Model    string
+	APIKey   string
+	BaseURL  string
 }
 
 func New(opts Options) *Orchestrator {
@@ -163,6 +172,10 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if o.registry != nil {
 		agents = o.registry.List()
 	}
+	llmCfg, err := o.resolveLLMConfig(ctx, projectID, agents)
+	if err != nil {
+		return nil, err
+	}
 	matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
 	if matchedPlaybook == nil {
 		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
@@ -196,12 +209,12 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 
 		for round := 0; round < o.maxToolRounds; round++ {
 			resp, err := o.createMessage(ctx, anthropicRequest{
-				Model:     o.model,
+				Model:     llmCfg.Model,
 				MaxTokens: 1024,
 				System:    systemPrompt,
 				Tools:     o.toolset.JSONSchemas(),
 				Messages:  messages,
-			})
+			}, llmCfg)
 			if err != nil {
 				ch <- StreamEvent{Type: "error", Error: err.Error()}
 				return
@@ -412,6 +425,94 @@ func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Proj
 	}
 }
 
+func (o *Orchestrator) resolveLLMConfig(ctx context.Context, projectID string, agents []*registry.AgentConfig) (llmConfig, error) {
+	provider := "anthropic"
+	model := strings.TrimSpace(o.model)
+	if model == "" {
+		model = defaultModel
+	}
+
+	if o.projectOrchestratorRepo != nil && strings.TrimSpace(projectID) != "" {
+		if profile, err := o.projectOrchestratorRepo.Get(ctx, projectID); err == nil && profile != nil {
+			if p := strings.ToLower(strings.TrimSpace(profile.DefaultProvider)); p != "" {
+				provider = p
+			}
+			if m := strings.TrimSpace(profile.DefaultModel); m != "" {
+				model = m
+			}
+		}
+	}
+
+	candidates := make([]*registry.AgentConfig, 0)
+	for _, agent := range agents {
+		if agent != nil && agent.SupportsOrchestrator {
+			candidates = append(candidates, agent)
+		}
+	}
+
+	pick := func(list []*registry.AgentConfig) *registry.AgentConfig {
+		for _, item := range list {
+			if strings.EqualFold(strings.TrimSpace(item.Model), model) {
+				return item
+			}
+		}
+		if len(list) > 0 {
+			return list[0]
+		}
+		return nil
+	}
+
+	filtered := make([]*registry.AgentConfig, 0, len(candidates))
+	for _, item := range candidates {
+		if p := strings.ToLower(strings.TrimSpace(item.OrchestratorProvider)); p == "" || p == provider {
+			filtered = append(filtered, item)
+		}
+	}
+	selected := pick(filtered)
+	if selected == nil {
+		selected = pick(candidates)
+	}
+
+	cfg := llmConfig{
+		Provider: provider,
+		Model:    model,
+		APIKey:   strings.TrimSpace(o.apiKey),
+		BaseURL:  strings.TrimSpace(o.anthropicBaseURL),
+	}
+
+	if selected != nil {
+		if p := strings.ToLower(strings.TrimSpace(selected.OrchestratorProvider)); p != "" {
+			cfg.Provider = p
+		}
+		if m := strings.TrimSpace(selected.Model); m != "" {
+			cfg.Model = m
+		}
+		cfg.APIKey = strings.TrimSpace(selected.OrchestratorAPIKey)
+		cfg.BaseURL = strings.TrimSpace(selected.OrchestratorAPIBase)
+	}
+
+	if cfg.Provider == "" {
+		cfg.Provider = "anthropic"
+	}
+	if cfg.Provider == "openai" && strings.TrimSpace(cfg.Model) == "" {
+		cfg.Model = defaultOpenAIModel
+	}
+	if cfg.Provider != "openai" && strings.TrimSpace(cfg.Model) == "" {
+		cfg.Model = defaultModel
+	}
+	if cfg.BaseURL == "" {
+		if cfg.Provider == "openai" {
+			cfg.BaseURL = defaultOpenAIURL
+		} else {
+			cfg.BaseURL = defaultAnthropicURL
+		}
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return llmConfig{}, fmt.Errorf("orchestrator credentials are not configured for provider %s", cfg.Provider)
+	}
+	return cfg, nil
+}
+
 func toJSON(v any) string {
 	buf, err := json.Marshal(v)
 	if err != nil {
@@ -459,18 +560,68 @@ type anthropicResponse struct {
 	Content []anthropicContentBlock `json:"content"`
 }
 
-func (o *Orchestrator) createMessage(ctx context.Context, req anthropicRequest) (*anthropicResponse, error) {
+type openAIRequest struct {
+	Model      string          `json:"model"`
+	Messages   []openAIMessage `json:"messages"`
+	Tools      []openAITool    `json:"tools,omitempty"`
+	ToolChoice string          `json:"tool_choice,omitempty"`
+}
+
+type openAIMessage struct {
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type openAITool struct {
+	Type     string         `json:"type"`
+	Function openAIFunction `json:"function"`
+}
+
+type openAIFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+type openAIToolCall struct {
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIFunctionCall `json:"function"`
+}
+
+type openAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type openAIResponse struct {
+	Choices []struct {
+		Message openAIMessage `json:"message"`
+	} `json:"choices"`
+}
+
+func (o *Orchestrator) createMessage(ctx context.Context, req anthropicRequest, cfg llmConfig) (*anthropicResponse, error) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if provider == "openai" {
+		return o.createOpenAIMessage(ctx, req, cfg)
+	}
+	return o.createAnthropicMessage(ctx, req, cfg)
+}
+
+func (o *Orchestrator) createAnthropicMessage(ctx context.Context, req anthropicRequest, cfg llmConfig) (*anthropicResponse, error) {
 	buf, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.anthropicBaseURL, bytes.NewReader(buf))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(o.apiKey) != "" {
-		httpReq.Header.Set("x-api-key", o.apiKey)
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		httpReq.Header.Set("x-api-key", cfg.APIKey)
 	}
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
@@ -490,4 +641,145 @@ func (o *Orchestrator) createMessage(ctx context.Context, req anthropicRequest) 
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (o *Orchestrator) createOpenAIMessage(ctx context.Context, req anthropicRequest, cfg llmConfig) (*anthropicResponse, error) {
+	openReq := openAIRequest{
+		Model:      cfg.Model,
+		Messages:   toOpenAIMessages(req),
+		Tools:      toOpenAITools(req.Tools),
+		ToolChoice: "auto",
+	}
+
+	buf, err := json.Marshal(openReq)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+
+	resp, err := o.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("openai api status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var out openAIResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, err
+	}
+	if len(out.Choices) == 0 {
+		return &anthropicResponse{}, nil
+	}
+
+	msg := out.Choices[0].Message
+	blocks := make([]anthropicContentBlock, 0, 1+len(msg.ToolCalls))
+	if strings.TrimSpace(msg.Content) != "" {
+		blocks = append(blocks, anthropicContentBlock{
+			Type: "text",
+			Text: msg.Content,
+		})
+	}
+	for _, call := range msg.ToolCalls {
+		input := map[string]any{}
+		raw := strings.TrimSpace(call.Function.Arguments)
+		if raw != "" {
+			_ = json.Unmarshal([]byte(raw), &input)
+		}
+		blocks = append(blocks, anthropicContentBlock{
+			Type:  "tool_use",
+			ID:    call.ID,
+			Name:  call.Function.Name,
+			Input: input,
+		})
+	}
+	return &anthropicResponse{Content: blocks}, nil
+}
+
+func toOpenAITools(input []map[string]any) []openAITool {
+	tools := make([]openAITool, 0, len(input))
+	for _, raw := range input {
+		name, _ := raw["name"].(string)
+		description, _ := raw["description"].(string)
+		schema, _ := raw["input_schema"].(map[string]any)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		tools = append(tools, openAITool{
+			Type: "function",
+			Function: openAIFunction{
+				Name:        name,
+				Description: description,
+				Parameters:  schema,
+			},
+		})
+	}
+	return tools
+}
+
+func toOpenAIMessages(req anthropicRequest) []openAIMessage {
+	out := make([]openAIMessage, 0, len(req.Messages)+2)
+	if strings.TrimSpace(req.System) != "" {
+		out = append(out, openAIMessage{Role: "system", Content: req.System})
+	}
+
+	for _, msg := range req.Messages {
+		textParts := make([]string, 0, 2)
+		toolUses := make([]openAIToolCall, 0, 1)
+		toolResults := make([]openAIMessage, 0, 1)
+
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "text":
+				if strings.TrimSpace(block.Text) != "" {
+					textParts = append(textParts, block.Text)
+				}
+			case "tool_use":
+				args, _ := json.Marshal(block.Input)
+				toolUses = append(toolUses, openAIToolCall{
+					ID:   block.ID,
+					Type: "function",
+					Function: openAIFunctionCall{
+						Name:      block.Name,
+						Arguments: string(args),
+					},
+				})
+			case "tool_result":
+				toolResults = append(toolResults, openAIMessage{
+					Role:       "tool",
+					ToolCallID: block.ToolUseID,
+					Content:    block.Content,
+				})
+			}
+		}
+
+		content := strings.Join(textParts, "\n")
+		if msg.Role == "assistant" {
+			out = append(out, openAIMessage{
+				Role:      "assistant",
+				Content:   content,
+				ToolCalls: toolUses,
+			})
+			continue
+		}
+
+		if strings.TrimSpace(content) != "" {
+			out = append(out, openAIMessage{Role: "user", Content: content})
+		}
+		out = append(out, toolResults...)
+	}
+
+	return out
 }

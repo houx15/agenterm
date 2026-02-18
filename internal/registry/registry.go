@@ -194,11 +194,29 @@ func validate(cfg *AgentConfig) error {
 	if cfg.Model == "" {
 		cfg.Model = "default"
 	}
+	cfg.OrchestratorProvider = strings.ToLower(strings.TrimSpace(cfg.OrchestratorProvider))
+	cfg.OrchestratorAPIBase = strings.TrimSpace(cfg.OrchestratorAPIBase)
+	cfg.OrchestratorAPIKey = strings.TrimSpace(cfg.OrchestratorAPIKey)
 	if cfg.MaxParallelAgents <= 0 {
 		cfg.MaxParallelAgents = 1
 	}
 	if cfg.MaxParallelAgents > 64 {
 		return errors.New("max_parallel_agents must be <= 64")
+	}
+	if cfg.SupportsOrchestrator {
+		if cfg.OrchestratorProvider != "anthropic" && cfg.OrchestratorProvider != "openai" {
+			return errors.New("orchestrator_provider must be anthropic or openai")
+		}
+		if cfg.OrchestratorAPIKey == "" {
+			return errors.New("orchestrator_api_key is required when supports_orchestrator=true")
+		}
+		if cfg.OrchestratorAPIBase == "" {
+			return errors.New("orchestrator_api_base is required when supports_orchestrator=true")
+		}
+	} else {
+		cfg.OrchestratorProvider = ""
+		cfg.OrchestratorAPIKey = ""
+		cfg.OrchestratorAPIBase = ""
 	}
 	cfg.Notes = strings.TrimSpace(cfg.Notes)
 	if cfg.Capabilities == nil {

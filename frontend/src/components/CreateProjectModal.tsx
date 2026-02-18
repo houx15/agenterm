@@ -6,6 +6,7 @@ interface CreateProjectValues {
   name: string
   repoPath: string
   orchestratorAgentID: string
+  orchestratorProvider: string
   playbook: string
   orchestratorModel: string
   workers: number
@@ -42,13 +43,14 @@ export default function CreateProjectModal({
   const [playbook, setPlaybook] = useState('')
   const [workers, setWorkers] = useState(2)
   const [error, setError] = useState('')
+  const orchestratorAgents = useMemo(() => agents.filter((item) => item.supports_orchestrator), [agents])
 
   const defaultPlaybook = useMemo(() => playbooks[0]?.id ?? '', [playbooks])
   const defaultModel = useMemo(() => modelOptions[0] ?? '', [modelOptions])
   const defaultOrchestratorAgentID = useMemo(() => {
-    const preferred = agents.find((item) => item.id === 'orchestrator')
-    return preferred?.id ?? agents[0]?.id ?? ''
-  }, [agents])
+    const preferred = orchestratorAgents.find((item) => item.id === 'orchestrator')
+    return preferred?.id ?? orchestratorAgents[0]?.id ?? ''
+  }, [orchestratorAgents])
 
   useEffect(() => {
     if (!open) {
@@ -59,10 +61,10 @@ export default function CreateProjectModal({
     setError('')
     setPlaybook(defaultPlaybook)
     setOrchestratorAgentID(defaultOrchestratorAgentID)
-    const selected = agents.find((item) => item.id === defaultOrchestratorAgentID)
+    const selected = orchestratorAgents.find((item) => item.id === defaultOrchestratorAgentID)
     setOrchestratorModel((selected?.model || '').trim() || defaultModel)
     setWorkers(2)
-  }, [agents, defaultModel, defaultOrchestratorAgentID, defaultPlaybook, open])
+  }, [defaultModel, defaultOrchestratorAgentID, defaultPlaybook, open, orchestratorAgents])
 
   useEffect(() => {
     if (!folderInputRef.current) {
@@ -107,6 +109,7 @@ export default function CreateProjectModal({
       name: trimmedName,
       repoPath: trimmedRepoPath,
       orchestratorAgentID,
+      orchestratorProvider: orchestratorAgents.find((item) => item.id === orchestratorAgentID)?.orchestrator_provider || 'anthropic',
       playbook,
       orchestratorModel: orchestratorModel.trim(),
       workers,
@@ -163,15 +166,15 @@ export default function CreateProjectModal({
             onChange={(event) => {
               const nextID = event.target.value
               setOrchestratorAgentID(nextID)
-              const selected = agents.find((item) => item.id === nextID)
+              const selected = orchestratorAgents.find((item) => item.id === nextID)
               if (selected?.model) {
                 setOrchestratorModel(selected.model)
               }
             }}
             value={orchestratorAgentID}
           >
-            {agents.length === 0 && <option value="">No agents in registry</option>}
-            {agents.map((agent) => (
+            {orchestratorAgents.length === 0 && <option value="">No orchestrator-capable agents</option>}
+            {orchestratorAgents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name} ({agent.id})
               </option>

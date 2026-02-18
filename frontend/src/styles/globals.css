@@ -1345,6 +1345,13 @@ textarea {
   padding: 0.45rem 0.55rem;
 }
 
+.settings-field-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .settings-field select {
   background: #f8fbff;
   color: var(--text-primary);
