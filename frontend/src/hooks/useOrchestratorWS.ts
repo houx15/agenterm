@@ -226,6 +226,7 @@ export function useOrchestratorWS(projectId: string) {
     }
 
     ws.onclose = () => {
+      finishActiveAssistant()
       setConnectionStatus('disconnected')
       wsRef.current = null
 
@@ -244,6 +245,7 @@ export function useOrchestratorWS(projectId: string) {
     }
 
     ws.onerror = () => {
+      finishActiveAssistant()
       setConnectionStatus('disconnected')
     }
 
