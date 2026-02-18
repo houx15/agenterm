@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import { useAppContext } from '../App'
@@ -8,6 +8,16 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768)
   const location = useLocation()
 
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true)
+      }
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const closeOnMobile = () => {
     if (window.innerWidth < 768) {
       setSidebarOpen(false)
@@ -16,7 +26,13 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
-      <button className="mobile-sidebar-toggle" onClick={() => setSidebarOpen((v) => !v)} type="button">
+      <button
+        aria-expanded={sidebarOpen}
+        aria-label="Toggle navigation"
+        className="mobile-sidebar-toggle"
+        onClick={() => setSidebarOpen((v) => !v)}
+        type="button"
+      >
         menu
       </button>
 
@@ -31,6 +47,14 @@ export default function Layout() {
           closeOnNavigate={closeOnMobile}
         />
       </div>
+      <button
+        aria-hidden={!sidebarOpen}
+        aria-label="Close navigation"
+        className={`mobile-sidebar-backdrop ${sidebarOpen ? 'open' : ''}`.trim()}
+        onClick={closeOnMobile}
+        tabIndex={sidebarOpen ? 0 : -1}
+        type="button"
+      />
 
       <main className="content-shell" onClick={closeOnMobile}>
         <header className="topbar">
