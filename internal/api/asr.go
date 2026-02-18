@@ -8,10 +8,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	maxASRAudioBytes = 8 << 20
+	asrRequestTimeout = 30 * time.Second
 )
 
 type asrTranscribeParams struct {
@@ -79,13 +81,20 @@ func (h *handler) transcribeASR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text, err := h.asrTranscriber.Transcribe(r.Context(), asrTranscribeParams{
+	ctx, cancel := context.WithTimeout(r.Context(), asrRequestTimeout)
+	defer cancel()
+
+	text, err := h.asrTranscriber.Transcribe(ctx, asrTranscribeParams{
 		AppID:      appID,
 		AccessKey:  accessKey,
 		SampleRate: sampleRate,
 		AudioPCM:   audio,
 	})
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			jsonError(w, http.StatusGatewayTimeout, "asr transcription timed out")
+			return
+		}
 		jsonError(w, http.StatusBadGateway, err.Error())
 		return
 	}

@@ -58,7 +58,10 @@ export default function PMChat() {
       return
     }
 
-    const [taskList, sessionList] = await Promise.all([listProjectTasks<Task[]>(projectID), listSessions<Session[]>()])
+    const [taskList, sessionList] = await Promise.all([
+      listProjectTasks<Task[]>(projectID),
+      listSessions<Session[]>({ projectID }),
+    ])
 
     setTasks(taskList)
     setSessions(sessionList)

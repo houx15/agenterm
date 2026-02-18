@@ -52,8 +52,25 @@ export function listProjects<T>() {
   return apiFetch<T>('/api/projects')
 }
 
-export function listSessions<T>() {
-  return apiFetch<T>('/api/sessions')
+interface ListSessionsParams {
+  status?: string
+  taskID?: string
+  projectID?: string
+}
+
+export function listSessions<T>(params: ListSessionsParams = {}) {
+  const search = new URLSearchParams()
+  if (params.status) {
+    search.set('status', params.status)
+  }
+  if (params.taskID) {
+    search.set('task_id', params.taskID)
+  }
+  if (params.projectID) {
+    search.set('project_id', params.projectID)
+  }
+  const query = search.toString()
+  return apiFetch<T>(query ? `/api/sessions?${query}` : '/api/sessions')
 }
 
 export function listProjectTasks<T>(projectID: string) {
