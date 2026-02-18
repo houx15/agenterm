@@ -54,6 +54,7 @@ type handler struct {
 	lifecycle               *session.Manager
 	hub                     *hub.Hub
 	orchestrator            *orchestrator.Orchestrator
+	asrTranscriber          asrTranscriber
 	tmuxSession             string
 
 	outputMu    sync.Mutex
@@ -81,6 +82,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		lifecycle:               lifecycle,
 		hub:                     hubInst,
 		orchestrator:            orchestratorInst,
+		asrTranscriber:          newVolcASRTranscriber(),
 		tmuxSession:             tmuxSession,
 		outputState:             make(map[string]*windowOutputState),
 	}
@@ -120,6 +122,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
 	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
+	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
 	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)

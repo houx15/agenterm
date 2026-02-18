@@ -81,6 +81,19 @@ function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessa
   })
 }
 
+function mergeHistoryMessages(history: SessionMessage[], current: SessionMessage[]): SessionMessage[] {
+  if (current.length === 0) {
+    return history
+  }
+
+  const existingIDs = new Set(current.map((item) => item.id).filter((id): id is string => Boolean(id)))
+  const dedupedHistory = history.filter((item) => !item.id || !existingIDs.has(item.id))
+  if (dedupedHistory.length === 0) {
+    return current
+  }
+  return dedupedHistory.concat(current)
+}
+
 export function useOrchestratorWS(projectId: string) {
   const token = useMemo(() => getToken(), [])
   const wsRef = useRef<WebSocket | null>(null)
@@ -344,11 +357,10 @@ export function useOrchestratorWS(projectId: string) {
         if (canceled) {
           return
         }
-        setMessages(items.map(toHistorySessionMessage))
+        const historyMessages = items.map(toHistorySessionMessage)
+        setMessages((prev) => mergeHistoryMessages(historyMessages, prev))
       } catch {
-        if (!canceled) {
-          setMessages([])
-        }
+        // Keep any local in-flight/optimistic chat messages if the history request fails.
       }
     })()
 

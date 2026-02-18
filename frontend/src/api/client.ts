@@ -27,7 +27,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   if (options.auth !== false && token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  if (!headers.has('Content-Type') && options.body) {
+  if (!headers.has('Content-Type') && options.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -72,4 +72,24 @@ export function listOrchestratorHistory<T>(projectID: string, limit = 50) {
   params.set('project_id', projectID)
   params.set('limit', String(limit))
   return apiFetch<T>(`/api/orchestrator/history?${params.toString()}`)
+}
+
+export interface ASRTranscribeInput {
+  appID: string
+  accessKey: string
+  sampleRate?: number
+  audio: Blob
+}
+
+export function transcribeASR<T>(input: ASRTranscribeInput) {
+  const form = new FormData()
+  form.set('app_id', input.appID)
+  form.set('access_key', input.accessKey)
+  form.set('sample_rate', String(input.sampleRate ?? 16000))
+  form.set('audio', input.audio, 'speech.pcm')
+
+  return apiFetch<T>('/api/asr/transcribe', {
+    method: 'POST',
+    body: form,
+  })
 }
