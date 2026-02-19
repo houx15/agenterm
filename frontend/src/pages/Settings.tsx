@@ -23,6 +23,7 @@ import Modal from '../components/Modal'
 
 type TabKey = 'agents' | 'playbooks' | 'asr'
 type WorkflowStageKey = keyof PlaybookWorkflow
+type RoleTemplateKey = 'planner' | 'worker' | 'reviewer' | 'tester'
 
 const DEFAULT_AGENT: AgentConfig = {
   id: '',
@@ -81,11 +82,64 @@ function clampParallelAgents(value: number): number {
   return Math.min(64, Math.max(1, Math.trunc(value)))
 }
 
+function clampNonNegative(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+  return Math.max(0, Math.trunc(value))
+}
+
+function parseCSV(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
   }
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+}
+
+const ROLE_TEMPLATES: Record<RoleTemplateKey, Partial<PlaybookWorkflowRole>> = {
+  planner: {
+    mode: 'planner',
+    inputs_required: ['goal'],
+    actions_allowed: ['get_project_status', 'create_task', 'create_worktree', 'write_task_spec', 'create_session', 'generate_progress_report'],
+    outputs_contract: { type: 'plan_result', required: ['strategy', 'task_graph'] },
+    gates: { requires_user_approval: true, pass_condition: 'user_plan_approved' },
+    retry_policy: { max_iterations: 2, escalate_on: ['unclear_scope'] },
+    completion_criteria: ['Task graph accepted by user'],
+  },
+  worker: {
+    mode: 'worker',
+    inputs_required: ['spec_path'],
+    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'close_session'],
+    outputs_contract: { type: 'work_result', required: ['commit_sha', 'summary'] },
+    gates: { requires_user_approval: false, pass_condition: 'changes_compiled_and_tested' },
+    retry_policy: { max_iterations: 5, escalate_on: ['no_progress'] },
+    completion_criteria: ['Spec implemented and committed'],
+  },
+  reviewer: {
+    mode: 'reviewer',
+    inputs_required: ['spec_path', 'commit_sha'],
+    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'generate_progress_report'],
+    outputs_contract: { type: 'review_result', required: ['verdict', 'issues'] },
+    gates: { requires_user_approval: false, pass_condition: "verdict == 'pass'" },
+    retry_policy: { max_iterations: 5, escalate_on: ['same_issue_repeated'] },
+    completion_criteria: ['Review verdict is pass'],
+  },
+  tester: {
+    mode: 'tester',
+    inputs_required: ['spec_path'],
+    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'generate_progress_report', 'close_session'],
+    outputs_contract: { type: 'test_result', required: ['summary', 'failed_cases'] },
+    gates: { requires_user_approval: false, pass_condition: 'failed_cases == 0' },
+    retry_policy: { max_iterations: 3, escalate_on: ['flaky_tests'] },
+    completion_criteria: ['All required checks pass'],
+  },
 }
 
 function normalizeRole(role: unknown): PlaybookWorkflowRole {
@@ -409,12 +463,29 @@ export default function Settings() {
     updateWorkflow(stageKey, (stage) => ({
       ...stage,
       enabled,
-      roles: enabled && stage.roles.length === 0 ? [createDefaultRole(stageKey === 'build' ? 'implementer' : stageKey)] : stage.roles,
+      roles:
+        enabled && stage.roles.length === 0
+          ? [
+              {
+                ...createDefaultRole(stageKey === 'build' ? 'implementer' : stageKey),
+                mode: stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker',
+              },
+            ]
+          : stage.roles,
     }))
   }
 
   function addRole(stageKey: WorkflowStageKey) {
-    updateWorkflow(stageKey, (stage) => ({ ...stage, roles: [...stage.roles, createDefaultRole()] }))
+    updateWorkflow(stageKey, (stage) => ({
+      ...stage,
+      roles: [
+        ...stage.roles,
+        {
+          ...createDefaultRole(),
+          mode: stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker',
+        },
+      ],
+    }))
   }
 
   function removeRole(stageKey: WorkflowStageKey, index: number) {
@@ -426,6 +497,39 @@ export default function Settings() {
       ...stage,
       roles: stage.roles.map((role, i) => (i === index ? { ...role, ...patch } : role)),
     }))
+  }
+
+  function updateStagePolicy(stageKey: WorkflowStageKey, patch: NonNullable<PlaybookWorkflowStage['stage_policy']>) {
+    updateWorkflow(stageKey, (stage) => ({
+      ...stage,
+      stage_policy: { ...(stage.stage_policy ?? {}), ...patch },
+    }))
+  }
+
+  function applyRoleTemplate(stageKey: WorkflowStageKey, roleIndex: number, templateKey: RoleTemplateKey) {
+    const template = ROLE_TEMPLATES[templateKey]
+    if (!template) {
+      return
+    }
+    updateRole(stageKey, roleIndex, {
+      ...template,
+      outputs_contract: {
+        type: template.outputs_contract?.type ?? '',
+        required: [...(template.outputs_contract?.required ?? [])],
+      },
+      gates: {
+        requires_user_approval: !!template.gates?.requires_user_approval,
+        pass_condition: template.gates?.pass_condition ?? '',
+      },
+      retry_policy: {
+        max_iterations: template.retry_policy?.max_iterations ?? 0,
+        escalate_on: [...(template.retry_policy?.escalate_on ?? [])],
+      },
+      inputs_required: [...(template.inputs_required ?? [])],
+      actions_allowed: [...(template.actions_allowed ?? [])],
+      handoff_to: [...(template.handoff_to ?? [])],
+      completion_criteria: [...(template.completion_criteria ?? [])],
+    })
   }
 
   function toggleRoleAgent(stageKey: WorkflowStageKey, roleIndex: number, agentID: string, checked: boolean) {
@@ -813,9 +917,36 @@ export default function Settings() {
                               </button>
                             </div>
 
+                            <div className="settings-actions">
+                              <button type="button" className="secondary-btn" onClick={() => applyRoleTemplate(stageKey, roleIndex, 'planner')}>
+                                Planner Template
+                              </button>
+                              <button type="button" className="secondary-btn" onClick={() => applyRoleTemplate(stageKey, roleIndex, 'worker')}>
+                                Worker Template
+                              </button>
+                              <button type="button" className="secondary-btn" onClick={() => applyRoleTemplate(stageKey, roleIndex, 'reviewer')}>
+                                Reviewer Template
+                              </button>
+                              <button type="button" className="secondary-btn" onClick={() => applyRoleTemplate(stageKey, roleIndex, 'tester')}>
+                                Tester Template
+                              </button>
+                            </div>
+
                             <label>
                               Role Name
                               <input value={role.name} onChange={(event) => updateRole(stageKey, roleIndex, { name: event.target.value })} />
+                            </label>
+                            <label>
+                              Mode
+                              <select
+                                value={role.mode ?? 'worker'}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { mode: event.target.value as PlaybookWorkflowRole['mode'] })}
+                              >
+                                <option value="planner">planner</option>
+                                <option value="worker">worker</option>
+                                <option value="reviewer">reviewer</option>
+                                <option value="tester">tester</option>
+                              </select>
                             </label>
 
                             <label>
@@ -855,8 +986,164 @@ export default function Settings() {
                                 onChange={(event) => updateRole(stageKey, roleIndex, { suggested_prompt: event.target.value })}
                               />
                             </label>
+
+                            <label>
+                              Inputs Required (comma-separated)
+                              <input
+                                value={(role.inputs_required ?? []).join(', ')}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { inputs_required: parseCSV(event.target.value) })}
+                              />
+                            </label>
+
+                            <label>
+                              Actions Allowed (comma-separated tool names)
+                              <input
+                                value={(role.actions_allowed ?? []).join(', ')}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { actions_allowed: parseCSV(event.target.value) })}
+                              />
+                            </label>
+
+                            <label>
+                              Handoff To (comma-separated role names)
+                              <input
+                                value={(role.handoff_to ?? []).join(', ')}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { handoff_to: parseCSV(event.target.value) })}
+                              />
+                            </label>
+
+                            <label>
+                              Completion Criteria (comma-separated)
+                              <input
+                                value={(role.completion_criteria ?? []).join(', ')}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { completion_criteria: parseCSV(event.target.value) })}
+                              />
+                            </label>
+
+                            <label>
+                              Outputs Contract Type
+                              <input
+                                value={role.outputs_contract?.type ?? ''}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    outputs_contract: {
+                                      type: event.target.value,
+                                      required: [...(role.outputs_contract?.required ?? [])],
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              Outputs Contract Required Fields (comma-separated)
+                              <input
+                                value={(role.outputs_contract?.required ?? []).join(', ')}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    outputs_contract: {
+                                      type: role.outputs_contract?.type ?? '',
+                                      required: parseCSV(event.target.value),
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label className="settings-field-checkbox">
+                              <span>Gate: Requires User Approval</span>
+                              <input
+                                type="checkbox"
+                                checked={!!role.gates?.requires_user_approval}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    gates: {
+                                      requires_user_approval: event.target.checked,
+                                      pass_condition: role.gates?.pass_condition ?? '',
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              Gate: Pass Condition
+                              <input
+                                value={role.gates?.pass_condition ?? ''}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    gates: {
+                                      requires_user_approval: !!role.gates?.requires_user_approval,
+                                      pass_condition: event.target.value,
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              Retry Policy: Max Iterations
+                              <input
+                                type="number"
+                                min={0}
+                                value={role.retry_policy?.max_iterations ?? 0}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    retry_policy: {
+                                      max_iterations: clampNonNegative(Number(event.target.value || 0)),
+                                      escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              Retry Policy: Escalate On (comma-separated)
+                              <input
+                                value={(role.retry_policy?.escalate_on ?? []).join(', ')}
+                                onChange={(event) =>
+                                  updateRole(stageKey, roleIndex, {
+                                    retry_policy: {
+                                      max_iterations: role.retry_policy?.max_iterations ?? 0,
+                                      escalate_on: parseCSV(event.target.value),
+                                    },
+                                  })
+                                }
+                              />
+                            </label>
                           </div>
                         ))}
+
+                        <div className="settings-stage-role">
+                          <div className="settings-stage-role-head">
+                            <strong>Stage Policy</strong>
+                          </div>
+                          <label>
+                            Enter Gate
+                            <input
+                              value={stage.stage_policy?.enter_gate ?? ''}
+                              onChange={(event) => updateStagePolicy(stageKey, { enter_gate: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Exit Gate
+                            <input
+                              value={stage.stage_policy?.exit_gate ?? ''}
+                              onChange={(event) => updateStagePolicy(stageKey, { exit_gate: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            Max Parallel Worktrees
+                            <input
+                              type="number"
+                              min={0}
+                              value={stage.stage_policy?.max_parallel_worktrees ?? 0}
+                              onChange={(event) =>
+                                updateStagePolicy(stageKey, { max_parallel_worktrees: clampNonNegative(Number(event.target.value || 0)) })
+                              }
+                            />
+                          </label>
+                        </div>
 
                         <button type="button" className="secondary-btn settings-stage-add" onClick={() => addRole(stageKey)}>
                           <Plus size={14} />
