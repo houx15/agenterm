@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { OutputMessage, Project, ServerMessage, Session, Task } from '../api/types'
+import type { Project, ServerMessage, Session, Task } from '../api/types'
 import { Plus, Square } from '../components/Lucide'
 import Terminal from '../components/Terminal'
 import { useAppContext } from '../App'
@@ -99,22 +99,6 @@ export default function Sessions() {
           return {
             ...prev,
             [message.window]: next.length > 300000 ? next.slice(next.length - 300000) : next,
-          }
-        })
-        return
-      }
-      case 'output': {
-        const data = message as OutputMessage
-        const windowID = data.window || app.activeWindow
-        if (!windowID) {
-          return
-        }
-        setRawBuffers((prev) => {
-          const current = prev[windowID] ?? ''
-          const next = current + (data.text ?? '')
-          return {
-            ...prev,
-            [windowID]: next.length > 300000 ? next.slice(next.length - 300000) : next,
           }
         })
         return
