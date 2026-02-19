@@ -48,14 +48,22 @@ function createDefaultRole(name = ''): PlaybookWorkflowRole {
     name,
     responsibilities: '',
     allowed_agents: [],
+    mode: 'worker',
+    inputs_required: [],
+    actions_allowed: [],
+    handoff_to: [],
+    completion_criteria: [],
+    outputs_contract: { type: '', required: [] },
+    gates: { requires_user_approval: false, pass_condition: '' },
+    retry_policy: { max_iterations: 0, escalate_on: [] },
     suggested_prompt: '',
   }
 }
 
 const DEFAULT_WORKFLOW: PlaybookWorkflow = {
-  plan: { enabled: true, roles: [createDefaultRole('planner')] },
-  build: { enabled: true, roles: [createDefaultRole('implementer')] },
-  test: { enabled: true, roles: [createDefaultRole('tester')] },
+  plan: { enabled: true, roles: [{ ...createDefaultRole('planner'), mode: 'planner' }], stage_policy: {} },
+  build: { enabled: true, roles: [{ ...createDefaultRole('implementer'), mode: 'worker' }], stage_policy: {} },
+  test: { enabled: true, roles: [{ ...createDefaultRole('tester'), mode: 'tester' }], stage_policy: {} },
 }
 
 const DEFAULT_PLAYBOOK: Playbook = {
@@ -82,11 +90,42 @@ function toStringArray(value: unknown): string[] {
 
 function normalizeRole(role: unknown): PlaybookWorkflowRole {
   const record = role && typeof role === 'object' && !Array.isArray(role) ? (role as Record<string, unknown>) : {}
+  const modeRaw = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : ''
+  const mode = modeRaw || 'worker'
+  const outputsContract =
+    record.outputs_contract && typeof record.outputs_contract === 'object' && !Array.isArray(record.outputs_contract)
+      ? (record.outputs_contract as Record<string, unknown>)
+      : {}
+  const gates = record.gates && typeof record.gates === 'object' && !Array.isArray(record.gates) ? (record.gates as Record<string, unknown>) : {}
+  const retryPolicy =
+    record.retry_policy && typeof record.retry_policy === 'object' && !Array.isArray(record.retry_policy)
+      ? (record.retry_policy as Record<string, unknown>)
+      : {}
   return {
     name: typeof record.name === 'string' ? record.name : '',
     responsibilities: typeof record.responsibilities === 'string' ? record.responsibilities : '',
     allowed_agents: toStringArray(record.allowed_agents),
     suggested_prompt: typeof record.suggested_prompt === 'string' ? record.suggested_prompt : '',
+    mode,
+    inputs_required: toStringArray(record.inputs_required),
+    actions_allowed: toStringArray(record.actions_allowed),
+    handoff_to: toStringArray(record.handoff_to),
+    completion_criteria: toStringArray(record.completion_criteria),
+    outputs_contract: {
+      type: typeof outputsContract.type === 'string' ? outputsContract.type.trim() : '',
+      required: toStringArray(outputsContract.required),
+    },
+    gates: {
+      requires_user_approval: Boolean(gates.requires_user_approval),
+      pass_condition: typeof gates.pass_condition === 'string' ? gates.pass_condition : '',
+    },
+    retry_policy: {
+      max_iterations:
+        typeof retryPolicy.max_iterations === 'number' && Number.isFinite(retryPolicy.max_iterations)
+          ? Math.max(0, Math.trunc(retryPolicy.max_iterations))
+          : 0,
+      escalate_on: toStringArray(retryPolicy.escalate_on),
+    },
   }
 }
 
@@ -94,7 +133,22 @@ function normalizeStage(stage: unknown): PlaybookWorkflowStage {
   const record = stage && typeof stage === 'object' && !Array.isArray(stage) ? (stage as Record<string, unknown>) : {}
   const enabled = typeof record.enabled === 'boolean' ? record.enabled : false
   const roles = Array.isArray(record.roles) ? record.roles.map(normalizeRole) : []
-  return { enabled, roles }
+  const stagePolicy =
+    record.stage_policy && typeof record.stage_policy === 'object' && !Array.isArray(record.stage_policy)
+      ? (record.stage_policy as Record<string, unknown>)
+      : {}
+  return {
+    enabled,
+    roles,
+    stage_policy: {
+      enter_gate: typeof stagePolicy.enter_gate === 'string' ? stagePolicy.enter_gate : '',
+      exit_gate: typeof stagePolicy.exit_gate === 'string' ? stagePolicy.exit_gate : '',
+      max_parallel_worktrees:
+        typeof stagePolicy.max_parallel_worktrees === 'number' && Number.isFinite(stagePolicy.max_parallel_worktrees)
+          ? Math.max(0, Math.trunc(stagePolicy.max_parallel_worktrees))
+          : 0,
+    },
+  }
 }
 
 function phaseToWorkflowRole(phase: PlaybookPhase): PlaybookWorkflowRole {
@@ -102,15 +156,23 @@ function phaseToWorkflowRole(phase: PlaybookPhase): PlaybookWorkflowRole {
     name: phase.role || phase.name,
     responsibilities: phase.description || `Run ${phase.name}`,
     allowed_agents: phase.agent ? [phase.agent] : [],
+    mode: 'worker',
+    inputs_required: [],
+    actions_allowed: [],
+    handoff_to: [],
+    completion_criteria: [],
+    outputs_contract: { type: '', required: [] },
+    gates: { requires_user_approval: false, pass_condition: '' },
+    retry_policy: { max_iterations: 0, escalate_on: [] },
     suggested_prompt: '',
   }
 }
 
 function fallbackWorkflowFromPhases(phases: PlaybookPhase[]): PlaybookWorkflow {
   const workflow: PlaybookWorkflow = {
-    plan: { enabled: true, roles: [] },
-    build: { enabled: true, roles: [] },
-    test: { enabled: true, roles: [] },
+    plan: { enabled: true, roles: [], stage_policy: {} },
+    build: { enabled: true, roles: [], stage_policy: {} },
+    test: { enabled: true, roles: [], stage_policy: {} },
   }
   phases.forEach((phase) => {
     const lower = `${phase.name} ${phase.role}`.toLowerCase()
@@ -157,15 +219,75 @@ function cloneWorkflow(workflow: PlaybookWorkflow): PlaybookWorkflow {
   return {
     plan: {
       enabled: workflow.plan.enabled,
-      roles: workflow.plan.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+      roles: workflow.plan.roles.map((role) => ({
+        ...role,
+        allowed_agents: [...role.allowed_agents],
+        inputs_required: [...(role.inputs_required ?? [])],
+        actions_allowed: [...(role.actions_allowed ?? [])],
+        handoff_to: [...(role.handoff_to ?? [])],
+        completion_criteria: [...(role.completion_criteria ?? [])],
+        outputs_contract: {
+          type: role.outputs_contract?.type ?? '',
+          required: [...(role.outputs_contract?.required ?? [])],
+        },
+        gates: {
+          requires_user_approval: !!role.gates?.requires_user_approval,
+          pass_condition: role.gates?.pass_condition ?? '',
+        },
+        retry_policy: {
+          max_iterations: role.retry_policy?.max_iterations ?? 0,
+          escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
+        },
+      })),
+      stage_policy: { ...(workflow.plan.stage_policy ?? {}) },
     },
     build: {
       enabled: workflow.build.enabled,
-      roles: workflow.build.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+      roles: workflow.build.roles.map((role) => ({
+        ...role,
+        allowed_agents: [...role.allowed_agents],
+        inputs_required: [...(role.inputs_required ?? [])],
+        actions_allowed: [...(role.actions_allowed ?? [])],
+        handoff_to: [...(role.handoff_to ?? [])],
+        completion_criteria: [...(role.completion_criteria ?? [])],
+        outputs_contract: {
+          type: role.outputs_contract?.type ?? '',
+          required: [...(role.outputs_contract?.required ?? [])],
+        },
+        gates: {
+          requires_user_approval: !!role.gates?.requires_user_approval,
+          pass_condition: role.gates?.pass_condition ?? '',
+        },
+        retry_policy: {
+          max_iterations: role.retry_policy?.max_iterations ?? 0,
+          escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
+        },
+      })),
+      stage_policy: { ...(workflow.build.stage_policy ?? {}) },
     },
     test: {
       enabled: workflow.test.enabled,
-      roles: workflow.test.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+      roles: workflow.test.roles.map((role) => ({
+        ...role,
+        allowed_agents: [...role.allowed_agents],
+        inputs_required: [...(role.inputs_required ?? [])],
+        actions_allowed: [...(role.actions_allowed ?? [])],
+        handoff_to: [...(role.handoff_to ?? [])],
+        completion_criteria: [...(role.completion_criteria ?? [])],
+        outputs_contract: {
+          type: role.outputs_contract?.type ?? '',
+          required: [...(role.outputs_contract?.required ?? [])],
+        },
+        gates: {
+          requires_user_approval: !!role.gates?.requires_user_approval,
+          pass_condition: role.gates?.pass_condition ?? '',
+        },
+        retry_policy: {
+          max_iterations: role.retry_policy?.max_iterations ?? 0,
+          escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
+        },
+      })),
+      stage_policy: { ...(workflow.test.stage_policy ?? {}) },
     },
   }
 }

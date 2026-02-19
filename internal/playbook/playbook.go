@@ -166,30 +166,21 @@ func (r *Registry) MatchProject(repoPath string) *Playbook {
 }
 
 func ensureDefaults(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return fmt.Errorf("read playbooks dir: %w", err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
-			return nil
-		}
-	}
-
 	for _, file := range []string{
 		"pairing-coding.yaml",
 		"tdd.yaml",
 		"compound-engineering.yaml",
 	} {
+		path := filepath.Join(dir, file)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("stat default %q: %w", path, err)
+		}
 		content, err := configs.PlaybookDefaults.ReadFile(filepath.Join("playbooks", file))
 		if err != nil {
 			return fmt.Errorf("read embedded default %q: %w", file, err)
 		}
-		path := filepath.Join(dir, file)
 		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return fmt.Errorf("write default %q: %w", path, err)
 		}
@@ -342,6 +333,7 @@ func normalizeStage(stageName string, stage *Stage) error {
 		stage.Roles[i].Name = strings.TrimSpace(stage.Roles[i].Name)
 		stage.Roles[i].Responsibilities = strings.TrimSpace(stage.Roles[i].Responsibilities)
 		stage.Roles[i].SuggestedPrompt = strings.TrimSpace(stage.Roles[i].SuggestedPrompt)
+		stage.Roles[i].Mode = strings.ToLower(strings.TrimSpace(stage.Roles[i].Mode))
 		if stage.Roles[i].AllowedAgents == nil {
 			stage.Roles[i].AllowedAgents = []string{}
 		}
@@ -349,6 +341,35 @@ func normalizeStage(stageName string, stage *Stage) error {
 			stage.Roles[i].AllowedAgents[j] = strings.TrimSpace(stage.Roles[i].AllowedAgents[j])
 		}
 		stage.Roles[i].AllowedAgents = compactNonEmpty(stage.Roles[i].AllowedAgents)
+		if stage.Roles[i].InputsRequired == nil {
+			stage.Roles[i].InputsRequired = []string{}
+		}
+		stage.Roles[i].InputsRequired = compactNonEmpty(stage.Roles[i].InputsRequired)
+		if stage.Roles[i].ActionsAllowed == nil {
+			stage.Roles[i].ActionsAllowed = []string{}
+		}
+		stage.Roles[i].ActionsAllowed = compactNonEmpty(stage.Roles[i].ActionsAllowed)
+		if stage.Roles[i].HandoffTo == nil {
+			stage.Roles[i].HandoffTo = []string{}
+		}
+		stage.Roles[i].HandoffTo = compactNonEmpty(stage.Roles[i].HandoffTo)
+		if stage.Roles[i].CompletionCriteria == nil {
+			stage.Roles[i].CompletionCriteria = []string{}
+		}
+		stage.Roles[i].CompletionCriteria = compactNonEmpty(stage.Roles[i].CompletionCriteria)
+		stage.Roles[i].OutputsContract.Type = strings.TrimSpace(stage.Roles[i].OutputsContract.Type)
+		if stage.Roles[i].OutputsContract.Required == nil {
+			stage.Roles[i].OutputsContract.Required = []string{}
+		}
+		stage.Roles[i].OutputsContract.Required = compactNonEmpty(stage.Roles[i].OutputsContract.Required)
+		stage.Roles[i].Gates.PassCondition = strings.TrimSpace(stage.Roles[i].Gates.PassCondition)
+		if stage.Roles[i].RetryPolicy.MaxIterations < 0 {
+			stage.Roles[i].RetryPolicy.MaxIterations = 0
+		}
+		if stage.Roles[i].RetryPolicy.EscalateOn == nil {
+			stage.Roles[i].RetryPolicy.EscalateOn = []string{}
+		}
+		stage.Roles[i].RetryPolicy.EscalateOn = compactNonEmpty(stage.Roles[i].RetryPolicy.EscalateOn)
 		if stage.Roles[i].Name == "" {
 			return fmt.Errorf("%w: workflow.%s.roles[%d].name is required", ErrInvalidPlaybook, stageName, i)
 		}
@@ -358,8 +379,41 @@ func normalizeStage(stageName string, stage *Stage) error {
 		if len(stage.Roles[i].AllowedAgents) == 0 {
 			return fmt.Errorf("%w: workflow.%s.roles[%d].allowed_agents is required", ErrInvalidPlaybook, stageName, i)
 		}
+		if stage.Roles[i].Mode == "" {
+			stage.Roles[i].Mode = inferRoleMode(stageName, stage.Roles[i].Name)
+		}
+		switch stage.Roles[i].Mode {
+		case "planner", "worker", "reviewer", "tester":
+		default:
+			return fmt.Errorf("%w: workflow.%s.roles[%d].mode must be one of planner|worker|reviewer|tester", ErrInvalidPlaybook, stageName, i)
+		}
+	}
+	stage.StagePolicy.EnterGate = strings.TrimSpace(stage.StagePolicy.EnterGate)
+	stage.StagePolicy.ExitGate = strings.TrimSpace(stage.StagePolicy.ExitGate)
+	if stage.StagePolicy.MaxParallelWorktrees < 0 {
+		return fmt.Errorf("%w: workflow.%s.stage_policy.max_parallel_worktrees must be >= 0", ErrInvalidPlaybook, stageName)
 	}
 	return nil
+}
+
+func inferRoleMode(stageName string, roleName string) string {
+	role := strings.ToLower(strings.TrimSpace(roleName))
+	switch stageName {
+	case "plan":
+		return "planner"
+	case "test":
+		return "tester"
+	}
+	if strings.Contains(role, "review") {
+		return "reviewer"
+	}
+	if strings.Contains(role, "test") || strings.Contains(role, "qa") {
+		return "tester"
+	}
+	if strings.Contains(role, "plan") || strings.Contains(role, "architect") {
+		return "planner"
+	}
+	return "worker"
 }
 
 func compactNonEmpty(values []string) []string {
@@ -448,11 +502,33 @@ func cloneStage(stage Stage) Stage {
 	}
 	for _, role := range stage.Roles {
 		out.Roles = append(out.Roles, StageRole{
-			Name:             role.Name,
-			Responsibilities: role.Responsibilities,
-			AllowedAgents:    append([]string(nil), role.AllowedAgents...),
-			SuggestedPrompt:  role.SuggestedPrompt,
+			Name:               role.Name,
+			Responsibilities:   role.Responsibilities,
+			AllowedAgents:      append([]string(nil), role.AllowedAgents...),
+			SuggestedPrompt:    role.SuggestedPrompt,
+			Mode:               role.Mode,
+			InputsRequired:     append([]string(nil), role.InputsRequired...),
+			ActionsAllowed:     append([]string(nil), role.ActionsAllowed...),
+			HandoffTo:          append([]string(nil), role.HandoffTo...),
+			CompletionCriteria: append([]string(nil), role.CompletionCriteria...),
+			OutputsContract: OutputsContract{
+				Type:     role.OutputsContract.Type,
+				Required: append([]string(nil), role.OutputsContract.Required...),
+			},
+			Gates: RoleGates{
+				RequiresUserApproval: role.Gates.RequiresUserApproval,
+				PassCondition:        role.Gates.PassCondition,
+			},
+			RetryPolicy: RetryPolicy{
+				MaxIterations: role.RetryPolicy.MaxIterations,
+				EscalateOn:    append([]string(nil), role.RetryPolicy.EscalateOn...),
+			},
 		})
+	}
+	out.StagePolicy = StagePolicy{
+		EnterGate:            stage.StagePolicy.EnterGate,
+		ExitGate:             stage.StagePolicy.ExitGate,
+		MaxParallelWorktrees: stage.StagePolicy.MaxParallelWorktrees,
 	}
 	return out
 }

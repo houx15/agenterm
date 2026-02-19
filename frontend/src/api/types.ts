@@ -212,11 +212,33 @@ export interface PlaybookWorkflowRole {
   responsibilities: string
   allowed_agents: string[]
   suggested_prompt?: string
+  mode?: 'planner' | 'worker' | 'reviewer' | 'tester' | string
+  inputs_required?: string[]
+  actions_allowed?: string[]
+  handoff_to?: string[]
+  completion_criteria?: string[]
+  outputs_contract?: {
+    type?: string
+    required?: string[]
+  }
+  gates?: {
+    requires_user_approval?: boolean
+    pass_condition?: string
+  }
+  retry_policy?: {
+    max_iterations?: number
+    escalate_on?: string[]
+  }
 }
 
 export interface PlaybookWorkflowStage {
   enabled: boolean
   roles: PlaybookWorkflowRole[]
+  stage_policy?: {
+    enter_gate?: string
+    exit_gate?: string
+    max_parallel_worktrees?: number
+  }
 }
 
 export interface PlaybookWorkflow {

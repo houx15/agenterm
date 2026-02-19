@@ -55,6 +55,50 @@ func TestMatchProjectDefaultsToPairingCoding(t *testing.T) {
 	}
 }
 
+func TestNewRegistryAddsMissingDefaultsWhenDirAlreadyHasYAML(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "playbooks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "custom.yaml"), []byte(`
+id: custom
+name: Custom
+description: custom
+workflow:
+  plan:
+    enabled: true
+    roles:
+      - name: planner
+        responsibilities: plan
+        allowed_agents: [codex]
+  build:
+    enabled: false
+    roles: []
+  test:
+    enabled: false
+    roles: []
+`), 0o644); err != nil {
+		t.Fatalf("write custom.yaml: %v", err)
+	}
+
+	r, err := NewRegistry(dir)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	if r.Get("custom") == nil {
+		t.Fatalf("expected custom playbook")
+	}
+	if r.Get("pairing-coding") == nil {
+		t.Fatalf("expected pairing-coding default playbook")
+	}
+	if r.Get("tdd") == nil {
+		t.Fatalf("expected tdd default playbook")
+	}
+	if r.Get("compound-engineering") == nil {
+		t.Fatalf("expected compound-engineering default playbook")
+	}
+}
+
 func TestSaveDeleteReload(t *testing.T) {
 	r, err := NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
 	if err != nil {
@@ -94,5 +138,69 @@ func TestDeleteMissingReturnsNotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrPlaybookNotFound) {
 		t.Fatalf("Delete() error = %v, want ErrPlaybookNotFound", err)
+	}
+}
+
+func TestSaveInfersRoleModeAndKeepsContractFields(t *testing.T) {
+	r, err := NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	custom := &Playbook{
+		ID:          "contract-playbook",
+		Name:        "Contract Playbook",
+		Description: "desc",
+		Workflow: Workflow{
+			Plan: Stage{
+				Enabled: true,
+				Roles: []StageRole{{
+					Name:             "planner",
+					Responsibilities: "plan",
+					AllowedAgents:    []string{"claude-code"},
+					InputsRequired:   []string{"goal"},
+					OutputsContract: OutputsContract{
+						Type:     "plan_result",
+						Required: []string{"task_graph", "worktree_plan"},
+					},
+					Gates: RoleGates{
+						RequiresUserApproval: true,
+						PassCondition:        "has_task_graph",
+					},
+					RetryPolicy: RetryPolicy{
+						MaxIterations: 3,
+						EscalateOn:    []string{"blocked"},
+					},
+				}},
+				StagePolicy: StagePolicy{
+					EnterGate:            "user_confirmed",
+					ExitGate:             "plan_approved",
+					MaxParallelWorktrees: 4,
+				},
+			},
+			Build: Stage{Enabled: false, Roles: []StageRole{}},
+			Test:  Stage{Enabled: false, Roles: []StageRole{}},
+		},
+	}
+
+	if err := r.Save(custom); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	got := r.Get("contract-playbook")
+	if got == nil {
+		t.Fatalf("expected saved playbook")
+	}
+	role := got.Workflow.Plan.Roles[0]
+	if role.Mode != "planner" {
+		t.Fatalf("mode=%q want planner", role.Mode)
+	}
+	if role.OutputsContract.Type != "plan_result" {
+		t.Fatalf("outputs_contract.type=%q", role.OutputsContract.Type)
+	}
+	if !role.Gates.RequiresUserApproval {
+		t.Fatalf("requires_user_approval=false want true")
+	}
+	if got.Workflow.Plan.StagePolicy.MaxParallelWorktrees != 4 {
+		t.Fatalf("max_parallel_worktrees=%d want 4", got.Workflow.Plan.StagePolicy.MaxParallelWorktrees)
 	}
 }
