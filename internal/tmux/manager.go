@@ -16,6 +16,8 @@ type Manager struct {
 	defaultDir string
 }
 
+var ErrSessionNotFound = errors.New("tmux session not found")
+
 func NewManager(defaultDir string) *Manager {
 	return &Manager{
 		gateways:   make(map[string]*Gateway),
@@ -72,7 +74,7 @@ func (m *Manager) AttachSession(name string) (*Gateway, error) {
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("tmux session %q not found", name)
+		return nil, fmt.Errorf("%w: %q", ErrSessionNotFound, name)
 	}
 
 	gw := New(name)

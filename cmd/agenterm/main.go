@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -329,8 +330,20 @@ func main() {
 	defer cancel()
 
 	if _, err := state.ensureSession(ctx, cfg.TmuxSession); err != nil {
-		slog.Error("failed to attach default tmux session", "session", cfg.TmuxSession, "error", err)
-		os.Exit(1)
+		if errors.Is(err, tmux.ErrSessionNotFound) {
+			slog.Info("default tmux session not found, creating", "session", cfg.TmuxSession)
+			if _, createErr := manager.CreateSession(cfg.TmuxSession, cfg.DefaultDir); createErr != nil {
+				slog.Error("failed to create default tmux session", "session", cfg.TmuxSession, "error", createErr)
+				os.Exit(1)
+			}
+			if _, retryErr := state.ensureSession(ctx, cfg.TmuxSession); retryErr != nil {
+				slog.Error("failed to attach created default tmux session", "session", cfg.TmuxSession, "error", retryErr)
+				os.Exit(1)
+			}
+		} else {
+			slog.Error("failed to attach default tmux session", "session", cfg.TmuxSession, "error", err)
+			os.Exit(1)
+		}
 	}
 
 	h.SetOnInputWithSession(func(sessionID string, windowID string, keys string) {
