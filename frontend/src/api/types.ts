@@ -84,6 +84,19 @@ export interface OrchestratorHistoryMessage {
   created_at: string
 }
 
+export interface OrchestratorProgressReport {
+  [key: string]: unknown
+  phase?: string
+  queue_depth?: number
+  blocked_count?: number
+  active_sessions?: number
+  pending_tasks?: number
+  completed_tasks?: number
+  blockers?: string[]
+  review_state?: string
+  open_review_issues_total?: number
+}
+
 export interface OrchestratorServerTokenMessage {
   type: 'token'
   text?: string

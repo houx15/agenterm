@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatMessage, { type MessageTaskLink, type SessionMessage } from './ChatMessage'
 import { useSpeechToText } from '../hooks/useSpeechToText'
+import { Activity } from './Lucide'
 
 interface ChatPanelProps {
   messages: SessionMessage[]
@@ -9,6 +10,8 @@ interface ChatPanelProps {
   connectionStatus: 'connected' | 'connecting' | 'disconnected'
   onSend: (message: string) => boolean
   onTaskClick: (taskID: string) => void
+  onReportProgress?: () => void
+  isFetchingReport?: boolean
 }
 
 export default function ChatPanel({
@@ -18,6 +21,8 @@ export default function ChatPanel({
   connectionStatus,
   onSend,
   onTaskClick,
+  onReportProgress,
+  isFetchingReport = false,
 }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
   const endRef = useRef<HTMLDivElement | null>(null)
@@ -90,6 +95,18 @@ export default function ChatPanel({
         />
 
         <div className="pm-chat-input-actions">
+          {onReportProgress && (
+            <button
+              className="secondary-btn"
+              type="button"
+              onClick={onReportProgress}
+              disabled={isFetchingReport || connectionStatus !== 'connected'}
+              title="Get current orchestrator progress summary"
+            >
+              <Activity size={14} />
+              <span>{isFetchingReport ? 'Reporting…' : 'Report Progress'}</span>
+            </button>
+          )}
           <button className="secondary-btn icon-only-btn" type="button" aria-label="Attach context" title="Attach context">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path

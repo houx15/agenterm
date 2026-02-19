@@ -152,6 +152,12 @@ export function listOrchestratorHistory<T>(projectID: string, limit = 50) {
   return apiFetch<T>(`/api/orchestrator/history?${params.toString()}`)
 }
 
+export function getOrchestratorReport<T>(projectID: string) {
+  const params = new URLSearchParams()
+  params.set('project_id', projectID)
+  return apiFetch<T>(`/api/orchestrator/report?${params.toString()}`)
+}
+
 export interface ASRTranscribeInput {
   appID: string
   accessKey: string

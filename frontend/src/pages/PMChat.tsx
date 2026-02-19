@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { OrchestratorServerMessage, Project, Session, Task } from '../api/types'
+import { getOrchestratorReport, listProjects, listProjectTasks, listSessions } from '../api/client'
+import type { OrchestratorProgressReport, OrchestratorServerMessage, Project, Session, Task } from '../api/types'
 import { useAppContext } from '../App'
 import ChatPanel from '../components/ChatPanel'
-import type { MessageTaskLink } from '../components/ChatMessage'
+import type { MessageTaskLink, SessionMessage } from '../components/ChatMessage'
 import { ChevronLeft, ChevronRight, FolderOpen, MessageSquareText } from '../components/Lucide'
 import TaskDAG from '../components/TaskDAG'
 import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
@@ -29,6 +29,10 @@ export default function PMChat() {
   const [error, setError] = useState('')
   const [detailCollapsed, setDetailCollapsed] = useState(false)
   const [showMobileProject, setShowMobileProject] = useState(false)
+  const [progressReport, setProgressReport] = useState<OrchestratorProgressReport | null>(null)
+  const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState('')
 
   const [projectID, setProjectID] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '')
 
@@ -153,6 +157,13 @@ export default function PMChat() {
     return () => window.clearInterval(intervalID)
   }, [loadProjectStats, projects])
 
+  useEffect(() => {
+    setProgressReport(null)
+    setReportUpdatedAt(null)
+    setReportError('')
+    setReportLoading(false)
+  }, [projectID])
+
   const sessionsByTask = useMemo(() => {
     const mapping: Record<string, Session> = {}
 
@@ -199,6 +210,23 @@ export default function PMChat() {
   }
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projectID, projects])
+  const chatMessages = useMemo<SessionMessage[]>(() => {
+    if (!progressReport || !reportUpdatedAt) {
+      return orchestrator.messages
+    }
+    const summary = buildReportSummaryText(progressReport)
+    return [
+      {
+        id: `progress-report-${reportUpdatedAt}`,
+        text: `Progress report (${new Date(reportUpdatedAt).toLocaleTimeString()}):\n${summary}`,
+        className: 'prompt',
+        role: 'system',
+        kind: 'text',
+        timestamp: reportUpdatedAt,
+      },
+      ...orchestrator.messages,
+    ]
+  }, [orchestrator.messages, progressReport, reportUpdatedAt])
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<string, number> = {}
@@ -210,6 +238,23 @@ export default function PMChat() {
   }, [tasks])
 
   const isMobile = window.innerWidth < 900
+
+  const requestProgressReport = useCallback(async () => {
+    if (!projectID) {
+      return
+    }
+    setReportLoading(true)
+    setReportError('')
+    try {
+      const report = await getOrchestratorReport<OrchestratorProgressReport>(projectID)
+      setProgressReport(report)
+      setReportUpdatedAt(Date.now())
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : 'Failed to get progress report')
+    } finally {
+      setReportLoading(false)
+    }
+  }, [projectID])
 
   return (
     <section className="pm-chat-page">
@@ -256,6 +301,18 @@ export default function PMChat() {
 
           {!loading && !error && selectedProject && (
             <>
+              <section className="pm-report-panel">
+                <div className="pm-panel-header">
+                  <h3>Progress</h3>
+                  <small>{reportUpdatedAt ? `Updated ${new Date(reportUpdatedAt).toLocaleTimeString()}` : 'No report yet'}</small>
+                </div>
+                <div className="pm-report-panel-body">
+                  {reportError && <p className="dashboard-error">{reportError}</p>}
+                  {!reportError && progressReport && <p>{buildReportSummaryText(progressReport)}</p>}
+                  {!reportError && !progressReport && <p className="empty-text">Press "Report Progress" to request a summary.</p>}
+                </div>
+              </section>
+
               <section className="pm-project-detail">
                 <div className="pm-panel-header">
                   <h3>
@@ -317,12 +374,14 @@ export default function PMChat() {
               <div className="pm-chat-main">
                 <TaskDAG tasks={tasks} sessionsByTask={sessionsByTask} onOpenTask={openTaskSession} />
                 <ChatPanel
-                  messages={orchestrator.messages}
+                  messages={chatMessages}
                   taskLinks={taskLinks}
                   isStreaming={orchestrator.isStreaming}
                   connectionStatus={orchestrator.connectionStatus}
                   onSend={orchestrator.send}
                   onTaskClick={openTaskSession}
+                  onReportProgress={requestProgressReport}
+                  isFetchingReport={reportLoading}
                 />
               </div>
             </>
@@ -337,4 +396,47 @@ export default function PMChat() {
       </div>
     </section>
   )
+}
+
+function readAsString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function readAsNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  return 0
+}
+
+function readAsStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+function buildReportSummaryText(report: OrchestratorProgressReport): string {
+  const phase = readAsString(report.phase) || 'unknown'
+  const queueDepth = readAsNumber(report.queue_depth)
+  const activeSessions = readAsNumber(report.active_sessions)
+  const pendingTasks = readAsNumber(report.pending_tasks)
+  const completedTasks = readAsNumber(report.completed_tasks)
+  const reviewState = readAsString(report.review_state) || 'not_started'
+  const openReviewIssues = readAsNumber(report.open_review_issues_total)
+  const blockers = readAsStringArray(report.blockers)
+
+  const lines = [
+    `phase=${phase}`,
+    `queue=${queueDepth}`,
+    `sessions_active=${activeSessions}`,
+    `tasks_pending=${pendingTasks}`,
+    `tasks_done=${completedTasks}`,
+    `review=${reviewState}`,
+    `open_review_issues=${openReviewIssues}`,
+  ]
+  if (blockers.length > 0) {
+    lines.push(`blockers=${blockers.join('; ')}`)
+  }
+  return lines.join('\n')
 }
