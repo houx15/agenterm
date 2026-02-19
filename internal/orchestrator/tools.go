@@ -434,6 +434,24 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "can_close_session",
+			Description: "Check whether a session can be safely closed according to review gate",
+			Parameters: map[string]Param{
+				"session_id": {Type: "string", Description: "Session id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := requiredString(args, "session_id")
+				if err != nil {
+					return nil, err
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodGet, "/api/sessions/"+sessionID+"/close-check", nil, nil, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "get_project_status",
 			Description: "Fetch project with tasks/worktrees/sessions",
 			Parameters: map[string]Param{

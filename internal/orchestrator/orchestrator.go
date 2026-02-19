@@ -578,7 +578,7 @@ func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[st
 
 func requiresExplicitSessionID(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "send_command", "read_session_output", "is_session_idle", "close_session":
+	case "send_command", "read_session_output", "is_session_idle", "close_session", "can_close_session":
 		return true
 	default:
 		return false

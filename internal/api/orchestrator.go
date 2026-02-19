@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/orchestrator"
 )
 
@@ -190,6 +191,26 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 			report["review_latest_iteration"] = maxLatestIteration
 			report["review_tasks_in_loop"] = len(reviewTaskSummaries)
 			report["review_task_summaries"] = reviewTaskSummaries
+			report["review_verdict"] = map[string]any{
+				"status":               normalizeReviewVerdict(reviewState),
+				"open_issues_total":    openIssues,
+				"latest_iteration":     maxLatestIteration,
+				"tasks_in_review_loop": len(reviewTaskSummaries),
+			}
+			completedTasks := countTasksWithStatus(tasks, "done", "completed")
+			totalTasks := len(tasks)
+			noActiveExecution := noActiveSessionExecution(readStatusCounts(report["session_counts"]))
+			requiredChecks := map[string]any{
+				"review_verdict_passed":   reviewState == "passed",
+				"open_review_issues_zero": openIssues == 0,
+				"tasks_completed":         totalTasks > 0 && completedTasks == totalTasks,
+				"no_active_execution":     noActiveExecution,
+			}
+			report["required_checks"] = requiredChecks
+			report["finalize_ready"] = boolFromMap(requiredChecks, "review_verdict_passed") &&
+				boolFromMap(requiredChecks, "open_review_issues_zero") &&
+				boolFromMap(requiredChecks, "tasks_completed") &&
+				boolFromMap(requiredChecks, "no_active_execution")
 		}
 	}
 	if h.orchestrator != nil {
@@ -198,4 +219,76 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	jsonResponse(w, http.StatusOK, report)
+}
+
+func normalizeReviewVerdict(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "passed":
+		return "pass"
+	case "changes_requested":
+		return "changes_requested"
+	case "in_review":
+		return "in_review"
+	default:
+		return "not_started"
+	}
+}
+
+func countTasksWithStatus(tasks []*db.Task, statuses ...string) int {
+	if len(tasks) == 0 || len(statuses) == 0 {
+		return 0
+	}
+	allowed := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		allowed[strings.ToLower(strings.TrimSpace(status))] = struct{}{}
+	}
+	count := 0
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(task.Status))]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+func readStatusCounts(raw any) map[string]int {
+	result := map[string]int{}
+	items, ok := raw.(map[string]any)
+	if !ok {
+		return result
+	}
+	for key, value := range items {
+		switch v := value.(type) {
+		case int:
+			result[strings.ToLower(strings.TrimSpace(key))] = v
+		case int32:
+			result[strings.ToLower(strings.TrimSpace(key))] = int(v)
+		case int64:
+			result[strings.ToLower(strings.TrimSpace(key))] = int(v)
+		case float64:
+			result[strings.ToLower(strings.TrimSpace(key))] = int(v)
+		}
+	}
+	return result
+}
+
+func noActiveSessionExecution(counts map[string]int) bool {
+	busyStatuses := []string{"running", "working", "queued", "starting", "waiting", "needs_input", "human_takeover"}
+	totalBusy := 0
+	for _, status := range busyStatuses {
+		totalBusy += counts[strings.ToLower(status)]
+	}
+	return totalBusy == 0
+}
+
+func boolFromMap(items map[string]any, key string) bool {
+	value, ok := items[key]
+	if !ok {
+		return false
+	}
+	v, ok := value.(bool)
+	return ok && v
 }

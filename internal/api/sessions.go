@@ -30,6 +30,13 @@ type patchTakeoverRequest struct {
 	HumanTakeover bool `json:"human_takeover"`
 }
 
+type sessionCloseCheckResponse struct {
+	CanClose       bool           `json:"can_close"`
+	Reason         string         `json:"reason"`
+	ReviewVerdict  map[string]any `json:"review_verdict"`
+	RequiredChecks map[string]any `json:"required_checks"`
+}
+
 type sessionOutputLine struct {
 	Text      string    `json:"text"`
 	Timestamp time.Time `json:"timestamp"`
@@ -366,6 +373,19 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *handler) getSessionCloseCheck(w http.ResponseWriter, r *http.Request) {
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
+		return
+	}
+	check, err := h.evaluateSessionCloseCheck(r.Context(), session)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, check)
+}
+
 func (h *handler) patchSessionTakeover(w http.ResponseWriter, r *http.Request) {
 	var req patchTakeoverRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -409,12 +429,134 @@ func (h *handler) deleteSession(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusNotImplemented, "session lifecycle manager unavailable")
 		return
 	}
-	if err := h.lifecycle.DestroySession(r.Context(), r.PathValue("id")); err != nil {
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
+		return
+	}
+	check, err := h.evaluateSessionCloseCheck(r.Context(), session)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !check.CanClose {
+		jsonResponse(w, http.StatusConflict, map[string]any{
+			"error": "session close blocked by review gate",
+			"gate":  check,
+		})
+		return
+	}
+	if err := h.lifecycle.DestroySession(r.Context(), session.ID); err != nil {
 		status, msg := mapSessionError(err)
 		jsonError(w, status, msg)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) evaluateSessionCloseCheck(ctx context.Context, session *db.Session) (sessionCloseCheckResponse, error) {
+	result := sessionCloseCheckResponse{
+		CanClose: true,
+		Reason:   "ok",
+		ReviewVerdict: map[string]any{
+			"status":              "not_applicable",
+			"open_issues_total":   0,
+			"latest_cycle_status": "",
+			"latest_iteration":    0,
+		},
+		RequiredChecks: map[string]any{
+			"task_completed":              true,
+			"latest_review_cycle_passed":  true,
+			"open_review_issues_zero":     true,
+			"requires_strict_review_gate": false,
+		},
+	}
+	if h == nil || session == nil || strings.TrimSpace(session.TaskID) == "" {
+		return result, nil
+	}
+	task, err := h.taskRepo.Get(ctx, session.TaskID)
+	if err != nil {
+		return result, err
+	}
+	if task == nil {
+		return result, nil
+	}
+	taskDone := isDoneStatus(task.Status)
+	result.RequiredChecks["task_completed"] = taskDone
+
+	role := strings.ToLower(strings.TrimSpace(session.Role))
+	requiresStrict := role == "coder" || role == "reviewer" || role == "qa"
+	result.RequiredChecks["requires_strict_review_gate"] = requiresStrict
+	if !requiresStrict {
+		return result, nil
+	}
+
+	if h.reviewRepo == nil {
+		result.CanClose = taskDone
+		result.RequiredChecks["latest_review_cycle_passed"] = false
+		result.Reason = "review data unavailable and task is not completed"
+		return result, nil
+	}
+
+	cycles, err := h.reviewRepo.ListCyclesByTask(ctx, task.ID)
+	if err != nil {
+		return result, err
+	}
+	latestStatus := ""
+	latestIteration := 0
+	if len(cycles) > 0 {
+		latest := cycles[len(cycles)-1]
+		latestStatus = strings.ToLower(strings.TrimSpace(latest.Status))
+		latestIteration = latest.Iteration
+	}
+
+	openIssues, err := h.reviewRepo.CountOpenIssuesByTask(ctx, task.ID)
+	if err != nil {
+		return result, err
+	}
+	reviewPassed := latestStatus == "review_passed"
+
+	result.ReviewVerdict = map[string]any{
+		"status":              closeGateReviewStatus(latestStatus, openIssues),
+		"open_issues_total":   openIssues,
+		"latest_cycle_status": latestStatus,
+		"latest_iteration":    latestIteration,
+	}
+	result.RequiredChecks["latest_review_cycle_passed"] = reviewPassed
+	result.RequiredChecks["open_review_issues_zero"] = openIssues == 0
+
+	if taskDone {
+		return result, nil
+	}
+	if !reviewPassed || openIssues > 0 {
+		result.CanClose = false
+		result.Reason = "task is not completed and review gate has not passed"
+	}
+	return result, nil
+}
+
+func isDoneStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func closeGateReviewStatus(latestCycleStatus string, openIssues int) string {
+	if openIssues > 0 {
+		return "changes_requested"
+	}
+	switch latestCycleStatus {
+	case "review_passed":
+		return "pass"
+	case "review_running", "review_pending":
+		return "in_review"
+	case "review_changes_requested":
+		return "changes_requested"
+	default:
+		return "not_started"
+	}
 }
 
 func (h *handler) mustGetSession(w http.ResponseWriter, r *http.Request) (*db.Session, bool) {

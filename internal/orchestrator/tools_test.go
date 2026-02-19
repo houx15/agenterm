@@ -42,8 +42,12 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 		BaseURL: "http://example.test",
 		HTTPClient: &http.Client{
 			Transport: toolsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-				b, _ := io.ReadAll(req.Body)
-				calls = append(calls, req.Method+" "+req.URL.Path+" "+strings.TrimSpace(string(b)))
+				bodyText := ""
+				if req.Body != nil {
+					b, _ := io.ReadAll(req.Body)
+					bodyText = strings.TrimSpace(string(b))
+				}
+				calls = append(calls, req.Method+" "+req.URL.Path+" "+bodyText)
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
@@ -67,14 +71,22 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("resolve_merge_conflict failed: %v", err)
 	}
-	if len(calls) != 2 {
-		t.Fatalf("calls=%d want 2", len(calls))
+	if _, err := ts.Execute(context.Background(), "can_close_session", map[string]any{
+		"session_id": "s-1",
+	}); err != nil {
+		t.Fatalf("can_close_session failed: %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("calls=%d want 3", len(calls))
 	}
 	if !strings.HasPrefix(calls[0], "POST /api/worktrees/wt-1/merge") {
 		t.Fatalf("unexpected first call: %q", calls[0])
 	}
 	if !strings.HasPrefix(calls[1], "POST /api/worktrees/wt-1/resolve-conflict") {
 		t.Fatalf("unexpected second call: %q", calls[1])
+	}
+	if !strings.HasPrefix(calls[2], "GET /api/sessions/s-1/close-check") {
+		t.Fatalf("unexpected third call: %q", calls[2])
 	}
 }
 

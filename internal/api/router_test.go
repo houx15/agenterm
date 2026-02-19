@@ -1003,12 +1003,95 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	if reportBody["review_state"] != "changes_requested" {
 		t.Fatalf("report review_state=%v want changes_requested", reportBody["review_state"])
 	}
+	reviewVerdict, ok := reportBody["review_verdict"].(map[string]any)
+	if !ok {
+		t.Fatalf("report review_verdict=%T want object", reportBody["review_verdict"])
+	}
+	if reviewVerdict["status"] != "changes_requested" {
+		t.Fatalf("review_verdict.status=%v want changes_requested", reviewVerdict["status"])
+	}
+	requiredChecks, ok := reportBody["required_checks"].(map[string]any)
+	if !ok {
+		t.Fatalf("report required_checks=%T want object", reportBody["required_checks"])
+	}
+	if requiredChecks["finalize_ready"] != nil {
+		t.Fatalf("required_checks should not contain finalize_ready directly")
+	}
+	if got, ok := reportBody["finalize_ready"].(bool); !ok || got {
+		t.Fatalf("finalize_ready=%v want false", reportBody["finalize_ready"])
+	}
 	if reportBody["review_latest_iteration"] != float64(1) {
 		t.Fatalf("report review_latest_iteration=%v want 1", reportBody["review_latest_iteration"])
 	}
 	summaries, ok := reportBody["review_task_summaries"].([]any)
 	if !ok || len(summaries) == 0 {
 		t.Fatalf("report review_task_summaries=%T %#v want non-empty", reportBody["review_task_summaries"], reportBody["review_task_summaries"])
+	}
+}
+
+func TestSessionCloseCheckGate(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	if createSession.Code != http.StatusCreated {
+		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
+	}
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+	sessionID := session["id"].(string)
+
+	beforeReview := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/close-check", nil, true)
+	if beforeReview.Code != http.StatusOK {
+		t.Fatalf("close-check before review status=%d body=%s", beforeReview.Code, beforeReview.Body.String())
+	}
+	var beforeBody map[string]any
+	decodeBody(t, beforeReview, &beforeBody)
+	if canClose, _ := beforeBody["can_close"].(bool); canClose {
+		t.Fatalf("expected can_close=false before review pass")
+	}
+
+	cycleResp := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/review-cycles", map[string]any{
+		"commit_hash": "abc123",
+	}, true)
+	if cycleResp.Code != http.StatusCreated {
+		t.Fatalf("create review cycle status=%d body=%s", cycleResp.Code, cycleResp.Body.String())
+	}
+	var cycle map[string]any
+	decodeBody(t, cycleResp, &cycle)
+	cycleID := cycle["id"].(string)
+
+	passCycle := apiRequest(t, h, http.MethodPatch, "/api/review-cycles/"+cycleID, map[string]any{
+		"status": "review_passed",
+	}, true)
+	if passCycle.Code != http.StatusOK {
+		t.Fatalf("pass cycle status=%d body=%s", passCycle.Code, passCycle.Body.String())
+	}
+
+	afterReview := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/close-check", nil, true)
+	if afterReview.Code != http.StatusOK {
+		t.Fatalf("close-check after review status=%d body=%s", afterReview.Code, afterReview.Body.String())
+	}
+	var afterBody map[string]any
+	decodeBody(t, afterReview, &afterBody)
+	if canClose, _ := afterBody["can_close"].(bool); !canClose {
+		t.Fatalf("expected can_close=true after review pass")
 	}
 }
 
