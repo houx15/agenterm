@@ -463,6 +463,179 @@ func TestExecuteToolBlocksWhenRoleInputsMissing(t *testing.T) {
 	}
 }
 
+func TestCreateSessionRespectsRetryPolicyMaxIterations(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	pbRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	if err := pbRegistry.Save(&playbook.Playbook{
+		ID:          "retry-policy-playbook",
+		Name:        "Retry Policy",
+		Description: "desc",
+		Workflow: playbook.Workflow{
+			Plan: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+			Build: playbook.Stage{Enabled: true, Roles: []playbook.StageRole{{
+				Name:             "worker",
+				Mode:             "worker",
+				Responsibilities: "code",
+				AllowedAgents:    []string{"codex"},
+				ActionsAllowed:   []string{"create_session"},
+				RetryPolicy:      playbook.RetryPolicy{MaxIterations: 1, EscalateOn: []string{"no_progress"}},
+			}}},
+			Test: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+		},
+	}); err != nil {
+		t.Fatalf("save playbook: %v", err)
+	}
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "active", Playbook: "retry-policy-playbook"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		SessionRepo:      sessionRepo,
+		PlaybookRegistry: pbRegistry,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_session": {
+					Name: "create_session",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	if _, err := o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "worker",
+		"agent_type": "codex",
+	}); err != nil {
+		t.Fatalf("first create_session failed: %v", err)
+	}
+	_, err = o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "worker",
+		"agent_type": "codex",
+	})
+	if err == nil {
+		t.Fatalf("expected retry policy block on second attempt")
+	}
+	if !strings.Contains(err.Error(), "max_iterations reached") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateSessionRespectsRoleHandoffPrerequisites(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	pbRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	if err := pbRegistry.Save(&playbook.Playbook{
+		ID:          "handoff-playbook",
+		Name:        "Handoff",
+		Description: "desc",
+		Workflow: playbook.Workflow{
+			Plan: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+			Build: playbook.Stage{
+				Enabled: true,
+				Roles: []playbook.StageRole{
+					{
+						Name:             "planner",
+						Mode:             "planner",
+						Responsibilities: "plan",
+						AllowedAgents:    []string{"claude-code"},
+						ActionsAllowed:   []string{"create_session"},
+						HandoffTo:        []string{"worker"},
+					},
+					{
+						Name:             "worker",
+						Mode:             "worker",
+						Responsibilities: "build",
+						AllowedAgents:    []string{"codex"},
+						ActionsAllowed:   []string{"create_session"},
+					},
+				},
+			},
+			Test: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+		},
+	}); err != nil {
+		t.Fatalf("save playbook: %v", err)
+	}
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "active", Playbook: "handoff-playbook"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		SessionRepo:      sessionRepo,
+		PlaybookRegistry: pbRegistry,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_session": {
+					Name: "create_session",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err = o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "worker",
+		"agent_type": "codex",
+	})
+	if err == nil {
+		t.Fatalf("expected handoff prerequisite block")
+	}
+	if !strings.Contains(err.Error(), "handoff not ready") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "planner",
+		"agent_type": "claude-code",
+	}); err != nil {
+		t.Fatalf("planner create_session failed: %v", err)
+	}
+
+	if _, err := o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "worker",
+		"agent_type": "codex",
+	}); err != nil {
+		t.Fatalf("worker create_session after handoff should succeed: %v", err)
+	}
+}
+
 func contains(haystack string, needle string) bool {
 	return strings.Contains(haystack, needle)
 }

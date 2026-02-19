@@ -90,6 +90,9 @@ type Orchestrator struct {
 	sessionCommandLock map[string]*sync.Mutex
 	commandLedger      []CommandLedgerEntry
 	nextCommandID      int64
+
+	roleLoopMu       sync.Mutex
+	roleLoopAttempts map[string]map[string]int
 }
 
 type CommandLedgerEntry struct {
@@ -168,6 +171,7 @@ func New(opts Options) *Orchestrator {
 		globalMaxParallel:       globalMaxParallel,
 		sessionCommandLock:      make(map[string]*sync.Mutex),
 		commandLedger:           make([]CommandLedgerEntry, 0, 64),
+		roleLoopAttempts:        make(map[string]map[string]int),
 	}
 }
 
@@ -384,7 +388,79 @@ func (o *Orchestrator) GenerateProgressReport(ctx context.Context, projectID str
 	if !ok {
 		return nil, fmt.Errorf("unexpected report payload type")
 	}
+	if roleLoop, err := o.BuildRoleLoopState(ctx, projectID); err == nil {
+		report["role_loop_state"] = roleLoop
+	}
 	return report, nil
+}
+
+func (o *Orchestrator) BuildRoleLoopState(ctx context.Context, projectID string) (map[string]any, error) {
+	if o == nil || o.taskRepo == nil {
+		return map[string]any{"tasks": []any{}}, nil
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return map[string]any{"tasks": []any{}}, nil
+	}
+	attempts := o.snapshotRoleAttempts()
+	tasks, err := o.taskRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	playbookDef, _ := o.loadProjectPlaybookDefinition(ctx, projectID)
+	stageRoles := map[string]playbook.StageRole{}
+	if playbookDef != nil {
+		for _, stage := range []playbook.Stage{playbookDef.Workflow.Plan, playbookDef.Workflow.Build, playbookDef.Workflow.Test} {
+			for _, role := range stage.Roles {
+				stageRoles[strings.ToLower(strings.TrimSpace(role.Name))] = role
+			}
+		}
+	}
+	taskStates := make([]map[string]any, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		perTaskAttempts := attempts[task.ID]
+		roles := make([]map[string]any, 0, len(perTaskAttempts))
+		escalations := make([]string, 0)
+		for roleNameKey, count := range perTaskAttempts {
+			roleDef, ok := stageRoles[roleNameKey]
+			maxIterations := 0
+			handoffTo := []string{}
+			if ok {
+				maxIterations = roleDef.RetryPolicy.MaxIterations
+				handoffTo = append([]string(nil), roleDef.HandoffTo...)
+			}
+			remaining := -1
+			exhausted := false
+			if maxIterations > 0 {
+				remaining = maxIterations - count
+				exhausted = count >= maxIterations
+				if exhausted {
+					escalations = append(escalations, strings.TrimSpace(roleDef.Name))
+				}
+			}
+			roles = append(roles, map[string]any{
+				"role":           roleNameKey,
+				"attempts":       count,
+				"max_iterations": maxIterations,
+				"remaining":      remaining,
+				"exhausted":      exhausted,
+				"handoff_to":     handoffTo,
+			})
+		}
+		taskStates = append(taskStates, map[string]any{
+			"task_id":       task.ID,
+			"task_title":    task.Title,
+			"roles":         roles,
+			"escalations":   compactNonEmptyStrings(escalations),
+			"tracked_roles": len(roles),
+		})
+	}
+	return map[string]any{
+		"tasks": taskStates,
+	}, nil
 }
 
 func (o *Orchestrator) RecentCommandLedger(limit int) []CommandLedgerEntry {
@@ -678,7 +754,16 @@ func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[st
 	if name == "send_command" {
 		return o.executeQueuedSendCommand(ctx, args)
 	}
-	return o.toolset.Execute(ctx, name, args)
+	result, err := o.toolset.Execute(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(name) == "create_session" {
+		taskID, _ := optionalString(args, "task_id")
+		roleName, _ := optionalString(args, "role")
+		o.incrementRoleAttempt(taskID, roleName)
+	}
+	return result, nil
 }
 
 func requiresExplicitSessionID(name string) bool {
@@ -728,6 +813,9 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		if !toolAllowedByRole(toolName, *role) {
 			return fmt.Errorf("tool %q is not allowed for role %q (mode=%s)", toolName, roleName, role.Mode)
 		}
+		if blocked, reason := o.checkRoleHandoffAndRetries(taskID, *pb, roleName); blocked {
+			return fmt.Errorf("role loop blocked for %q: %s", roleName, reason)
+		}
 		if missing := missingRoleInputs(*role, task, nil, args); len(missing) > 0 {
 			return fmt.Errorf("missing required role inputs for %q: %s", roleName, strings.Join(missing, ", "))
 		}
@@ -761,6 +849,123 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		}
 	}
 	return nil
+}
+
+func (o *Orchestrator) checkRoleHandoffAndRetries(taskID string, pb playbook.Playbook, roleName string) (bool, string) {
+	taskID = strings.TrimSpace(taskID)
+	roleName = strings.TrimSpace(roleName)
+	if o == nil || taskID == "" || roleName == "" {
+		return false, ""
+	}
+	stageName, role := findPlaybookRole(&pb, roleName)
+	if role == nil {
+		return true, "role is not in playbook"
+	}
+	attempts := o.roleAttemptCount(taskID, roleName)
+	if role.RetryPolicy.MaxIterations > 0 && attempts >= role.RetryPolicy.MaxIterations {
+		reason := fmt.Sprintf("max_iterations reached (%d/%d)", attempts, role.RetryPolicy.MaxIterations)
+		if len(role.RetryPolicy.EscalateOn) > 0 {
+			reason += fmt.Sprintf("; escalate_on=%s", strings.Join(role.RetryPolicy.EscalateOn, ","))
+		}
+		return true, reason
+	}
+
+	predecessors := predecessorRoles(pb, roleName)
+	if len(predecessors) == 0 {
+		return false, ""
+	}
+	for _, predecessor := range predecessors {
+		if o.roleAttemptCount(taskID, predecessor) > 0 {
+			return false, ""
+		}
+	}
+	return true, fmt.Sprintf("handoff not ready in stage %s; requires one of: %s", stageName, strings.Join(predecessors, ", "))
+}
+
+func predecessorRoles(pb playbook.Playbook, roleName string) []string {
+	roleName = strings.TrimSpace(roleName)
+	if roleName == "" {
+		return nil
+	}
+	stages := []playbook.Stage{pb.Workflow.Plan, pb.Workflow.Build, pb.Workflow.Test}
+	predecessors := make([]string, 0)
+	for _, stage := range stages {
+		for _, role := range stage.Roles {
+			if containsFold(role.HandoffTo, roleName) {
+				predecessors = append(predecessors, strings.TrimSpace(role.Name))
+			}
+		}
+	}
+	return compactNonEmptyStrings(predecessors)
+}
+
+func compactNonEmptyStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (o *Orchestrator) roleAttemptCount(taskID string, roleName string) int {
+	taskID = strings.TrimSpace(taskID)
+	roleName = strings.ToLower(strings.TrimSpace(roleName))
+	if o == nil || taskID == "" || roleName == "" {
+		return 0
+	}
+	o.roleLoopMu.Lock()
+	defer o.roleLoopMu.Unlock()
+	perTask := o.roleLoopAttempts[taskID]
+	if perTask == nil {
+		return 0
+	}
+	return perTask[roleName]
+}
+
+func (o *Orchestrator) incrementRoleAttempt(taskID string, roleName string) {
+	taskID = strings.TrimSpace(taskID)
+	roleName = strings.ToLower(strings.TrimSpace(roleName))
+	if o == nil || taskID == "" || roleName == "" {
+		return
+	}
+	o.roleLoopMu.Lock()
+	defer o.roleLoopMu.Unlock()
+	perTask := o.roleLoopAttempts[taskID]
+	if perTask == nil {
+		perTask = make(map[string]int)
+		o.roleLoopAttempts[taskID] = perTask
+	}
+	perTask[roleName] = perTask[roleName] + 1
+}
+
+func (o *Orchestrator) snapshotRoleAttempts() map[string]map[string]int {
+	if o == nil {
+		return nil
+	}
+	o.roleLoopMu.Lock()
+	defer o.roleLoopMu.Unlock()
+	out := make(map[string]map[string]int, len(o.roleLoopAttempts))
+	for taskID, perTask := range o.roleLoopAttempts {
+		cloned := make(map[string]int, len(perTask))
+		for role, attempts := range perTask {
+			cloned[role] = attempts
+		}
+		out[taskID] = cloned
+	}
+	return out
 }
 
 func (o *Orchestrator) loadProjectPlaybookDefinition(ctx context.Context, projectID string) (*playbook.Playbook, error) {
