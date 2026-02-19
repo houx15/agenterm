@@ -324,7 +324,11 @@ func ensureDefaults(dir string) error {
 		}
 	}
 
-	for _, file := range []string{"default.yaml", "go-backend.yaml"} {
+	for _, file := range []string{
+		"pairing-coding.yaml",
+		"tdd-coding.yaml",
+		"compound-engineering-workflow.yaml",
+	} {
 		content, err := configs.PlaybookDefaults.ReadFile(filepath.Join("playbooks", file))
 		if err != nil {
 			return fmt.Errorf("read embedded default %q: %w", file, err)
@@ -433,6 +437,10 @@ func normalizeAndValidate(pb *Playbook) error {
 		}
 	}
 
+	if err := normalizeWorkflow(pb); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -456,5 +464,160 @@ func clone(pb *Playbook) *Playbook {
 		ProjectPatterns: append([]string(nil), pb.Match.ProjectPatterns...),
 	}
 	out.Phases = append([]Phase(nil), pb.Phases...)
+	out.Workflow = cloneWorkflow(pb.Workflow)
 	return &out
+}
+
+func normalizeWorkflow(pb *Playbook) error {
+	if pb == nil {
+		return fmt.Errorf("%w: playbook is required", ErrInvalidPlaybook)
+	}
+	if workflowIsEmpty(pb.Workflow) {
+		pb.Workflow = workflowFromLegacyPhases(pb.Phases)
+	}
+	if workflowIsEmpty(pb.Workflow) {
+		return fmt.Errorf("%w: workflow requires at least one stage role", ErrInvalidPlaybook)
+	}
+	if err := normalizeStage("plan", &pb.Workflow.Plan); err != nil {
+		return err
+	}
+	if err := normalizeStage("build", &pb.Workflow.Build); err != nil {
+		return err
+	}
+	if err := normalizeStage("test", &pb.Workflow.Test); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeStage(stageName string, stage *Stage) error {
+	if stage == nil {
+		return fmt.Errorf("%w: workflow.%s is required", ErrInvalidPlaybook, stageName)
+	}
+	if stage.Roles == nil {
+		stage.Roles = []StageRole{}
+	}
+	if !stage.Enabled && len(stage.Roles) == 0 {
+		return nil
+	}
+	if len(stage.Roles) == 0 && stage.Enabled {
+		return fmt.Errorf("%w: workflow.%s.enabled requires at least one role", ErrInvalidPlaybook, stageName)
+	}
+	for i := range stage.Roles {
+		stage.Roles[i].Name = strings.TrimSpace(stage.Roles[i].Name)
+		stage.Roles[i].Responsibilities = strings.TrimSpace(stage.Roles[i].Responsibilities)
+		stage.Roles[i].SuggestedPrompt = strings.TrimSpace(stage.Roles[i].SuggestedPrompt)
+		if stage.Roles[i].AllowedAgents == nil {
+			stage.Roles[i].AllowedAgents = []string{}
+		}
+		for j := range stage.Roles[i].AllowedAgents {
+			stage.Roles[i].AllowedAgents[j] = strings.TrimSpace(stage.Roles[i].AllowedAgents[j])
+		}
+		stage.Roles[i].AllowedAgents = compactNonEmpty(stage.Roles[i].AllowedAgents)
+		if stage.Roles[i].Name == "" {
+			return fmt.Errorf("%w: workflow.%s.roles[%d].name is required", ErrInvalidPlaybook, stageName, i)
+		}
+		if stage.Roles[i].Responsibilities == "" {
+			return fmt.Errorf("%w: workflow.%s.roles[%d].responsibilities is required", ErrInvalidPlaybook, stageName, i)
+		}
+		if len(stage.Roles[i].AllowedAgents) == 0 {
+			return fmt.Errorf("%w: workflow.%s.roles[%d].allowed_agents is required", ErrInvalidPlaybook, stageName, i)
+		}
+	}
+	return nil
+}
+
+func compactNonEmpty(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, exists := seen[v]; exists {
+			continue
+		}
+		seen[v] = struct{}{}
+		result = append(result, v)
+	}
+	return result
+}
+
+func workflowIsEmpty(workflow Workflow) bool {
+	return len(workflow.Plan.Roles) == 0 && len(workflow.Build.Roles) == 0 && len(workflow.Test.Roles) == 0
+}
+
+func workflowFromLegacyPhases(phases []Phase) Workflow {
+	workflow := Workflow{
+		Plan:  Stage{Enabled: true, Roles: []StageRole{}},
+		Build: Stage{Enabled: true, Roles: []StageRole{}},
+		Test:  Stage{Enabled: true, Roles: []StageRole{}},
+	}
+	for _, phase := range phases {
+		role := StageRole{
+			Name:             strings.TrimSpace(phase.Role),
+			Responsibilities: strings.TrimSpace(phase.Description),
+			AllowedAgents:    compactNonEmpty([]string{strings.TrimSpace(phase.Agent)}),
+		}
+		if role.Name == "" {
+			role.Name = strings.TrimSpace(phase.Name)
+		}
+		if role.Responsibilities == "" {
+			role.Responsibilities = fmt.Sprintf("Run legacy phase %q", strings.TrimSpace(phase.Name))
+		}
+		target := stageForLegacyPhase(phase)
+		switch target {
+		case "plan":
+			workflow.Plan.Roles = append(workflow.Plan.Roles, role)
+		case "test":
+			workflow.Test.Roles = append(workflow.Test.Roles, role)
+		default:
+			workflow.Build.Roles = append(workflow.Build.Roles, role)
+		}
+	}
+	workflow.Plan.Enabled = len(workflow.Plan.Roles) > 0
+	workflow.Build.Enabled = len(workflow.Build.Roles) > 0
+	workflow.Test.Enabled = len(workflow.Test.Roles) > 0
+	return workflow
+}
+
+func stageForLegacyPhase(phase Phase) string {
+	role := strings.ToLower(strings.TrimSpace(phase.Role))
+	name := strings.ToLower(strings.TrimSpace(phase.Name))
+	switch {
+	case strings.Contains(role, "plan"), strings.Contains(role, "architect"), strings.Contains(role, "research"), strings.Contains(name, "discover"), strings.Contains(name, "plan"):
+		return "plan"
+	case strings.Contains(role, "test"), strings.Contains(role, "review"), strings.Contains(role, "qa"), strings.Contains(name, "verify"), strings.Contains(name, "review"), strings.Contains(name, "test"):
+		return "test"
+	default:
+		return "build"
+	}
+}
+
+func cloneWorkflow(workflow Workflow) Workflow {
+	return Workflow{
+		Plan:  cloneStage(workflow.Plan),
+		Build: cloneStage(workflow.Build),
+		Test:  cloneStage(workflow.Test),
+	}
+}
+
+func cloneStage(stage Stage) Stage {
+	out := Stage{
+		Enabled: stage.Enabled,
+		Roles:   make([]StageRole, 0, len(stage.Roles)),
+	}
+	for _, role := range stage.Roles {
+		out.Roles = append(out.Roles, StageRole{
+			Name:             role.Name,
+			Responsibilities: role.Responsibilities,
+			AllowedAgents:    append([]string(nil), role.AllowedAgents...),
+			SuggestedPrompt:  role.SuggestedPrompt,
+		})
+	}
+	return out
 }

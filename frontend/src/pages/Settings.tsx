@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Hammer, Map, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   createAgent,
   createPlaybook,
@@ -9,12 +10,19 @@ import {
   updateAgent,
   updatePlaybook,
 } from '../api/client'
-import type { AgentConfig, Playbook, PlaybookPhase } from '../api/types'
+import type {
+  AgentConfig,
+  Playbook,
+  PlaybookPhase,
+  PlaybookWorkflow,
+  PlaybookWorkflowRole,
+  PlaybookWorkflowStage,
+} from '../api/types'
 import { loadASRSettings, saveASRSettings } from '../settings/asr'
 import Modal from '../components/Modal'
 
 type TabKey = 'agents' | 'playbooks' | 'asr'
-type PhaseEditorMode = 'table' | 'raw'
+type WorkflowStageKey = keyof PlaybookWorkflow
 
 const DEFAULT_AGENT: AgentConfig = {
   id: '',
@@ -35,6 +43,21 @@ const DEFAULT_AGENT: AgentConfig = {
   notes: '',
 }
 
+function createDefaultRole(name = ''): PlaybookWorkflowRole {
+  return {
+    name,
+    responsibilities: '',
+    allowed_agents: [],
+    suggested_prompt: '',
+  }
+}
+
+const DEFAULT_WORKFLOW: PlaybookWorkflow = {
+  plan: { enabled: true, roles: [createDefaultRole('planner')] },
+  build: { enabled: true, roles: [createDefaultRole('implementer')] },
+  test: { enabled: true, roles: [createDefaultRole('tester')] },
+}
+
 const DEFAULT_PLAYBOOK: Playbook = {
   id: '',
   name: '',
@@ -42,6 +65,7 @@ const DEFAULT_PLAYBOOK: Playbook = {
   parallelism_strategy: '',
   match: { languages: [], project_patterns: [] },
   phases: [{ name: 'Implement', agent: 'codex', role: 'implementer', description: '' }],
+  workflow: DEFAULT_WORKFLOW,
 }
 
 function parseCSV(value: string): string[] {
@@ -58,15 +82,76 @@ function clampParallelAgents(value: number): number {
   return Math.min(64, Math.max(1, Math.trunc(value)))
 }
 
-function stringifyPhases(phases: PlaybookPhase[]): string {
-  return JSON.stringify(phases, null, 2)
-}
-
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
   }
-  return value.filter((item): item is string => typeof item === 'string')
+  return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+}
+
+function normalizeRole(role: unknown): PlaybookWorkflowRole {
+  const record = role && typeof role === 'object' && !Array.isArray(role) ? (role as Record<string, unknown>) : {}
+  return {
+    name: typeof record.name === 'string' ? record.name : '',
+    responsibilities: typeof record.responsibilities === 'string' ? record.responsibilities : '',
+    allowed_agents: toStringArray(record.allowed_agents),
+    suggested_prompt: typeof record.suggested_prompt === 'string' ? record.suggested_prompt : '',
+  }
+}
+
+function normalizeStage(stage: unknown): PlaybookWorkflowStage {
+  const record = stage && typeof stage === 'object' && !Array.isArray(stage) ? (stage as Record<string, unknown>) : {}
+  const enabled = typeof record.enabled === 'boolean' ? record.enabled : false
+  const roles = Array.isArray(record.roles) ? record.roles.map(normalizeRole) : []
+  return { enabled, roles }
+}
+
+function phaseToWorkflowRole(phase: PlaybookPhase): PlaybookWorkflowRole {
+  return {
+    name: phase.role || phase.name,
+    responsibilities: phase.description || `Run ${phase.name}`,
+    allowed_agents: phase.agent ? [phase.agent] : [],
+    suggested_prompt: '',
+  }
+}
+
+function fallbackWorkflowFromPhases(phases: PlaybookPhase[]): PlaybookWorkflow {
+  const workflow: PlaybookWorkflow = {
+    plan: { enabled: true, roles: [] },
+    build: { enabled: true, roles: [] },
+    test: { enabled: true, roles: [] },
+  }
+  phases.forEach((phase) => {
+    const lower = `${phase.name} ${phase.role}`.toLowerCase()
+    const role = phaseToWorkflowRole(phase)
+    if (lower.includes('plan') || lower.includes('discover') || lower.includes('architect')) {
+      workflow.plan.roles.push(role)
+      return
+    }
+    if (lower.includes('test') || lower.includes('review') || lower.includes('qa') || lower.includes('verify')) {
+      workflow.test.roles.push(role)
+      return
+    }
+    workflow.build.roles.push(role)
+  })
+  workflow.plan.enabled = workflow.plan.roles.length > 0
+  workflow.build.enabled = workflow.build.roles.length > 0
+  workflow.test.enabled = workflow.test.roles.length > 0
+  return workflow
+}
+
+function normalizeWorkflow(input: Playbook): PlaybookWorkflow {
+  const parsed = {
+    plan: normalizeStage(input.workflow?.plan),
+    build: normalizeStage(input.workflow?.build),
+    test: normalizeStage(input.workflow?.test),
+  }
+
+  const hasRoles = parsed.plan.roles.length > 0 || parsed.build.roles.length > 0 || parsed.test.roles.length > 0
+  if (!hasRoles) {
+    return fallbackWorkflowFromPhases(Array.isArray(input.phases) ? input.phases : [])
+  }
+  return parsed
 }
 
 function normalizePlaybook(input: Playbook): Playbook {
@@ -77,39 +162,31 @@ function normalizePlaybook(input: Playbook): Playbook {
       project_patterns: toStringArray(input.match?.project_patterns),
     },
     phases: Array.isArray(input.phases) ? input.phases : DEFAULT_PLAYBOOK.phases,
+    workflow: normalizeWorkflow(input),
   }
 }
 
-function parseRawPhases(value: string): { phases: PlaybookPhase[]; error?: string } {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(value)
-  } catch {
-    return { phases: [], error: 'Phases must be valid JSON.' }
+function cloneWorkflow(workflow: PlaybookWorkflow): PlaybookWorkflow {
+  return {
+    plan: {
+      enabled: workflow.plan.enabled,
+      roles: workflow.plan.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+    },
+    build: {
+      enabled: workflow.build.enabled,
+      roles: workflow.build.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+    },
+    test: {
+      enabled: workflow.test.enabled,
+      roles: workflow.test.roles.map((role) => ({ ...role, allowed_agents: [...role.allowed_agents] })),
+    },
   }
+}
 
-  if (!Array.isArray(parsed)) {
-    return { phases: [], error: 'Raw phases must be a JSON array.' }
-  }
-
-  const phases: PlaybookPhase[] = []
-  for (let i = 0; i < parsed.length; i += 1) {
-    const item = parsed[i]
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return { phases: [], error: `Phase ${i + 1} must be an object.` }
-    }
-    const record = item as Record<string, unknown>
-    const name = typeof record.name === 'string' ? record.name.trim() : ''
-    const agent = typeof record.agent === 'string' ? record.agent.trim() : ''
-    const role = typeof record.role === 'string' ? record.role.trim() : ''
-    const description = typeof record.description === 'string' ? record.description : ''
-    if (!name || !agent || !role) {
-      return { phases: [], error: `Phase ${i + 1} requires non-empty name, agent, and role.` }
-    }
-    phases.push({ name, agent, role, description })
-  }
-
-  return { phases }
+const STAGE_META: Record<WorkflowStageKey, { label: string; icon: typeof Map }> = {
+  plan: { label: 'Plan Stage', icon: Map },
+  build: { label: 'Build Stage', icon: Hammer },
+  test: { label: 'Test Stage', icon: ShieldCheck },
 }
 
 export default function Settings() {
@@ -120,8 +197,6 @@ export default function Settings() {
   const [selectedPlaybookID, setSelectedPlaybookID] = useState<string>('')
   const [agentDraft, setAgentDraft] = useState<AgentConfig>(DEFAULT_AGENT)
   const [playbookDraft, setPlaybookDraft] = useState<Playbook>(DEFAULT_PLAYBOOK)
-  const [phasesEditor, setPhasesEditor] = useState<string>(stringifyPhases(DEFAULT_PLAYBOOK.phases))
-  const [phaseEditorMode, setPhaseEditorMode] = useState<PhaseEditorMode>('table')
   const [loading, setLoading] = useState<boolean>(true)
   const [busy, setBusy] = useState<boolean>(false)
   const [message, setMessage] = useState<string>('')
@@ -151,7 +226,6 @@ export default function Settings() {
         if (normalizedPlaybooks.length > 0) {
           setSelectedPlaybookID(normalizedPlaybooks[0].id)
           setPlaybookDraft(normalizedPlaybooks[0])
-          setPhasesEditor(stringifyPhases(normalizedPlaybooks[0].phases))
         }
       } catch (error) {
         setMessage(error instanceof Error ? error.message : 'Failed to load settings')
@@ -191,7 +265,6 @@ export default function Settings() {
   function startNewPlaybook() {
     setSelectedPlaybookID('')
     setPlaybookDraft(DEFAULT_PLAYBOOK)
-    setPhasesEditor(stringifyPhases(DEFAULT_PLAYBOOK.phases))
     setMessage('')
   }
 
@@ -212,47 +285,49 @@ export default function Settings() {
     }
     setSelectedPlaybookID(id)
     setPlaybookDraft(found)
-    setPhasesEditor(stringifyPhases(found.phases))
     setMessage('')
   }
 
-  function setDraftPhases(phases: PlaybookPhase[]) {
-    setPlaybookDraft((prev) => ({ ...prev, phases }))
-    setPhasesEditor(stringifyPhases(phases))
+  function updateWorkflow(stageKey: WorkflowStageKey, updater: (stage: PlaybookWorkflowStage) => PlaybookWorkflowStage) {
+    setPlaybookDraft((prev) => {
+      const nextWorkflow = cloneWorkflow(prev.workflow)
+      nextWorkflow[stageKey] = updater(nextWorkflow[stageKey])
+      return { ...prev, workflow: nextWorkflow }
+    })
   }
 
-  function updatePhase(index: number, patch: Partial<PlaybookPhase>) {
-    const next = playbookDraft.phases.map((phase, i) => (i === index ? { ...phase, ...patch } : phase))
-    setDraftPhases(next)
+  function toggleStage(stageKey: WorkflowStageKey, enabled: boolean) {
+    updateWorkflow(stageKey, (stage) => ({
+      ...stage,
+      enabled,
+      roles: enabled && stage.roles.length === 0 ? [createDefaultRole(stageKey === 'build' ? 'implementer' : stageKey)] : stage.roles,
+    }))
   }
 
-  function addPhase() {
-    const next = [...playbookDraft.phases, { name: '', agent: '', role: '', description: '' }]
-    setDraftPhases(next)
+  function addRole(stageKey: WorkflowStageKey) {
+    updateWorkflow(stageKey, (stage) => ({ ...stage, roles: [...stage.roles, createDefaultRole()] }))
   }
 
-  function removePhase(index: number) {
-    const next = playbookDraft.phases.filter((_, i) => i !== index)
-    setDraftPhases(next.length > 0 ? next : [{ name: '', agent: '', role: '', description: '' }])
+  function removeRole(stageKey: WorkflowStageKey, index: number) {
+    updateWorkflow(stageKey, (stage) => ({ ...stage, roles: stage.roles.filter((_, i) => i !== index) }))
   }
 
-  function switchPhaseEditorMode(mode: PhaseEditorMode) {
-    if (mode === phaseEditorMode) {
+  function updateRole(stageKey: WorkflowStageKey, index: number, patch: Partial<PlaybookWorkflowRole>) {
+    updateWorkflow(stageKey, (stage) => ({
+      ...stage,
+      roles: stage.roles.map((role, i) => (i === index ? { ...role, ...patch } : role)),
+    }))
+  }
+
+  function toggleRoleAgent(stageKey: WorkflowStageKey, roleIndex: number, agentID: string, checked: boolean) {
+    const current = playbookDraft.workflow[stageKey].roles[roleIndex]
+    if (!current) {
       return
     }
-    if (mode === 'raw') {
-      setPhasesEditor(stringifyPhases(playbookDraft.phases))
-      setPhaseEditorMode('raw')
-      return
-    }
-    const parsed = parseRawPhases(phasesEditor)
-    if (parsed.error) {
-      setMessage(parsed.error)
-      return
-    }
-    setDraftPhases(parsed.phases)
-    setPhaseEditorMode('table')
-    setMessage('')
+    const allowed = checked
+      ? [...current.allowed_agents.filter((item) => item !== agentID), agentID]
+      : current.allowed_agents.filter((item) => item !== agentID)
+    updateRole(stageKey, roleIndex, { allowed_agents: allowed })
   }
 
   async function saveAgent() {
@@ -306,38 +381,22 @@ export default function Settings() {
     setBusy(true)
     setMessage('')
     try {
-      let phases = playbookDraft.phases
-      if (phaseEditorMode === 'raw') {
-        const parsed = parseRawPhases(phasesEditor)
-        if (parsed.error) {
-          setMessage(parsed.error)
-          return
-        }
-        phases = parsed.phases
-      }
       const payload: Playbook = {
         ...playbookDraft,
-        phases,
       }
       if (isNewPlaybook) {
         const created = normalizePlaybook(await createPlaybook<Playbook>(payload))
         setPlaybooks((prev) => [...prev.filter((item) => item.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
         setSelectedPlaybookID(created.id)
         setPlaybookDraft(created)
-        setDraftPhases(created.phases)
       } else {
         const updated = normalizePlaybook(await updatePlaybook<Playbook>(selectedPlaybookID, payload))
         setPlaybooks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
         setPlaybookDraft(updated)
-        setDraftPhases(updated.phases)
       }
       setMessage('Playbook saved.')
     } catch (error) {
-      if (error instanceof SyntaxError) {
-        setMessage('Phases must be valid JSON array.')
-      } else {
-        setMessage(error instanceof Error ? error.message : 'Failed to save playbook')
-      }
+      setMessage(error instanceof Error ? error.message : 'Failed to save playbook')
     } finally {
       setBusy(false)
     }
@@ -357,7 +416,6 @@ export default function Settings() {
       if (next.length > 0) {
         setSelectedPlaybookID(next[0].id)
         setPlaybookDraft(next[0])
-        setPhasesEditor(stringifyPhases(next[0].phases))
       } else {
         startNewPlaybook()
       }
@@ -577,6 +635,12 @@ export default function Settings() {
             <button type="button" className="primary-btn" onClick={startNewPlaybook}>
               + New Playbook
             </button>
+            {isNewPlaybook && (
+              <button type="button" className="session-row active">
+                <strong>{playbookDraft.name.trim() || 'New Playbook (Draft)'}</strong>
+                <small>{playbookDraft.id.trim() || 'unsaved'}</small>
+              </button>
+            )}
             {playbooks.map((item) => (
               <button
                 key={item.id}
@@ -617,7 +681,7 @@ export default function Settings() {
             <label>
               Match Languages (comma-separated)
               <input
-                value={(playbookDraft.match?.languages ?? []).join(', ')}
+                value={toStringArray(playbookDraft.match?.languages).join(', ')}
                 onChange={(event) =>
                   setPlaybookDraft((prev) => ({
                     ...prev,
@@ -629,7 +693,7 @@ export default function Settings() {
             <label>
               Match Project Patterns (comma-separated)
               <input
-                value={(playbookDraft.match?.project_patterns ?? []).join(', ')}
+                value={toStringArray(playbookDraft.match?.project_patterns).join(', ')}
                 onChange={(event) =>
                   setPlaybookDraft((prev) => ({
                     ...prev,
@@ -638,69 +702,93 @@ export default function Settings() {
                 }
               />
             </label>
-            <div className="settings-phase-editor">
-              <div className="settings-phase-editor-head">
-                <span>Phases</span>
-                <div className="settings-phase-editor-modes">
-                  <button
-                    type="button"
-                    className={`secondary-btn ${phaseEditorMode === 'table' ? 'active' : ''}`}
-                    onClick={() => switchPhaseEditorMode('table')}
-                  >
-                    Table
-                  </button>
-                  <button
-                    type="button"
-                    className={`secondary-btn ${phaseEditorMode === 'raw' ? 'active' : ''}`}
-                    onClick={() => switchPhaseEditorMode('raw')}
-                  >
-                    Raw JSON
-                  </button>
-                </div>
-              </div>
-              {phaseEditorMode === 'table' ? (
-                <>
-                  <table className="settings-phase-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Agent</th>
-                        <th>Role</th>
-                        <th>Description</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {playbookDraft.phases.map((phase, index) => (
-                        <tr key={`${index}-${phase.name}-${phase.agent}`}>
-                          <td>
-                            <input value={phase.name} onChange={(event) => updatePhase(index, { name: event.target.value })} />
-                          </td>
-                          <td>
-                            <input value={phase.agent} onChange={(event) => updatePhase(index, { agent: event.target.value })} />
-                          </td>
-                          <td>
-                            <input value={phase.role} onChange={(event) => updatePhase(index, { role: event.target.value })} />
-                          </td>
-                          <td>
-                            <input value={phase.description} onChange={(event) => updatePhase(index, { description: event.target.value })} />
-                          </td>
-                          <td>
-                            <button type="button" className="action-btn danger" onClick={() => removePhase(index)}>
-                              Remove
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <button type="button" className="secondary-btn settings-phase-add" onClick={addPhase}>
-                    + Add Phase
-                  </button>
-                </>
-              ) : (
-                <textarea className="settings-code" value={phasesEditor} onChange={(event) => setPhasesEditor(event.target.value)} />
-              )}
+
+            <div className="settings-workflow-editor">
+              {(Object.keys(STAGE_META) as WorkflowStageKey[]).map((stageKey) => {
+                const stage = playbookDraft.workflow[stageKey]
+                const stageMeta = STAGE_META[stageKey]
+                const StageIcon = stageMeta.icon
+                return (
+                  <section className={`settings-stage-card ${stage.enabled ? 'enabled' : 'disabled'}`} key={stageKey}>
+                    <header className="settings-stage-header">
+                      <h4>
+                        <StageIcon size={16} />
+                        {stageMeta.label}
+                      </h4>
+                      <label className="settings-field-checkbox">
+                        <span>Enabled</span>
+                        <input checked={stage.enabled} onChange={(event) => toggleStage(stageKey, event.target.checked)} type="checkbox" />
+                      </label>
+                    </header>
+
+                    {!stage.enabled ? (
+                      <p className="settings-stage-hint">This stage is disabled for this playbook.</p>
+                    ) : (
+                      <>
+                        {stage.roles.map((role, roleIndex) => (
+                          <div className="settings-stage-role" key={`${stageKey}-${roleIndex}`}>
+                            <div className="settings-stage-role-head">
+                              <strong>Role {roleIndex + 1}</strong>
+                              <button type="button" className="action-btn danger" onClick={() => removeRole(stageKey, roleIndex)}>
+                                <Trash2 size={14} />
+                                Remove
+                              </button>
+                            </div>
+
+                            <label>
+                              Role Name
+                              <input value={role.name} onChange={(event) => updateRole(stageKey, roleIndex, { name: event.target.value })} />
+                            </label>
+
+                            <label>
+                              Responsibilities
+                              <textarea
+                                rows={2}
+                                value={role.responsibilities}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { responsibilities: event.target.value })}
+                              />
+                            </label>
+
+                            <div className="settings-role-agents">
+                              <span>Available Models (Agent IDs)</span>
+                              {agents.length === 0 ? (
+                                <small>No agents available. Create agents first.</small>
+                              ) : (
+                                <div className="settings-role-agents-grid">
+                                  {agents.map((agent) => (
+                                    <label key={`${stageKey}-${roleIndex}-${agent.id}`} className="settings-role-agent-item">
+                                      <input
+                                        checked={role.allowed_agents.includes(agent.id)}
+                                        onChange={(event) => toggleRoleAgent(stageKey, roleIndex, agent.id, event.target.checked)}
+                                        type="checkbox"
+                                      />
+                                      <span>{agent.id}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <label>
+                              Suggested Prompt (optional)
+                              <textarea
+                                rows={2}
+                                value={role.suggested_prompt ?? ''}
+                                onChange={(event) => updateRole(stageKey, roleIndex, { suggested_prompt: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                        ))}
+
+                        <button type="button" className="secondary-btn settings-stage-add" onClick={() => addRole(stageKey)}>
+                          <Plus size={14} />
+                          Add Role
+                        </button>
+                      </>
+                    )}
+                  </section>
+                )
+              })}
             </div>
             <div className="settings-actions">
               <button type="button" className="primary-btn" disabled={busy} onClick={() => void savePlaybook()}>

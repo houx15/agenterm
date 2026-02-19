@@ -14,14 +14,17 @@ func TestNewRegistryCreatesDefaults(t *testing.T) {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 
-	if r.Get("default") == nil {
-		t.Fatalf("expected default playbook")
+	if r.Get("pairing-coding") == nil {
+		t.Fatalf("expected pairing-coding playbook")
 	}
-	if r.Get("go-backend") == nil {
-		t.Fatalf("expected go-backend playbook")
+	if r.Get("tdd-coding") == nil {
+		t.Fatalf("expected tdd-coding playbook")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "default.yaml")); err != nil {
-		t.Fatalf("default file missing: %v", err)
+	if r.Get("compound-engineering-workflow") == nil {
+		t.Fatalf("expected compound-engineering-workflow playbook")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pairing-coding.yaml")); err != nil {
+		t.Fatalf("pairing-coding file missing: %v", err)
 	}
 }
 
@@ -45,8 +48,8 @@ func TestMatchProjectByLanguageAndPattern(t *testing.T) {
 	if matched == nil {
 		t.Fatalf("expected matched playbook")
 	}
-	if matched.ID != "go-backend" {
-		t.Fatalf("matched id=%q want go-backend", matched.ID)
+	if matched.ID != "tdd-coding" {
+		t.Fatalf("matched id=%q want tdd-coding", matched.ID)
 	}
 }
 

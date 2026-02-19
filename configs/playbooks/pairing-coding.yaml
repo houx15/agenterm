@@ -1,0 +1,37 @@
+id: pairing-coding
+name: Pairing Coding
+description: Two-person style flow with one planner and one codebase reader, then builder and reviewer pairing.
+parallelism_strategy: Keep planning focused, then run builder and reviewer in tight pairing loops.
+match:
+  languages: []
+  project_patterns: []
+workflow:
+  plan:
+    enabled: true
+    roles:
+      - name: planner
+        responsibilities: Clarify scope, split milestones, and define acceptance criteria.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Turn the user goal into an actionable engineering plan with milestones.
+      - name: codebase-reader
+        responsibilities: Read the current repository and surface relevant architecture constraints.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Explore the repository and summarize key files, risks, and constraints.
+  build:
+    enabled: true
+    roles:
+      - name: builder
+        responsibilities: Implement the agreed plan in small reviewable commits.
+        allowed_agents: [codex]
+        suggested_prompt: Implement phase tasks and keep each change verifiable.
+      - name: reviewer
+        responsibilities: Review each build increment and request fixes before merge.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Review the code diffs and list concrete issues with severity.
+  test:
+    enabled: true
+    roles:
+      - name: tester
+        responsibilities: Run tests and validate acceptance criteria before completion.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Execute tests, report failures, and suggest targeted fixes.

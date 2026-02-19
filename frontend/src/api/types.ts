@@ -212,11 +212,30 @@ export interface PlaybookPhase {
   description: string
 }
 
+export interface PlaybookWorkflowRole {
+  name: string
+  responsibilities: string
+  allowed_agents: string[]
+  suggested_prompt?: string
+}
+
+export interface PlaybookWorkflowStage {
+  enabled: boolean
+  roles: PlaybookWorkflowRole[]
+}
+
+export interface PlaybookWorkflow {
+  plan: PlaybookWorkflowStage
+  build: PlaybookWorkflowStage
+  test: PlaybookWorkflowStage
+}
+
 export interface Playbook {
   id: string
   name: string
   description: string
   match: PlaybookMatch
   phases: PlaybookPhase[]
+  workflow: PlaybookWorkflow
   parallelism_strategy: string
 }

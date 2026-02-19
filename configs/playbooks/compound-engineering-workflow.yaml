@@ -1,0 +1,45 @@
+id: compound-engineering-workflow
+name: Compound Engineering Workflow
+description: Structured multi-agent workflow inspired by compound engineering with planning, execution, and hardening loops.
+parallelism_strategy: Plan centrally, execute in parallel workstreams, then converge with strict review and integration gates.
+match:
+  languages: []
+  project_patterns:
+    - docs/
+    - .github/
+    - cmd/
+    - internal/
+workflow:
+  plan:
+    enabled: true
+    roles:
+      - name: requirements-analyst
+        responsibilities: Refine goals, constraints, and acceptance criteria from user intent.
+        allowed_agents: [claude-code]
+        suggested_prompt: Elicit requirements and produce a clear scope definition.
+      - name: architecture-planner
+        responsibilities: Produce execution architecture, task graph, and worktree strategy.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Build a staged execution plan with dependencies and risk controls.
+  build:
+    enabled: true
+    roles:
+      - name: coder
+        responsibilities: Deliver implementation tasks in dedicated worktrees.
+        allowed_agents: [codex]
+        suggested_prompt: Implement assigned task slice and keep commits focused.
+      - name: reviewer
+        responsibilities: Review code quality, correctness, and contract compliance continuously.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Review diffs against requirements and flag defects precisely.
+      - name: test-builder
+        responsibilities: Expand automated tests and quality checks for each delivered slice.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Add targeted tests and quality gates for changed areas.
+  test:
+    enabled: true
+    roles:
+      - name: integration-verifier
+        responsibilities: Validate integration, merge readiness, and operational stability.
+        allowed_agents: [claude-code]
+        suggested_prompt: Run integration checks and summarize merge/release readiness.

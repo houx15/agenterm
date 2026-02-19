@@ -1,0 +1,44 @@
+id: tdd-coding
+name: TDD Coding
+description: Test-driven workflow where tests/specs are written first, then implementation and refactoring.
+parallelism_strategy: Serialize red-green-refactor loops per scope, parallelize only independent test suites.
+match:
+  languages:
+    - go
+    - typescript
+    - python
+  project_patterns:
+    - go.mod
+    - package.json
+    - pyproject.toml
+    - tests/
+workflow:
+  plan:
+    enabled: true
+    roles:
+      - name: test-planner
+        responsibilities: Define expected behaviors, edge cases, and test strategy before coding.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Convert requirements into testable scenarios and concrete test cases.
+  build:
+    enabled: true
+    roles:
+      - name: test-writer
+        responsibilities: Write or update failing tests/specs for each behavior slice.
+        allowed_agents: [claude-code, codex]
+        suggested_prompt: Create minimal failing tests that capture required behavior.
+      - name: implementer
+        responsibilities: Implement code to make tests pass with minimal scope changes.
+        allowed_agents: [codex]
+        suggested_prompt: Implement only what is needed to satisfy the failing tests.
+      - name: refactorer
+        responsibilities: Refactor while preserving passing tests and improving maintainability.
+        allowed_agents: [codex, claude-code]
+        suggested_prompt: Refactor safely and keep test suite green.
+  test:
+    enabled: true
+    roles:
+      - name: qa-reviewer
+        responsibilities: Run full regression checks and validate no hidden behavior regressions.
+        allowed_agents: [claude-code]
+        suggested_prompt: Run full checks and produce a final quality report with risks.

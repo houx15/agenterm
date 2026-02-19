@@ -19,15 +19,50 @@ type ProjectState struct {
 type Playbook struct {
 	ID       string
 	Name     string
-	Phases   []PlaybookPhase
+	Workflow PlaybookWorkflow
 	Strategy string
 }
 
-type PlaybookPhase struct {
-	Name        string
-	Agent       string
-	Role        string
-	Description string
+type PlaybookWorkflow struct {
+	Plan  PlaybookStage
+	Build PlaybookStage
+	Test  PlaybookStage
+}
+
+type PlaybookStage struct {
+	Enabled bool
+	Roles   []PlaybookRole
+}
+
+type PlaybookRole struct {
+	Name             string
+	Responsibilities string
+	AllowedAgents    []string
+	SuggestedPrompt  string
+}
+
+func roleCatalog(stage PlaybookStage) string {
+	if !stage.Enabled {
+		return "disabled"
+	}
+	if len(stage.Roles) == 0 {
+		return "enabled (no roles configured)"
+	}
+	parts := make([]string, 0, len(stage.Roles))
+	for _, role := range stage.Roles {
+		desc := strings.TrimSpace(role.Name)
+		if desc == "" {
+			desc = "unnamed-role"
+		}
+		if len(role.AllowedAgents) > 0 {
+			desc += fmt.Sprintf(" [agents: %s]", strings.Join(role.AllowedAgents, ", "))
+		}
+		if strings.TrimSpace(role.Responsibilities) != "" {
+			desc += ": " + role.Responsibilities
+		}
+		parts = append(parts, desc)
+	}
+	return strings.Join(parts, " | ")
 }
 
 func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook) string {
@@ -40,6 +75,8 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("3) Use tools for every state-changing action.\\n")
 	b.WriteString("4) Keep actions bounded and avoid runaway loops.\\n")
 	b.WriteString("5) Explain intent before major actions and summarize outcomes.\\n\\n")
+	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\\n")
+	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\\n\\n")
 
 	if projectState == nil || projectState.Project == nil {
 		b.WriteString("Current project state: unavailable.\\n")
@@ -92,17 +129,10 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 
 	if playbook != nil {
 		b.WriteString(fmt.Sprintf("Matched playbook: %s (%s)\\n", playbook.Name, playbook.ID))
-		for _, phase := range playbook.Phases {
-			line := fmt.Sprintf("- %s", phase.Name)
-			agentRole := strings.TrimSpace(strings.Join([]string{phase.Agent, phase.Role}, "/"))
-			if agentRole != "/" && agentRole != "" {
-				line += fmt.Sprintf(" [%s]", agentRole)
-			}
-			if strings.TrimSpace(phase.Description) != "" {
-				line += ": " + phase.Description
-			}
-			b.WriteString(line + "\\n")
-		}
+		b.WriteString("Workflow stages:\\n")
+		b.WriteString("- plan: " + roleCatalog(playbook.Workflow.Plan) + "\\n")
+		b.WriteString("- build: " + roleCatalog(playbook.Workflow.Build) + "\\n")
+		b.WriteString("- test: " + roleCatalog(playbook.Workflow.Test) + "\\n")
 		if strings.TrimSpace(playbook.Strategy) != "" {
 			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\\n")
 		}

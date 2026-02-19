@@ -198,11 +198,20 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if err != nil {
 		return nil, err
 	}
+	approval := evaluateApprovalGate(userMessage)
 	matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
 	if matchedPlaybook == nil {
 		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
 	}
 	systemPrompt := BuildSystemPrompt(state, agents, matchedPlaybook)
+	systemPrompt += "\n\nApproval gate:\n"
+	if approval.Confirmed {
+		systemPrompt += "- User message includes explicit approval for execution in this turn.\n"
+	} else {
+		systemPrompt += "- User has NOT provided explicit approval for execution in this turn.\n"
+		systemPrompt += "- You may analyze, ask questions, and propose plans.\n"
+		systemPrompt += "- Do NOT execute mutating actions until user confirms.\n"
+	}
 	if o.knowledgeRepo != nil {
 		knowledge, err := o.knowledgeRepo.ListByProject(ctx, projectID)
 		if err == nil && len(knowledge) > 0 {
@@ -257,6 +266,23 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 				case "tool_use":
 					toolUsed = true
 					ch <- StreamEvent{Type: "tool_call", Name: block.Name, Args: block.Input}
+					if isMutatingTool(block.Name) && !approval.Confirmed {
+						result := map[string]any{
+							"error":  "approval_required",
+							"reason": "explicit user confirmation required before executing mutating actions",
+							"hint":   "ask user to reply with an explicit approval, then retry",
+						}
+						ch <- StreamEvent{Type: "tool_result", Name: block.Name, Result: result}
+						messages = append(messages, anthropicMessage{
+							Role: "user",
+							Content: []anthropicContentBlock{{
+								Type:      "tool_result",
+								ToolUseID: block.ID,
+								Content:   toJSON(result),
+							}},
+						})
+						continue
+					}
 					if block.Name == "create_session" {
 						decision := o.checkSessionCreationAllowed(ctx, block.Input)
 						if !decision.Allowed {
@@ -305,6 +331,45 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	}()
 
 	return ch, nil
+}
+
+type approvalGate struct {
+	Confirmed bool
+}
+
+func evaluateApprovalGate(message string) approvalGate {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return approvalGate{Confirmed: false}
+	}
+	// Keep this strict: only explicit approve/confirm intent unlocks execution.
+	tokens := []string{
+		"confirm",
+		"approved",
+		"approve",
+		"go ahead",
+		"proceed",
+		"start now",
+		"run it",
+		"execute",
+		"continue",
+	}
+	for _, token := range tokens {
+		if strings.Contains(text, token) {
+			return approvalGate{Confirmed: true}
+		}
+	}
+	return approvalGate{Confirmed: false}
+}
+
+func isMutatingTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "create_project", "create_task", "create_worktree", "merge_worktree", "resolve_merge_conflict",
+		"create_session", "send_command", "close_session", "write_task_spec":
+		return true
+	default:
+		return false
+	}
 }
 
 func (o *Orchestrator) GenerateProgressReport(ctx context.Context, projectID string) (map[string]any, error) {
@@ -412,22 +477,37 @@ func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID str
 	if err != nil || workflow == nil {
 		return nil
 	}
-	phases := make([]PlaybookPhase, 0, len(workflow.Phases))
+	playbookWorkflow := PlaybookWorkflow{
+		Plan:  PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Build: PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Test:  PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+	}
 	for _, p := range workflow.Phases {
 		if p == nil {
 			continue
 		}
-		phases = append(phases, PlaybookPhase{
-			Name:        p.PhaseType + ":" + p.Role,
-			Agent:       "",
-			Role:        p.Role,
-			Description: fmt.Sprintf("entry=%s | exit=%s | max_parallel=%d", p.EntryRule, p.ExitRule, p.MaxParallel),
-		})
+		role := PlaybookRole{
+			Name:             strings.TrimSpace(p.Role),
+			Responsibilities: fmt.Sprintf("entry=%s | exit=%s | max_parallel=%d", p.EntryRule, p.ExitRule, p.MaxParallel),
+			AllowedAgents:    []string{},
+		}
+		phaseType := strings.ToLower(strings.TrimSpace(p.PhaseType))
+		switch {
+		case strings.Contains(phaseType, "scan"), strings.Contains(phaseType, "plan"):
+			playbookWorkflow.Plan.Enabled = true
+			playbookWorkflow.Plan.Roles = append(playbookWorkflow.Plan.Roles, role)
+		case strings.Contains(phaseType, "review"), strings.Contains(phaseType, "test"), strings.Contains(phaseType, "qa"):
+			playbookWorkflow.Test.Enabled = true
+			playbookWorkflow.Test.Roles = append(playbookWorkflow.Test.Roles, role)
+		default:
+			playbookWorkflow.Build.Enabled = true
+			playbookWorkflow.Build.Roles = append(playbookWorkflow.Build.Roles, role)
+		}
 	}
 	return &Playbook{
 		ID:       workflow.ID,
 		Name:     workflow.Name,
-		Phases:   phases,
+		Workflow: playbookWorkflow,
 		Strategy: fmt.Sprintf("project_max_parallel=%d, review_policy=%s", profile.MaxParallel, profile.ReviewPolicy),
 	}
 }
@@ -448,21 +528,41 @@ func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Proj
 		return nil
 	}
 
-	phases := make([]PlaybookPhase, 0, len(pb.Phases))
-	for _, phase := range pb.Phases {
-		phases = append(phases, PlaybookPhase{
-			Name:        phase.Name,
-			Agent:       phase.Agent,
-			Role:        phase.Role,
-			Description: phase.Description,
-		})
-	}
 	return &Playbook{
-		ID:       pb.ID,
-		Name:     pb.Name,
-		Phases:   phases,
+		ID:   pb.ID,
+		Name: pb.Name,
+		Workflow: PlaybookWorkflow{
+			Plan: PlaybookStage{
+				Enabled: pb.Workflow.Plan.Enabled,
+				Roles:   toPromptRoles(pb.Workflow.Plan.Roles),
+			},
+			Build: PlaybookStage{
+				Enabled: pb.Workflow.Build.Enabled,
+				Roles:   toPromptRoles(pb.Workflow.Build.Roles),
+			},
+			Test: PlaybookStage{
+				Enabled: pb.Workflow.Test.Enabled,
+				Roles:   toPromptRoles(pb.Workflow.Test.Roles),
+			},
+		},
 		Strategy: pb.ParallelismStrategy,
 	}
+}
+
+func toPromptRoles(roles []playbook.StageRole) []PlaybookRole {
+	if len(roles) == 0 {
+		return []PlaybookRole{}
+	}
+	out := make([]PlaybookRole, 0, len(roles))
+	for _, role := range roles {
+		out = append(out, PlaybookRole{
+			Name:             strings.TrimSpace(role.Name),
+			Responsibilities: strings.TrimSpace(role.Responsibilities),
+			AllowedAgents:    append([]string(nil), role.AllowedAgents...),
+			SuggestedPrompt:  strings.TrimSpace(role.SuggestedPrompt),
+		})
+	}
+	return out
 }
 
 func (o *Orchestrator) resolveLLMConfig(ctx context.Context, projectID string, agents []*registry.AgentConfig) (llmConfig, error) {
