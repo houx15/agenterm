@@ -15,6 +15,7 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const currentSessionRef = useRef<string>('')
+  const lastRenderedHistoryRef = useRef<string>('')
   const onInputRef = useRef(onInput)
   const onResizeRef = useRef(onResize)
 
@@ -82,6 +83,21 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
       if (history) {
         term.write(history)
       }
+      lastRenderedHistoryRef.current = history
+    } else if (history !== lastRenderedHistoryRef.current) {
+      const previous = lastRenderedHistoryRef.current
+      if (history.startsWith(previous)) {
+        const delta = history.slice(previous.length)
+        if (delta) {
+          term.write(delta)
+        }
+      } else {
+        term.reset()
+        if (history) {
+          term.write(history)
+        }
+      }
+      lastRenderedHistoryRef.current = history
     }
 
     fit.fit()

@@ -128,11 +128,7 @@ func (g *Gateway) reader(r io.Reader) {
 			} else {
 				if event, err := ParseLine(line); err == nil {
 					if event.Type == EventOutput && event.WindowID == "" && event.PaneID != "" {
-						g.mu.RLock()
-						if windowID, ok := g.paneToWindow[event.PaneID]; ok {
-							event.WindowID = windowID
-						}
-						g.mu.RUnlock()
+						event.WindowID = g.resolveWindowIDForPane(event.PaneID)
 					}
 					g.handleEvent(event)
 					select {
@@ -161,11 +157,7 @@ func (g *Gateway) reader(r io.Reader) {
 		}
 
 		if event.Type == EventOutput && event.WindowID == "" && event.PaneID != "" {
-			g.mu.RLock()
-			if windowID, ok := g.paneToWindow[event.PaneID]; ok {
-				event.WindowID = windowID
-			}
-			g.mu.RUnlock()
+			event.WindowID = g.resolveWindowIDForPane(event.PaneID)
 		}
 
 		g.handleEvent(event)
@@ -182,6 +174,29 @@ func (g *Gateway) reader(r io.Reader) {
 
 	close(g.events)
 	close(g.done)
+}
+
+func (g *Gateway) resolveWindowIDForPane(paneID string) string {
+	if paneID == "" {
+		return ""
+	}
+
+	g.mu.RLock()
+	if windowID, ok := g.paneToWindow[paneID]; ok && windowID != "" {
+		g.mu.RUnlock()
+		return windowID
+	}
+	g.mu.RUnlock()
+
+	// Pane/window mappings can change when tmux is controlled outside this process.
+	// Do a best-effort sync and retry lookup before dropping terminal output.
+	if err := g.syncStateFromTmux(); err != nil {
+		return ""
+	}
+
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.paneToWindow[paneID]
 }
 
 func (g *Gateway) handleCommandResponse(lines []string) {
