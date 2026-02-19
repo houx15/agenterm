@@ -235,6 +235,13 @@ export function promoteDemandPoolItem<T>(itemID: string, input: unknown = {}) {
   })
 }
 
+export function reprioritizeDemandPool<T>(projectID: string, input: { items: Array<{ id: string; priority: number }> }) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/demand-pool/reprioritize`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export interface ASRTranscribeInput {
   appID: string
   accessKey: string

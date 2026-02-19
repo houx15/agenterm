@@ -1475,6 +1475,13 @@ textarea {
   overflow: hidden;
 }
 
+.demand-list-toolbar {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.55rem;
+}
+
 .demand-table-wrap {
   overflow-x: auto;
 }
@@ -1507,10 +1514,31 @@ textarea {
   gap: 0.4rem;
 }
 
+.demand-priority-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.demand-priority-cell input {
+  width: 70px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fbff;
+  color: var(--text-primary);
+  padding: 0.35rem 0.45rem;
+}
+
 .demand-modal-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
+}
+
+.demand-digest {
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+  margin: 0;
 }
 
 .demand-assistant-section {

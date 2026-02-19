@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Filter, Lightbulb, Pencil, Rocket, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, FileText, Filter, Lightbulb, Pencil, RefreshCw, Rocket, Sparkles, Trash2 } from 'lucide-react'
 import {
   chatDemandOrchestrator,
   createDemandPoolItem,
@@ -9,6 +9,7 @@ import {
   listDemandOrchestratorHistory,
   listProjects,
   promoteDemandPoolItem,
+  reprioritizeDemandPool,
   updateDemandPoolItem,
 } from '../api/client'
 import type { DemandPoolItem, DemandPoolStatus, OrchestratorHistoryMessage, Project } from '../api/types'
@@ -60,6 +61,8 @@ export default function DemandPool() {
   const [demandHistory, setDemandHistory] = useState<OrchestratorHistoryMessage[]>([])
   const [demandInput, setDemandInput] = useState('')
   const [demandReport, setDemandReport] = useState<Record<string, unknown> | null>(null)
+  const [localPriorities, setLocalPriorities] = useState<Record<string, number>>({})
+  const [digestSummary, setDigestSummary] = useState('')
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projects, projectID])
 
@@ -76,12 +79,30 @@ export default function DemandPool() {
         q: queryFilter.trim() || undefined,
       })
       setItems(data)
+      setLocalPriorities(Object.fromEntries(data.map((item) => [item.id, item.priority])))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load demand pool items')
     } finally {
       setLoading(false)
     }
   }, [projectID, queryFilter, statusFilter])
+
+  const sortedItems = useMemo(() => {
+    const list = [...items]
+    list.sort((a, b) => {
+      const pa = localPriorities[a.id] ?? a.priority
+      const pb = localPriorities[b.id] ?? b.priority
+      if (pa !== pb) {
+        return pb - pa
+      }
+      return a.created_at < b.created_at ? 1 : -1
+    })
+    return list
+  }, [items, localPriorities])
+
+  const hasPriorityChanges = useMemo(() => {
+    return items.some((item) => (localPriorities[item.id] ?? item.priority) !== item.priority)
+  }, [items, localPriorities])
 
   const loadDemandLaneContext = useCallback(async () => {
     if (!projectID) {
@@ -279,6 +300,105 @@ export default function DemandPool() {
     }
   }
 
+  function setItemPriority(itemID: string, value: number) {
+    setLocalPriorities((prev) => ({ ...prev, [itemID]: value }))
+  }
+
+  function moveItemPriority(itemID: string, direction: 'up' | 'down') {
+    const index = sortedItems.findIndex((item) => item.id === itemID)
+    if (index < 0) {
+      return
+    }
+    const swapIndex = direction === 'up' ? index - 1 : index + 1
+    if (swapIndex < 0 || swapIndex >= sortedItems.length) {
+      return
+    }
+    const current = sortedItems[index]
+    const target = sortedItems[swapIndex]
+    const currentPriority = localPriorities[current.id] ?? current.priority
+    const targetPriority = localPriorities[target.id] ?? target.priority
+    setLocalPriorities((prev) => ({
+      ...prev,
+      [current.id]: targetPriority,
+      [target.id]: currentPriority,
+    }))
+  }
+
+  async function saveReprioritization() {
+    if (!projectID || !hasPriorityChanges) {
+      return
+    }
+    setBusyItemID('reprioritize')
+    setError('')
+    setMessage('')
+    try {
+      const changed = items
+        .map((item) => ({ id: item.id, priority: localPriorities[item.id] ?? item.priority, original: item.priority }))
+        .filter((entry) => entry.priority !== entry.original)
+        .map(({ id, priority }) => ({ id, priority }))
+      if (changed.length === 0) {
+        return
+      }
+      await reprioritizeDemandPool(projectID, { items: changed })
+      setMessage(`Saved ${changed.length} reprioritized item(s).`)
+      await loadDemandItems()
+      await loadDemandLaneContext()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reprioritize demand pool')
+    } finally {
+      setBusyItemID('')
+    }
+  }
+
+  function resetLocalPriorities() {
+    setLocalPriorities(Object.fromEntries(items.map((item) => [item.id, item.priority])))
+  }
+
+  async function rerankNow() {
+    if (!projectID) {
+      return
+    }
+    setBusyItemID('rerank')
+    setError('')
+    setMessage('')
+    try {
+      await chatDemandOrchestrator<{ response?: string }>({
+        project_id: projectID,
+        message:
+          'Approved: reprioritize the demand pool now. Use reprioritize_demand_pool and then summarize your rationale in 5 bullets.',
+      })
+      setMessage('Demand assistant reprioritized the pool.')
+      await loadDemandItems()
+      await loadDemandLaneContext()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run AI rerank')
+    } finally {
+      setBusyItemID('')
+    }
+  }
+
+  async function generateDigest() {
+    if (!projectID) {
+      return
+    }
+    setBusyItemID('digest')
+    setError('')
+    setMessage('')
+    try {
+      const response = await chatDemandOrchestrator<{ response?: string }>({
+        project_id: projectID,
+        message:
+          'Generate a concise backlog digest: top 5 demands, why now, what can wait, and one recommended next item to promote.',
+      })
+      setDigestSummary((response?.response || '').trim())
+      await loadDemandLaneContext()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate digest')
+    } finally {
+      setBusyItemID('')
+    }
+  }
+
   return (
     <section className="page-block demand-page">
       <div className="demand-header">
@@ -347,9 +467,27 @@ export default function DemandPool() {
       )}
 
       <div className="dashboard-section demand-list">
+        <div className="demand-list-toolbar">
+          <button className="secondary-btn" disabled={!hasPriorityChanges || busyItemID === 'reprioritize'} onClick={() => void saveReprioritization()} type="button">
+            <Sparkles size={14} />
+            <span>Save Priority Changes</span>
+          </button>
+          <button className="secondary-btn" disabled={!hasPriorityChanges} onClick={resetLocalPriorities} type="button">
+            <RefreshCw size={14} />
+            <span>Reset</span>
+          </button>
+          <button className="primary-btn" disabled={busyItemID === 'rerank'} onClick={() => void rerankNow()} type="button">
+            <Sparkles size={14} />
+            <span>AI Re-rank Now</span>
+          </button>
+          <button className="secondary-btn" disabled={busyItemID === 'digest'} onClick={() => void generateDigest()} type="button">
+            <FileText size={14} />
+            <span>Generate Digest</span>
+          </button>
+        </div>
         {loading ? (
           <p className="empty-text">Loading demand pool...</p>
-        ) : items.length === 0 ? (
+        ) : sortedItems.length === 0 ? (
           <p className="empty-text">No demand items yet for this filter.</p>
         ) : (
           <div className="demand-table-wrap">
@@ -365,14 +503,33 @@ export default function DemandPool() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
+                {sortedItems.map((item, index) => (
                   <tr key={item.id}>
                     <td>
                       <strong>{item.title}</strong>
                       {item.description ? <p>{item.description}</p> : null}
                     </td>
                     <td>{item.status}</td>
-                    <td>{item.priority}</td>
+                    <td>
+                      <div className="demand-priority-cell">
+                        <button className="icon-only-btn secondary-btn" disabled={index === 0} onClick={() => moveItemPriority(item.id, 'up')} type="button">
+                          <ArrowUp size={13} />
+                        </button>
+                        <button
+                          className="icon-only-btn secondary-btn"
+                          disabled={index === sortedItems.length - 1}
+                          onClick={() => moveItemPriority(item.id, 'down')}
+                          type="button"
+                        >
+                          <ArrowDown size={13} />
+                        </button>
+                        <input
+                          type="number"
+                          value={localPriorities[item.id] ?? item.priority}
+                          onChange={(event) => setItemPriority(item.id, Number(event.target.value) || 0)}
+                        />
+                      </div>
+                    </td>
                     <td>
                       {item.impact}/{item.effort}
                     </td>
@@ -404,6 +561,13 @@ export default function DemandPool() {
           </div>
         )}
       </div>
+
+      {digestSummary && (
+        <div className="dashboard-section">
+          <h3>Latest Digest</h3>
+          <p className="demand-digest">{digestSummary}</p>
+        </div>
+      )}
 
       <div className="dashboard-section demand-assistant-section">
         <div className="demand-assistant-header">
