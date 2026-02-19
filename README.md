@@ -20,6 +20,7 @@ agenterm is a single-binary Go server that bridges tmux terminal sessions to a m
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Agentic Onboarding](#agentic-onboarding)
 - [Configuration](#configuration)
 - [Usage Guide](#usage-guide)
   - [PM Chat — Talk to the Orchestrator](#pm-chat--talk-to-the-orchestrator)
@@ -232,6 +233,29 @@ Pass the token in the URL once — it is persisted in `localStorage` for future 
 ```
 
 Or export `ANTHROPIC_API_KEY` in your shell before starting agenterm.
+
+---
+
+## Agentic Onboarding
+
+If you want an AI assistant to configure agenterm for you, use:
+
+1. `AGENTS.md` (assistant-facing feature/architecture/function guide)
+2. `docs/agentic-setup.md` (question-driven setup flow)
+3. `scripts/agentic-bootstrap.sh` (automated local bootstrap)
+
+Example:
+
+```bash
+bash scripts/agentic-bootstrap.sh \
+  --token "<TOKEN>" \
+  --repo-path "/absolute/path/to/repo" \
+  --project-name "My Project" \
+  --playbook "compound-engineering"
+```
+
+This will upsert agent/playbook configs from `configs/agentic/` and create a project.
+`configs/agentic/` is intended for assistant-generated files, not fixed templates.
 
 ---
 
