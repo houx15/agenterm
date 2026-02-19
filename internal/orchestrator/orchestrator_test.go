@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 )
 
@@ -316,6 +317,149 @@ func TestSendCommandQueueSerializesPerSessionAndWritesLedger(t *testing.T) {
 		if entry.Command == "" {
 			t.Fatalf("ledger command should be present")
 		}
+	}
+}
+
+func TestExecuteToolBlocksWhenRoleActionNotAllowed(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	pbRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	if err := pbRegistry.Save(&playbook.Playbook{
+		ID:          "contract-playbook",
+		Name:        "Contract Playbook",
+		Description: "desc",
+		Workflow: playbook.Workflow{
+			Plan: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+			Build: playbook.Stage{Enabled: true, Roles: []playbook.StageRole{{
+				Name:             "reviewer",
+				Mode:             "reviewer",
+				Responsibilities: "review",
+				AllowedAgents:    []string{"codex"},
+				ActionsAllowed:   []string{"read_session_output"},
+			}}},
+			Test: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+		},
+	}); err != nil {
+		t.Fatalf("save playbook: %v", err)
+	}
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "active", Playbook: "contract-playbook"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	sess := &db.Session{TaskID: task.ID, TmuxSessionName: "s", TmuxWindowID: "@1", AgentType: "codex", Role: "reviewer", Status: "working"}
+	if err := sessionRepo.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		SessionRepo:      sessionRepo,
+		PlaybookRegistry: pbRegistry,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"send_command": {
+					Name: "send_command",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "sent"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err = o.executeTool(context.Background(), "send_command", map[string]any{
+		"session_id": sess.ID,
+		"text":       "ls\n",
+	})
+	if err == nil {
+		t.Fatalf("expected role contract action error")
+	}
+	if !strings.Contains(err.Error(), "not allowed for role") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExecuteToolBlocksWhenRoleInputsMissing(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	pbRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	if err := pbRegistry.Save(&playbook.Playbook{
+		ID:          "contract-inputs-playbook",
+		Name:        "Contract Inputs Playbook",
+		Description: "desc",
+		Workflow: playbook.Workflow{
+			Plan: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+			Build: playbook.Stage{Enabled: true, Roles: []playbook.StageRole{{
+				Name:             "worker",
+				Mode:             "worker",
+				Responsibilities: "code",
+				AllowedAgents:    []string{"codex"},
+				ActionsAllowed:   []string{"send_command"},
+				InputsRequired:   []string{"spec_path"},
+			}}},
+			Test: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+		},
+	}); err != nil {
+		t.Fatalf("save playbook: %v", err)
+	}
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "active", Playbook: "contract-inputs-playbook"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running", SpecPath: ""}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	sess := &db.Session{TaskID: task.ID, TmuxSessionName: "s", TmuxWindowID: "@1", AgentType: "codex", Role: "worker", Status: "working"}
+	if err := sessionRepo.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		SessionRepo:      sessionRepo,
+		PlaybookRegistry: pbRegistry,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"send_command": {
+					Name: "send_command",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "sent"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err = o.executeTool(context.Background(), "send_command", map[string]any{
+		"session_id": sess.ID,
+		"text":       "ls\n",
+	})
+	if err == nil {
+		t.Fatalf("expected role required input error")
+	}
+	if !strings.Contains(err.Error(), "missing required role inputs") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

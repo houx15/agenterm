@@ -36,8 +36,11 @@ type PlaybookStage struct {
 
 type PlaybookRole struct {
 	Name             string
+	Mode             string
 	Responsibilities string
 	AllowedAgents    []string
+	InputsRequired   []string
+	ActionsAllowed   []string
 	SuggestedPrompt  string
 }
 
@@ -56,6 +59,15 @@ func roleCatalog(stage PlaybookStage) string {
 		}
 		if len(role.AllowedAgents) > 0 {
 			desc += fmt.Sprintf(" [agents: %s]", strings.Join(role.AllowedAgents, ", "))
+		}
+		if mode := strings.TrimSpace(role.Mode); mode != "" {
+			desc += " [mode: " + mode + "]"
+		}
+		if len(role.InputsRequired) > 0 {
+			desc += " [inputs: " + strings.Join(role.InputsRequired, ", ") + "]"
+		}
+		if len(role.ActionsAllowed) > 0 {
+			desc += " [actions: " + strings.Join(role.ActionsAllowed, ", ") + "]"
 		}
 		if strings.TrimSpace(role.Responsibilities) != "" {
 			desc += ": " + role.Responsibilities
@@ -77,6 +89,8 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("5) Explain intent before major actions and summarize outcomes.\\n\\n")
 	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\\n")
 	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\\n\\n")
+	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\\n")
+	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\\n\\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\\n\\n")
 	}

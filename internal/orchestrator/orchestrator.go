@@ -556,8 +556,11 @@ func toPromptRoles(roles []playbook.StageRole) []PlaybookRole {
 	for _, role := range roles {
 		out = append(out, PlaybookRole{
 			Name:             strings.TrimSpace(role.Name),
+			Mode:             strings.TrimSpace(role.Mode),
 			Responsibilities: strings.TrimSpace(role.Responsibilities),
 			AllowedAgents:    append([]string(nil), role.AllowedAgents...),
+			InputsRequired:   append([]string(nil), role.InputsRequired...),
+			ActionsAllowed:   append([]string(nil), role.ActionsAllowed...),
 			SuggestedPrompt:  strings.TrimSpace(role.SuggestedPrompt),
 		})
 	}
@@ -664,6 +667,9 @@ func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[st
 	if o == nil || o.toolset == nil {
 		return nil, fmt.Errorf("orchestrator tools unavailable")
 	}
+	if err := o.enforceRoleContractForTool(ctx, name, args); err != nil {
+		return nil, err
+	}
 	if requiresExplicitSessionID(name) {
 		if _, err := requiredString(args, "session_id"); err != nil {
 			return nil, fmt.Errorf("%s requires explicit session_id: %w", name, err)
@@ -682,6 +688,217 @@ func requiresExplicitSessionID(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName string, args map[string]any) error {
+	if o == nil || o.playbookRegistry == nil || o.projectRepo == nil || o.taskRepo == nil || o.sessionRepo == nil {
+		return nil
+	}
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return nil
+	}
+
+	switch toolName {
+	case "create_session":
+		taskID, err := requiredString(args, "task_id")
+		if err != nil {
+			return nil
+		}
+		roleName, err := requiredString(args, "role")
+		if err != nil {
+			return nil
+		}
+		agentType, _ := optionalString(args, "agent_type")
+		task, err := o.taskRepo.Get(ctx, taskID)
+		if err != nil || task == nil {
+			return nil
+		}
+		pb, err := o.loadProjectPlaybookDefinition(ctx, task.ProjectID)
+		if err != nil || pb == nil {
+			return nil
+		}
+		stage, role := findPlaybookRole(pb, roleName)
+		if role == nil {
+			return fmt.Errorf("role %q is not defined in playbook %q", roleName, pb.ID)
+		}
+		if strings.TrimSpace(agentType) != "" && len(role.AllowedAgents) > 0 && !containsFold(role.AllowedAgents, agentType) {
+			return fmt.Errorf("agent %q is not allowed for role %q in stage %s", agentType, roleName, stage)
+		}
+		if !toolAllowedByRole(toolName, *role) {
+			return fmt.Errorf("tool %q is not allowed for role %q (mode=%s)", toolName, roleName, role.Mode)
+		}
+		if missing := missingRoleInputs(*role, task, nil, args); len(missing) > 0 {
+			return fmt.Errorf("missing required role inputs for %q: %s", roleName, strings.Join(missing, ", "))
+		}
+		return nil
+	case "send_command", "read_session_output", "is_session_idle", "close_session", "can_close_session":
+		sessionID, err := requiredString(args, "session_id")
+		if err != nil {
+			return nil
+		}
+		sess, err := o.sessionRepo.Get(ctx, sessionID)
+		if err != nil || sess == nil {
+			return nil
+		}
+		task, err := o.taskRepo.Get(ctx, sess.TaskID)
+		if err != nil || task == nil {
+			return nil
+		}
+		pb, err := o.loadProjectPlaybookDefinition(ctx, task.ProjectID)
+		if err != nil || pb == nil {
+			return nil
+		}
+		_, role := findPlaybookRole(pb, sess.Role)
+		if role == nil {
+			return nil
+		}
+		if !toolAllowedByRole(toolName, *role) {
+			return fmt.Errorf("tool %q is not allowed for role %q (mode=%s)", toolName, sess.Role, role.Mode)
+		}
+		if missing := missingRoleInputs(*role, task, sess, args); len(missing) > 0 {
+			return fmt.Errorf("missing required role inputs for %q: %s", sess.Role, strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
+func (o *Orchestrator) loadProjectPlaybookDefinition(ctx context.Context, projectID string) (*playbook.Playbook, error) {
+	if o == nil || o.projectRepo == nil || o.playbookRegistry == nil || strings.TrimSpace(projectID) == "" {
+		return nil, nil
+	}
+	project, err := o.projectRepo.Get(ctx, projectID)
+	if err != nil || project == nil {
+		return nil, err
+	}
+	if overrideID := strings.TrimSpace(project.Playbook); overrideID != "" {
+		if pb := o.playbookRegistry.Get(overrideID); pb != nil {
+			return pb, nil
+		}
+	}
+	return o.playbookRegistry.MatchProject(project.RepoPath), nil
+}
+
+func findPlaybookRole(pb *playbook.Playbook, roleName string) (string, *playbook.StageRole) {
+	if pb == nil || strings.TrimSpace(roleName) == "" {
+		return "", nil
+	}
+	stages := []struct {
+		name  string
+		stage playbook.Stage
+	}{
+		{name: "plan", stage: pb.Workflow.Plan},
+		{name: "build", stage: pb.Workflow.Build},
+		{name: "test", stage: pb.Workflow.Test},
+	}
+	for _, s := range stages {
+		for i := range s.stage.Roles {
+			if strings.EqualFold(strings.TrimSpace(s.stage.Roles[i].Name), strings.TrimSpace(roleName)) {
+				return s.name, &s.stage.Roles[i]
+			}
+		}
+	}
+	return "", nil
+}
+
+func containsFold(values []string, candidate string) bool {
+	candidate = strings.TrimSpace(candidate)
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return true
+	}
+	if len(role.ActionsAllowed) > 0 {
+		return containsFold(role.ActionsAllowed, toolName)
+	}
+	mode := strings.ToLower(strings.TrimSpace(role.Mode))
+	switch mode {
+	case "planner":
+		return containsFold([]string{
+			"create_task", "create_worktree", "write_task_spec", "create_session",
+			"read_session_output", "is_session_idle", "get_project_status", "generate_progress_report",
+		}, toolName)
+	case "reviewer":
+		return containsFold([]string{
+			"create_session", "send_command", "read_session_output", "is_session_idle",
+			"generate_progress_report", "can_close_session",
+		}, toolName)
+	case "tester":
+		return containsFold([]string{
+			"create_session", "send_command", "read_session_output", "is_session_idle",
+			"generate_progress_report", "can_close_session", "close_session",
+		}, toolName)
+	default:
+		return containsFold([]string{
+			"create_session", "send_command", "read_session_output", "is_session_idle",
+			"write_task_spec", "can_close_session", "close_session", "resolve_merge_conflict",
+		}, toolName)
+	}
+}
+
+func missingRoleInputs(role playbook.StageRole, task *db.Task, session *db.Session, args map[string]any) []string {
+	if len(role.InputsRequired) == 0 {
+		return nil
+	}
+	available := map[string]struct{}{}
+	for key, value := range args {
+		if value == nil {
+			continue
+		}
+		switch v := value.(type) {
+		case string:
+			if strings.TrimSpace(v) != "" {
+				available[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
+			}
+		default:
+			available[strings.ToLower(strings.TrimSpace(key))] = struct{}{}
+		}
+	}
+	if task != nil {
+		if strings.TrimSpace(task.ID) != "" {
+			available["task_id"] = struct{}{}
+		}
+		if strings.TrimSpace(task.ProjectID) != "" {
+			available["project_id"] = struct{}{}
+		}
+		if strings.TrimSpace(task.WorktreeID) != "" {
+			available["worktree_id"] = struct{}{}
+		}
+		if strings.TrimSpace(task.SpecPath) != "" {
+			available["spec_path"] = struct{}{}
+		}
+	}
+	if session != nil {
+		if strings.TrimSpace(session.ID) != "" {
+			available["session_id"] = struct{}{}
+		}
+		if strings.TrimSpace(session.AgentType) != "" {
+			available["agent_type"] = struct{}{}
+		}
+		if strings.TrimSpace(session.Role) != "" {
+			available["role"] = struct{}{}
+		}
+	}
+
+	missing := make([]string, 0)
+	for _, input := range role.InputsRequired {
+		key := strings.ToLower(strings.TrimSpace(input))
+		if key == "" {
+			continue
+		}
+		if _, ok := available[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }
 
 func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[string]any) (any, error) {
