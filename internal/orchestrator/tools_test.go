@@ -90,6 +90,48 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 	}
 }
 
+func TestProgressiveDisclosureSkillTools(t *testing.T) {
+	ts := NewToolset(nil)
+
+	listRaw, err := ts.Execute(context.Background(), "list_skills", map[string]any{})
+	if err != nil {
+		t.Fatalf("list_skills failed: %v", err)
+	}
+	listMap, ok := listRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("list_skills type=%T want map[string]any", listRaw)
+	}
+	skillsRaw, ok := listMap["skills"].([]map[string]string)
+	if !ok {
+		t.Fatalf("skills type=%T want []map[string]string", listMap["skills"])
+	}
+	if len(skillsRaw) == 0 {
+		t.Fatalf("skills should be non-empty")
+	}
+
+	detailRaw, err := ts.Execute(context.Background(), "get_skill_details", map[string]any{"skill_id": "model-allocation"})
+	if err != nil {
+		t.Fatalf("get_skill_details failed: %v", err)
+	}
+	detail, ok := detailRaw.(map[string]any)
+	if !ok {
+		t.Fatalf("detail type=%T want map[string]any", detailRaw)
+	}
+	if detail["id"] != "model-allocation" {
+		t.Fatalf("detail id=%v want model-allocation", detail["id"])
+	}
+	if _, ok := detail["details"].(string); !ok {
+		t.Fatalf("details type=%T want string", detail["details"])
+	}
+	if _, ok := detail["description"].(string); !ok {
+		t.Fatalf("description type=%T want string", detail["description"])
+	}
+
+	if _, err := ts.Execute(context.Background(), "get_skill_details", map[string]any{"skill_id": "unknown-skill"}); err == nil {
+		t.Fatalf("expected unknown skill error")
+	}
+}
+
 type toolsRoundTripFunc func(req *http.Request) (*http.Response, error)
 
 func (f toolsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -164,6 +164,38 @@ func defaultTools(client *RESTToolClient) []Tool {
 	}
 	return []Tool{
 		{
+			Name:        "list_skills",
+			Description: "List orchestrator skills with short summaries",
+			Parameters:  map[string]Param{},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				return map[string]any{"skills": SkillSummaries()}, nil
+			},
+		},
+		{
+			Name:        "get_skill_details",
+			Description: "Fetch full description for one orchestrator skill",
+			Parameters: map[string]Param{
+				"skill_id": {Type: "string", Description: "Skill id returned by list_skills", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				skillID, err := requiredString(args, "skill_id")
+				if err != nil {
+					return nil, err
+				}
+				spec, ok := SkillDetailsByID(skillID)
+				if !ok {
+					return nil, fmt.Errorf("unknown skill_id: %s", strings.TrimSpace(skillID))
+				}
+				return map[string]any{
+					"id":          spec.ID,
+					"name":        spec.Name,
+					"description": spec.Description,
+					"details":     spec.Details,
+					"path":        spec.Path,
+				}, nil
+			},
+		},
+		{
 			Name:        "create_project",
 			Description: "Create a new project",
 			Parameters: map[string]Param{

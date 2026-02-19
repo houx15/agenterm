@@ -27,6 +27,7 @@ agenterm is a single-binary Go server that bridges tmux terminal sessions to a m
   - [Human Takeover](#human-takeover)
   - [Remote Access via Tailscale](#remote-access-via-tailscale)
 - [Agent System](#agent-system)
+- [Skills Protocol](#skills-protocol)
 - [Playbook System](#playbook-system)
 - [Review Cycles](#review-cycles)
 - [REST API](#rest-api)
@@ -47,7 +48,7 @@ agenterm wraps that workflow in a structured control plane:
 
 - **Durable metadata**: projects, tasks, sessions, and review cycles stored in SQLite
 - **Orchestrator**: an LLM that reads your backlog, spawns agents, and drives tasks to completion via tool calls against the REST API
-- **Playbooks**: YAML-defined multi-phase workflows (implement → review → merge) matched to projects by language or path pattern
+- **Playbooks**: YAML-defined workflow stages (`plan` / `build` / `test`) matched to projects by language or path pattern
 - **Live UI**: chat with the orchestrator, watch agent output stream in real time, take over a terminal with a tap
 
 ---
@@ -66,6 +67,7 @@ agenterm wraps that workflow in a structured control plane:
 - **Scheduler guardrails** — global, per-project, per-workflow, per-role, and per-model parallelism limits prevent runaway agent spawning
 - **Orchestrator history** — every tool call, result, and message is persisted and replayed on reconnect
 - **Project knowledge** — store freeform notes that the orchestrator injects into its system prompt
+- **Progressive skill disclosure** — orchestrator sees skill summaries first, then loads full skill docs only when it decides to apply one
 
 ### Agents & Playbooks
 - **Agent registry** — YAML-defined agent profiles (command, model, capabilities, cost tier, speed tier); managed via Settings UI or REST API
@@ -321,33 +323,43 @@ supports_headless: true
 
 #### Playbooks
 
-Playbooks define multi-phase workflows matched to your projects. The orchestrator selects the matching playbook when it spawns agents for a task.
+Playbooks define stage-based workflows (`plan`, `build`, `test`) matched to your projects. The orchestrator selects the matching playbook when it spawns agents for a task.
 
 Example playbook definition:
 
 ```yaml
-id: go-review-flow
-name: Go Review Flow
-description: Implement, then review, then merge
-parallelism_strategy: sequential
+id: pairing-coding
+name: Pairing Coding
+description: Pair-style flow with planner + codebase reader, then builder + reviewer.
+parallelism_strategy: Keep planning focused, then run builder/reviewer loops.
 match:
-  languages:
-    - go
-  project_patterns:
-    - "*/backend/*"
-phases:
-  - name: Implement
-    agent: claude-code
-    role: implementer
-    description: Write the feature implementation
-  - name: Review
-    agent: claude-code
-    role: reviewer
-    description: Review the implementation for correctness and style
-  - name: Merge
-    agent: claude-code
-    role: merger
-    description: Merge the worktree after review passes
+  languages: []
+  project_patterns: []
+workflow:
+  plan:
+    enabled: true
+    roles:
+      - name: planner
+        responsibilities: Clarify scope and milestones.
+        allowed_agents: [claude-code, codex]
+      - name: codebase-reader
+        responsibilities: Explore repository and constraints.
+        allowed_agents: [claude-code, codex]
+  build:
+    enabled: true
+    roles:
+      - name: builder
+        responsibilities: Implement scoped changes.
+        allowed_agents: [codex]
+      - name: reviewer
+        responsibilities: Review and request fixes.
+        allowed_agents: [claude-code, codex]
+  test:
+    enabled: true
+    roles:
+      - name: tester
+        responsibilities: Run tests and validate acceptance criteria.
+        allowed_agents: [claude-code, codex]
 ```
 
 #### ASR (Speech-to-Text)
@@ -399,6 +411,34 @@ Agents are defined as YAML files in `--agents-dir` (default `~/.config/agenterm/
 
 ---
 
+## Skills Protocol
+
+agenterm now uses a filesystem-based skill protocol for orchestrator guidance, compatible with the Agent Skills style:
+
+- Skill location: `skills/<skill-id>/SKILL.md`
+- Format: YAML frontmatter + markdown body
+- Frontmatter keys: `name`, `description`
+- Progressive disclosure:
+  - orchestrator prompt includes only skill summaries
+  - orchestrator calls tools to fetch full details only when needed
+
+Built-in disclosure tools:
+
+- `list_skills` — returns discovered skill summaries
+- `get_skill_details(skill_id)` — returns full skill body for one selected skill
+
+Discovered roots (searched upward from current working directory):
+
+- `skills/`
+- `.agents/skills/`
+- `.claude/skills/`
+
+Reference:
+- https://agentskills.io/
+- https://github.com/anthropics/skills
+
+---
+
 ## Playbook System
 
 Playbooks are YAML files in `--playbooks-dir`. The orchestrator matches a playbook to a project using the `match` block.
@@ -408,11 +448,33 @@ Playbooks are YAML files in `--playbooks-dir`. The orchestrator matches a playbo
 - **`match.languages`**: checked against the project's detected languages
 - **`match.project_patterns`**: glob patterns matched against the project's `repo_path`
 
-The first matching playbook is selected. If no playbook matches, the orchestrator falls back to single-phase behavior.
+The first matching playbook is selected. If no playbook matches, the orchestrator falls back to first available playbook.
 
-### Phases
+### Workflow Stages
 
-Each phase specifies an `agent` (by ID), a `role` (passed to the agent as context), and an optional `description`. The orchestrator executes phases sequentially by default; `parallelism_strategy: parallel` runs all phases concurrently.
+Each playbook uses fixed stages:
+
+- `plan`
+- `build`
+- `test`
+
+Each stage has:
+
+- `enabled`
+- `roles[]`
+
+Each role defines:
+
+- `name`
+- `responsibilities`
+- `allowed_agents` (agent IDs)
+- `suggested_prompt` (optional)
+
+Current shipped templates:
+
+- `pairing-coding`
+- `tdd-coding`
+- `compound-engineering-workflow`
 
 ---
 

@@ -77,6 +77,9 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("5) Explain intent before major actions and summarize outcomes.\\n\\n")
 	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\\n")
 	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\\n\\n")
+	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
+		b.WriteString(block + "\\n\\n")
+	}
 
 	if projectState == nil || projectState.Project == nil {
 		b.WriteString("Current project state: unavailable.\\n")
