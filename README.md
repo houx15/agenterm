@@ -16,6 +16,7 @@ agenterm is a single-binary Go server that bridges tmux terminal sessions to a m
 - [Why agenterm](#why-agenterm)
 - [Features](#features)
 - [Architecture](#architecture)
+  - [Orchestrator Architecture Doc](#orchestrator-architecture-doc)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -88,6 +89,10 @@ agenterm wraps that workflow in a structured control plane:
 ---
 
 ## Architecture
+
+### Orchestrator Architecture Doc
+
+Detailed orchestrator architecture is documented in `docs/orchestrator-architecture.md`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
