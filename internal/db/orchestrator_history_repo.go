@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 type OrchestratorMessage struct {
@@ -98,6 +99,67 @@ LIMIT ?
 	return items, nil
 }
 
+func (r *OrchestratorHistoryRepo) ListByProjectAndRoles(ctx context.Context, projectID string, limit int, roles []string) ([]*OrchestratorMessage, error) {
+	if len(roles) == 0 {
+		return r.ListByProject(ctx, projectID, limit)
+	}
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("orchestrator history repo unavailable")
+	}
+	if projectID == "" {
+		return nil, fmt.Errorf("project id is required")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	cleanRoles := make([]string, 0, len(roles))
+	for _, role := range roles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		cleanRoles = append(cleanRoles, role)
+	}
+	if len(cleanRoles) == 0 {
+		return r.ListByProject(ctx, projectID, limit)
+	}
+	query := `
+SELECT id, project_id, role, content, created_at
+FROM orchestrator_messages
+WHERE project_id = ?
+  AND role IN (` + placeholders(len(cleanRoles)) + `)
+ORDER BY created_at DESC
+LIMIT ?
+`
+	args := make([]any, 0, len(cleanRoles)+2)
+	args = append(args, projectID)
+	for _, role := range cleanRoles {
+		args = append(args, role)
+	}
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list orchestrator messages: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]*OrchestratorMessage, 0)
+	for rows.Next() {
+		msg := &OrchestratorMessage{}
+		if err := rows.Scan(&msg.ID, &msg.ProjectID, &msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan orchestrator message: %w", err)
+		}
+		items = append(items, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate orchestrator messages: %w", err)
+	}
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+	return items, nil
+}
+
 func (r *OrchestratorHistoryRepo) TrimProject(ctx context.Context, projectID string, keep int) error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("orchestrator history repo unavailable")
@@ -122,4 +184,69 @@ WHERE project_id = ?
 		return fmt.Errorf("trim orchestrator messages: %w", err)
 	}
 	return nil
+}
+
+func (r *OrchestratorHistoryRepo) TrimProjectAndRoles(ctx context.Context, projectID string, keep int, roles []string) error {
+	if len(roles) == 0 {
+		return r.TrimProject(ctx, projectID, keep)
+	}
+	if r == nil || r.db == nil {
+		return fmt.Errorf("orchestrator history repo unavailable")
+	}
+	if projectID == "" {
+		return fmt.Errorf("project id is required")
+	}
+	if keep <= 0 {
+		keep = 50
+	}
+	cleanRoles := make([]string, 0, len(roles))
+	for _, role := range roles {
+		role = strings.TrimSpace(role)
+		if role == "" {
+			continue
+		}
+		cleanRoles = append(cleanRoles, role)
+	}
+	if len(cleanRoles) == 0 {
+		return r.TrimProject(ctx, projectID, keep)
+	}
+	inClause := placeholders(len(cleanRoles))
+	query := `
+DELETE FROM orchestrator_messages
+WHERE project_id = ?
+  AND role IN (` + inClause + `)
+  AND id NOT IN (
+    SELECT id FROM orchestrator_messages
+    WHERE project_id = ?
+      AND role IN (` + inClause + `)
+    ORDER BY created_at DESC
+    LIMIT ?
+  )
+`
+	args := make([]any, 0, len(cleanRoles)*2+3)
+	args = append(args, projectID)
+	for _, role := range cleanRoles {
+		args = append(args, role)
+	}
+	args = append(args, projectID)
+	for _, role := range cleanRoles {
+		args = append(args, role)
+	}
+	args = append(args, keep)
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("trim orchestrator messages: %w", err)
+	}
+	return nil
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	parts := make([]string, count)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return strings.Join(parts, ",")
 }

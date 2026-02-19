@@ -21,7 +21,15 @@ type orchestratorChatResponse struct {
 }
 
 func (h *handler) chatOrchestrator(w http.ResponseWriter, r *http.Request) {
-	if h.orchestrator == nil {
+	h.chatWithOrchestrator(w, r, h.orchestrator)
+}
+
+func (h *handler) chatDemandOrchestrator(w http.ResponseWriter, r *http.Request) {
+	h.chatWithOrchestrator(w, r, h.demandOrchestrator)
+}
+
+func (h *handler) chatWithOrchestrator(w http.ResponseWriter, r *http.Request, instance *orchestrator.Orchestrator) {
+	if instance == nil {
 		jsonError(w, http.StatusServiceUnavailable, "orchestrator unavailable")
 		return
 	}
@@ -34,13 +42,11 @@ func (h *handler) chatOrchestrator(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "project_id and message are required")
 		return
 	}
-
-	stream, err := h.orchestrator.Chat(r.Context(), req.ProjectID, req.Message)
+	stream, err := instance.Chat(r.Context(), req.ProjectID, req.Message)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
 	resp := orchestratorChatResponse{Events: make([]orchestrator.StreamEvent, 0, 16)}
 	for evt := range stream {
 		resp.Events = append(resp.Events, evt)
@@ -56,12 +62,19 @@ func (h *handler) chatOrchestrator(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	jsonResponse(w, http.StatusOK, resp)
 }
 
 func (h *handler) listOrchestratorHistory(w http.ResponseWriter, r *http.Request) {
-	if h.historyRepo == nil {
+	h.listOrchestratorHistoryWithInstance(w, r, h.orchestrator)
+}
+
+func (h *handler) listDemandOrchestratorHistory(w http.ResponseWriter, r *http.Request) {
+	h.listOrchestratorHistoryWithInstance(w, r, h.demandOrchestrator)
+}
+
+func (h *handler) listOrchestratorHistoryWithInstance(w http.ResponseWriter, r *http.Request, instance *orchestrator.Orchestrator) {
+	if instance == nil {
 		jsonError(w, http.StatusServiceUnavailable, "orchestrator history unavailable")
 		return
 	}
@@ -79,7 +92,7 @@ func (h *handler) listOrchestratorHistory(w http.ResponseWriter, r *http.Request
 		}
 		limit = parsed
 	}
-	items, err := h.historyRepo.ListByProject(r.Context(), projectID, limit)
+	items, err := instance.ListHistory(r.Context(), projectID, limit)
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -217,6 +230,63 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 		if ledger := h.orchestrator.RecentCommandLedger(25); len(ledger) > 0 {
 			report["command_ledger_recent"] = ledger
 		}
+	}
+	jsonResponse(w, http.StatusOK, report)
+}
+
+func (h *handler) getDemandOrchestratorReport(w http.ResponseWriter, r *http.Request) {
+	if h.demandOrchestrator == nil {
+		jsonError(w, http.StatusServiceUnavailable, "orchestrator unavailable")
+		return
+	}
+	projectID := strings.TrimSpace(r.URL.Query().Get("project_id"))
+	if projectID == "" {
+		jsonError(w, http.StatusBadRequest, "project_id is required")
+		return
+	}
+	if _, ok := h.mustGetProject(w, r, projectID); !ok {
+		return
+	}
+	if h.demandPoolRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "demand pool unavailable")
+		return
+	}
+	items, err := h.demandPoolRepo.List(r.Context(), db.DemandPoolFilter{ProjectID: projectID, Limit: 200})
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	statusCounts := map[string]int{}
+	topCandidates := make([]map[string]any, 0, 5)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(item.Status))
+		if status == "" {
+			status = "captured"
+		}
+		statusCounts[status]++
+		if len(topCandidates) < 5 && (status == "captured" || status == "triaged" || status == "shortlisted") {
+			topCandidates = append(topCandidates, map[string]any{
+				"id":       item.ID,
+				"title":    item.Title,
+				"status":   item.Status,
+				"priority": item.Priority,
+				"impact":   item.Impact,
+				"effort":   item.Effort,
+				"risk":     item.Risk,
+				"urgency":  item.Urgency,
+			})
+		}
+	}
+	report := map[string]any{
+		"project_id":                projectID,
+		"demand_items_total":        len(items),
+		"demand_status_counts":      statusCounts,
+		"top_triage_candidates":     topCandidates,
+		"awaiting_triage_total":     statusCounts["captured"],
+		"awaiting_scheduling_total": statusCounts["shortlisted"],
 	}
 	jsonResponse(w, http.StatusOK, report)
 }

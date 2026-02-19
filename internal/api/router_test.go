@@ -75,7 +75,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new playbook registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
+	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
 }
 
 func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
@@ -93,7 +93,7 @@ func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.
 	if err != nil {
 		t.Fatalf("new playbook registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
+	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -939,6 +939,61 @@ func TestDemandPoolEndpoints(t *testing.T) {
 	}
 }
 
+func TestDemandOrchestratorReportEndpoint(t *testing.T) {
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	agentRegistry, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	demandOrchestratorInst := orchestrator.New(orchestrator.Options{Lane: "demand"})
+	h := NewRouter(database.SQL(), &fakeGateway{}, nil, nil, nil, nil, demandOrchestratorInst, "test-token", "configured-session", agentRegistry, playbookRegistry)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "Demand Report P1", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	for _, payload := range []map[string]any{
+		{"title": "Add release checklist", "status": "captured", "priority": 3},
+		{"title": "Improve onboarding", "status": "shortlisted", "priority": 8},
+	} {
+		resp := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/demand-pool", payload, true)
+		if resp.Code != http.StatusCreated {
+			t.Fatalf("create demand item status=%d body=%s", resp.Code, resp.Body.String())
+		}
+	}
+
+	report := apiRequest(t, h, http.MethodGet, "/api/demand-orchestrator/report?project_id="+projectID, nil, true)
+	if report.Code != http.StatusOK {
+		t.Fatalf("demand report status=%d body=%s", report.Code, report.Body.String())
+	}
+	var got map[string]any
+	decodeBody(t, report, &got)
+	if got["demand_items_total"] != float64(2) {
+		t.Fatalf("demand_items_total=%v want 2", got["demand_items_total"])
+	}
+	counts, ok := got["demand_status_counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("demand_status_counts type=%T", got["demand_status_counts"])
+	}
+	if counts["captured"] != float64(1) || counts["shortlisted"] != float64(1) {
+		t.Fatalf("unexpected status counts: %+v", counts)
+	}
+}
+
 func TestOrchestratorEndpoints(t *testing.T) {
 	gw := &fakeGateway{}
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
@@ -1017,7 +1072,7 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new playbook registry: %v", err)
 	}
-	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, "test-token", "configured-session", agentRegistry, playbookRegistry)
+	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, nil, "test-token", "configured-session", agentRegistry, playbookRegistry)
 
 	chat := apiRequest(t, h, http.MethodPost, "/api/orchestrator/chat", map[string]any{
 		"project_id": project.ID,

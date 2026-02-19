@@ -57,6 +57,7 @@ type handler struct {
 	lifecycle               *session.Manager
 	hub                     *hub.Hub
 	orchestrator            *orchestrator.Orchestrator
+	demandOrchestrator      *orchestrator.Orchestrator
 	asrTranscriber          asrTranscriber
 	tmuxSession             string
 
@@ -64,7 +65,7 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
+func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, demandOrchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
 	if lifecycle == nil {
 		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
 	}
@@ -87,6 +88,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		lifecycle:               lifecycle,
 		hub:                     hubInst,
 		orchestrator:            orchestratorInst,
+		demandOrchestrator:      demandOrchestratorInst,
 		asrTranscriber:          newVolcASRTranscriber(),
 		tmuxSession:             tmuxSession,
 		outputState:             make(map[string]*windowOutputState),
@@ -135,6 +137,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
 	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)
 	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
+	mux.HandleFunc("POST /api/demand-orchestrator/chat", handler.chatDemandOrchestrator)
+	mux.HandleFunc("GET /api/demand-orchestrator/history", handler.listDemandOrchestratorHistory)
+	mux.HandleFunc("GET /api/demand-orchestrator/report", handler.getDemandOrchestratorReport)
 	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
 	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)

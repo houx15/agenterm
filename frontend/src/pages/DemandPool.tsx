@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Filter, Lightbulb, Pencil, Rocket, Trash2 } from 'lucide-react'
 import {
+  chatDemandOrchestrator,
   createDemandPoolItem,
   deleteDemandPoolItem,
+  getDemandOrchestratorReport,
   listDemandPoolItems,
+  listDemandOrchestratorHistory,
   listProjects,
   promoteDemandPoolItem,
   updateDemandPoolItem,
 } from '../api/client'
-import type { DemandPoolItem, DemandPoolStatus, Project } from '../api/types'
+import type { DemandPoolItem, DemandPoolStatus, OrchestratorHistoryMessage, Project } from '../api/types'
 import Modal from '../components/Modal'
 
 type EditableDemandFields = Pick<DemandPoolItem, 'title' | 'description' | 'status' | 'priority' | 'impact' | 'effort' | 'risk' | 'urgency' | 'notes'>
@@ -54,6 +57,9 @@ export default function DemandPool() {
   const [editTarget, setEditTarget] = useState<DemandPoolItem | null>(null)
   const [draft, setDraft] = useState<EditableDemandFields>(EMPTY_EDITABLE)
   const [draftTags, setDraftTags] = useState('')
+  const [demandHistory, setDemandHistory] = useState<OrchestratorHistoryMessage[]>([])
+  const [demandInput, setDemandInput] = useState('')
+  const [demandReport, setDemandReport] = useState<Record<string, unknown> | null>(null)
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projects, projectID])
 
@@ -76,6 +82,24 @@ export default function DemandPool() {
       setLoading(false)
     }
   }, [projectID, queryFilter, statusFilter])
+
+  const loadDemandLaneContext = useCallback(async () => {
+    if (!projectID) {
+      setDemandHistory([])
+      setDemandReport(null)
+      return
+    }
+    try {
+      const [history, report] = await Promise.all([
+        listDemandOrchestratorHistory<OrchestratorHistoryMessage[]>(projectID, 30),
+        getDemandOrchestratorReport<Record<string, unknown>>(projectID),
+      ])
+      setDemandHistory(history)
+      setDemandReport(report)
+    } catch {
+      // Demand lane context is supplemental; keep page usable even when unavailable.
+    }
+  }, [projectID])
 
   useEffect(() => {
     let cancelled = false
@@ -111,6 +135,10 @@ export default function DemandPool() {
   useEffect(() => {
     void loadDemandItems()
   }, [loadDemandItems])
+
+  useEffect(() => {
+    void loadDemandLaneContext()
+  }, [loadDemandLaneContext])
 
   function openCreateModal() {
     setEditTarget(null)
@@ -220,6 +248,32 @@ export default function DemandPool() {
       await loadDemandItems()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete demand')
+    } finally {
+      setBusyItemID('')
+    }
+  }
+
+  async function sendDemandChat() {
+    if (!projectID || !demandInput.trim()) {
+      return
+    }
+    const userText = demandInput.trim()
+    setBusyItemID('demand-chat')
+    setError('')
+    setMessage('')
+    setDemandInput('')
+    try {
+      const response = await chatDemandOrchestrator<{ response?: string } | undefined>({
+        project_id: projectID,
+        message: userText,
+      })
+      await loadDemandItems()
+      await loadDemandLaneContext()
+      if (response?.response) {
+        setMessage('Demand assistant responded.')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send message to demand assistant')
     } finally {
       setBusyItemID('')
     }
@@ -349,6 +403,46 @@ export default function DemandPool() {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="dashboard-section demand-assistant-section">
+        <div className="demand-assistant-header">
+          <h3>Demand Assistant</h3>
+          <button className="secondary-btn" onClick={() => void loadDemandLaneContext()} type="button">
+            Refresh
+          </button>
+        </div>
+        {demandReport ? (
+          <p className="demand-report-summary">
+            total={String(demandReport.demand_items_total ?? 0)} | awaiting_triage={String(demandReport.awaiting_triage_total ?? 0)} |
+            awaiting_scheduling={String(demandReport.awaiting_scheduling_total ?? 0)}
+          </p>
+        ) : (
+          <p className="empty-text">Demand report unavailable.</p>
+        )}
+        <div className="demand-chat-history">
+          {demandHistory.length === 0 ? (
+            <p className="empty-text">No demand assistant history yet.</p>
+          ) : (
+            demandHistory.map((item) => (
+              <article key={item.id} className={`demand-chat-row ${item.role === 'assistant' ? 'assistant' : 'user'}`.trim()}>
+                <strong>{item.role === 'assistant' ? 'Assistant' : 'You'}</strong>
+                <p>{item.content}</p>
+              </article>
+            ))
+          )}
+        </div>
+        <div className="demand-chat-input">
+          <textarea
+            rows={3}
+            placeholder="Ask for triage suggestions, reprioritization ideas, or demand-to-task promotion guidance."
+            value={demandInput}
+            onChange={(event) => setDemandInput(event.target.value)}
+          />
+          <button className="primary-btn" disabled={!projectID || !demandInput.trim() || busyItemID === 'demand-chat'} onClick={() => void sendDemandChat()} type="button">
+            Send
+          </button>
+        </div>
       </div>
 
       <Modal

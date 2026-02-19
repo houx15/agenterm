@@ -159,3 +159,37 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 
 	return b.String()
 }
+
+func BuildDemandSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig) string {
+	var b strings.Builder
+	b.WriteString("You are the AgenTerm Demand Orchestrator, focused on backlog capture and prioritization.\n")
+	b.WriteString("You are strictly separated from execution orchestration.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("1) Stay in demand lane: capture, clarify, triage, reprioritize, and promote demand items only.\n")
+	b.WriteString("2) Never run execution actions (sessions, worktrees, command execution, task execution loops).\n")
+	b.WriteString("3) For mutating operations, require explicit user confirmation in this turn.\n")
+	b.WriteString("4) Keep summaries concise and deterministic; use tools for state-changing actions.\n")
+	b.WriteString("5) When promoting demand to tasks, confirm impact and scope with the user first.\n\n")
+	if projectState == nil || projectState.Project == nil {
+		b.WriteString("Current project state: unavailable.\n")
+		return b.String()
+	}
+	b.WriteString(fmt.Sprintf("Project: %s (%s)\n", projectState.Project.Name, projectState.Project.ID))
+	b.WriteString(fmt.Sprintf("Repo: %s\n", projectState.Project.RepoPath))
+	b.WriteString(fmt.Sprintf("Status: %s\n", projectState.Project.Status))
+	b.WriteString(fmt.Sprintf("Reference counts -> tasks: %d, worktrees: %d, sessions: %d\n", len(projectState.Tasks), len(projectState.Worktrees), len(projectState.Sessions)))
+	if len(agents) > 0 {
+		b.WriteString("\nAgent registry snapshot:\n")
+		for _, a := range agents {
+			if a == nil {
+				continue
+			}
+			line := fmt.Sprintf("- %s (%s): model=%s", a.ID, a.Name, a.Model)
+			if notes := strings.TrimSpace(a.Notes); notes != "" {
+				line += ", bio=" + notes
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	return b.String()
+}

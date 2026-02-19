@@ -26,6 +26,8 @@ const (
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
 	maxCommandLedgerEntries  = 500
+	executionLane            = "execution"
+	demandLane               = "demand"
 )
 
 type StreamEvent struct {
@@ -61,6 +63,7 @@ type Options struct {
 	MaxToolRounds     int
 	MaxHistory        int
 	GlobalMaxParallel int
+	Lane              string
 }
 
 type Orchestrator struct {
@@ -81,6 +84,7 @@ type Orchestrator struct {
 	registry                *registry.Registry
 	playbookRegistry        *playbook.Registry
 	toolset                 *Toolset
+	lane                    string
 
 	maxToolRounds     int
 	maxHistory        int
@@ -148,6 +152,10 @@ func New(opts Options) *Orchestrator {
 	if globalMaxParallel <= 0 {
 		globalMaxParallel = defaultGlobalMaxParallel
 	}
+	lane := strings.ToLower(strings.TrimSpace(opts.Lane))
+	if lane == "" {
+		lane = executionLane
+	}
 
 	return &Orchestrator{
 		apiKey:                  strings.TrimSpace(opts.APIKey),
@@ -166,6 +174,7 @@ func New(opts Options) *Orchestrator {
 		registry:                opts.Registry,
 		playbookRegistry:        opts.PlaybookRegistry,
 		toolset:                 toolset,
+		lane:                    lane,
 		maxToolRounds:           maxRounds,
 		maxHistory:              maxHistory,
 		globalMaxParallel:       globalMaxParallel,
@@ -203,11 +212,16 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		return nil, err
 	}
 	approval := evaluateApprovalGate(userMessage)
-	matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
-	if matchedPlaybook == nil {
-		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
+	var systemPrompt string
+	if o.lane == demandLane {
+		systemPrompt = BuildDemandSystemPrompt(state, agents)
+	} else {
+		matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
+		if matchedPlaybook == nil {
+			matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
+		}
+		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook)
 	}
-	systemPrompt := BuildSystemPrompt(state, agents, matchedPlaybook)
 	systemPrompt += "\n\nApproval gate:\n"
 	if approval.Confirmed {
 		systemPrompt += "- User message includes explicit approval for execution in this turn.\n"
@@ -234,7 +248,11 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	messages := append(history, anthropicMessage{Role: "user", Content: []anthropicContentBlock{{Type: "text", Text: userMessage}}})
 
 	if o.historyRepo != nil {
-		_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{ProjectID: projectID, Role: "user", Content: userMessage})
+		_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{
+			ProjectID: projectID,
+			Role:      o.storageRole("user"),
+			Content:   userMessage,
+		})
 	}
 
 	ch := make(chan StreamEvent, 32)
@@ -323,8 +341,12 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 			if !toolUsed {
 				final := strings.TrimSpace(strings.Join(finalTexts, "\n"))
 				if final != "" && o.historyRepo != nil {
-					_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{ProjectID: projectID, Role: "assistant", Content: final})
-					_ = o.historyRepo.TrimProject(ctx, projectID, o.maxHistory)
+					_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{
+						ProjectID: projectID,
+						Role:      o.storageRole("assistant"),
+						Content:   final,
+					})
+					_ = o.historyRepo.TrimProjectAndRoles(ctx, projectID, o.maxHistory, o.storageRoles())
 				}
 				ch <- StreamEvent{Type: "done"}
 				return
@@ -369,7 +391,8 @@ func evaluateApprovalGate(message string) approvalGate {
 func isMutatingTool(name string) bool {
 	switch strings.TrimSpace(name) {
 	case "create_project", "create_task", "create_worktree", "merge_worktree", "resolve_merge_conflict",
-		"create_session", "send_command", "close_session", "write_task_spec":
+		"create_session", "send_command", "close_session", "write_task_spec",
+		"create_demand_item", "update_demand_item", "reprioritize_demand_pool", "promote_demand_item":
 		return true
 	default:
 		return false
@@ -523,15 +546,15 @@ func (o *Orchestrator) loadHistory(ctx context.Context, projectID string) []anth
 	if o.historyRepo == nil {
 		return nil
 	}
-	items, err := o.historyRepo.ListByProject(ctx, projectID, o.maxHistory)
+	items, err := o.historyRepo.ListByProjectAndRoles(ctx, projectID, o.maxHistory, o.storageRoles())
 	if err != nil {
 		return nil
 	}
 	messages := make([]anthropicMessage, 0, len(items))
 	for _, item := range items {
-		role := strings.TrimSpace(item.Role)
-		if role != "assistant" {
-			role = "user"
+		role, ok := o.normalizeHistoryRole(item.Role)
+		if !ok {
+			continue
 		}
 		messages = append(messages, anthropicMessage{
 			Role:    role,
@@ -539,6 +562,57 @@ func (o *Orchestrator) loadHistory(ctx context.Context, projectID string) []anth
 		})
 	}
 	return messages
+}
+
+func (o *Orchestrator) ListHistory(ctx context.Context, projectID string, limit int) ([]*db.OrchestratorMessage, error) {
+	if o == nil || o.historyRepo == nil {
+		return nil, fmt.Errorf("orchestrator history unavailable")
+	}
+	items, err := o.historyRepo.ListByProjectAndRoles(ctx, projectID, limit, o.storageRoles())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*db.OrchestratorMessage, 0, len(items))
+	for _, item := range items {
+		role, ok := o.normalizeHistoryRole(item.Role)
+		if !ok {
+			continue
+		}
+		cloned := *item
+		cloned.Role = role
+		out = append(out, &cloned)
+	}
+	return out, nil
+}
+
+func (o *Orchestrator) storageRole(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	if role == "" {
+		return "user"
+	}
+	if o != nil && o.lane == demandLane {
+		return demandLane + "_" + role
+	}
+	return role
+}
+
+func (o *Orchestrator) storageRoles() []string {
+	if o != nil && o.lane == demandLane {
+		return []string{"demand_user", "demand_assistant"}
+	}
+	return []string{"user", "assistant", "execution_user", "execution_assistant"}
+}
+
+func (o *Orchestrator) normalizeHistoryRole(stored string) (string, bool) {
+	stored = strings.ToLower(strings.TrimSpace(stored))
+	switch stored {
+	case "assistant", "execution_assistant", "demand_assistant":
+		return "assistant", true
+	case "user", "execution_user", "demand_user":
+		return "user", true
+	default:
+		return "", false
+	}
 }
 
 func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID string) *Playbook {

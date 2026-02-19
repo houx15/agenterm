@@ -158,6 +158,26 @@ export function getOrchestratorReport<T>(projectID: string) {
   return apiFetch<T>(`/api/orchestrator/report?${params.toString()}`)
 }
 
+export function chatDemandOrchestrator<T>(input: { project_id: string; message: string }) {
+  return apiFetch<T>('/api/demand-orchestrator/chat', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function listDemandOrchestratorHistory<T>(projectID: string, limit = 50) {
+  const params = new URLSearchParams()
+  params.set('project_id', projectID)
+  params.set('limit', String(limit))
+  return apiFetch<T>(`/api/demand-orchestrator/history?${params.toString()}`)
+}
+
+export function getDemandOrchestratorReport<T>(projectID: string) {
+  const params = new URLSearchParams()
+  params.set('project_id', projectID)
+  return apiFetch<T>(`/api/demand-orchestrator/report?${params.toString()}`)
+}
+
 interface ListDemandPoolParams {
   status?: string
   tag?: string

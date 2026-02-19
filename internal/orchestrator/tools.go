@@ -107,8 +107,33 @@ type Toolset struct {
 }
 
 func NewToolset(client *RESTToolClient) *Toolset {
+	return NewExecutionToolset(client)
+}
+
+func NewExecutionToolset(client *RESTToolClient) *Toolset {
+	return newToolset(client, defaultTools(client))
+}
+
+func NewDemandToolset(client *RESTToolClient) *Toolset {
+	readOnly := map[string]struct{}{
+		"list_skills":        {},
+		"get_skill_details":  {},
+		"get_project_status": {},
+	}
+	base := defaultTools(client)
+	tools := make([]Tool, 0, len(readOnly)+8)
+	for _, tool := range base {
+		if _, ok := readOnly[tool.Name]; ok {
+			tools = append(tools, tool)
+		}
+	}
+	tools = append(tools, demandPoolTools(client)...)
+	return newToolset(client, tools)
+}
+
+func newToolset(client *RESTToolClient, tools []Tool) *Toolset {
 	ts := &Toolset{client: client, tools: make(map[string]Tool)}
-	for _, t := range defaultTools(client) {
+	for _, t := range tools {
 		ts.tools[t.Name] = t
 	}
 	return ts
@@ -593,6 +618,302 @@ func defaultTools(client *RESTToolClient) []Tool {
 					return nil, err
 				}
 				return summarizeProjectStatus(status), nil
+			},
+		},
+	}
+}
+
+func demandPoolTools(client *RESTToolClient) []Tool {
+	if client == nil {
+		client = &RESTToolClient{}
+	}
+	return []Tool{
+		{
+			Name:        "list_demand_pool",
+			Description: "List demand pool items for one project",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+				"status":     {Type: "string", Description: "Optional status filter"},
+				"q":          {Type: "string", Description: "Optional full-text query"},
+				"limit":      {Type: "number", Description: "Optional page size"},
+				"offset":     {Type: "number", Description: "Optional page offset"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				status, _ := optionalString(args, "status")
+				queryText, _ := optionalString(args, "q")
+				limit, err := optionalInt(args, "limit")
+				if err != nil {
+					return nil, err
+				}
+				offset, err := optionalInt(args, "offset")
+				if err != nil {
+					return nil, err
+				}
+				query := url.Values{}
+				if strings.TrimSpace(status) != "" {
+					query.Set("status", strings.TrimSpace(status))
+				}
+				if strings.TrimSpace(queryText) != "" {
+					query.Set("q", strings.TrimSpace(queryText))
+				}
+				if limit > 0 {
+					query.Set("limit", fmt.Sprintf("%d", limit))
+				}
+				if offset > 0 {
+					query.Set("offset", fmt.Sprintf("%d", offset))
+				}
+				var out []map[string]any
+				if err := client.doJSON(ctx, http.MethodGet, "/api/projects/"+projectID+"/demand-pool", query, nil, &out); err != nil {
+					return nil, err
+				}
+				return map[string]any{"items": out, "count": len(out)}, nil
+			},
+		},
+		{
+			Name:        "create_demand_item",
+			Description: "Create a demand pool item in a project",
+			Parameters: map[string]Param{
+				"project_id":  {Type: "string", Description: "Project id", Required: true},
+				"title":       {Type: "string", Description: "Demand title", Required: true},
+				"description": {Type: "string", Description: "Demand description"},
+				"status":      {Type: "string", Description: "Demand status"},
+				"priority":    {Type: "number", Description: "Priority score"},
+				"impact":      {Type: "number", Description: "Impact score 1-5"},
+				"effort":      {Type: "number", Description: "Effort score 1-5"},
+				"risk":        {Type: "number", Description: "Risk score 1-5"},
+				"urgency":     {Type: "number", Description: "Urgency score 1-5"},
+				"notes":       {Type: "string", Description: "Optional notes"},
+				"tags":        {Type: "array", Description: "Optional tag list"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				title, err := requiredString(args, "title")
+				if err != nil {
+					return nil, err
+				}
+				description, _ := optionalString(args, "description")
+				status, _ := optionalString(args, "status")
+				priority, err := optionalInt(args, "priority")
+				if err != nil {
+					return nil, err
+				}
+				impact, err := optionalInt(args, "impact")
+				if err != nil {
+					return nil, err
+				}
+				effort, err := optionalInt(args, "effort")
+				if err != nil {
+					return nil, err
+				}
+				risk, err := optionalInt(args, "risk")
+				if err != nil {
+					return nil, err
+				}
+				urgency, err := optionalInt(args, "urgency")
+				if err != nil {
+					return nil, err
+				}
+				notes, _ := optionalString(args, "notes")
+				tags, err := optionalStringSlice(args, "tags")
+				if err != nil {
+					return nil, err
+				}
+				body := map[string]any{
+					"title":       title,
+					"description": description,
+					"status":      status,
+					"priority":    priority,
+					"impact":      impact,
+					"effort":      effort,
+					"risk":        risk,
+					"urgency":     urgency,
+					"notes":       notes,
+					"tags":        tags,
+					"source":      "orchestrator",
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/demand-pool", nil, body, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "update_demand_item",
+			Description: "Update an existing demand pool item",
+			Parameters: map[string]Param{
+				"item_id":          {Type: "string", Description: "Demand item id", Required: true},
+				"title":            {Type: "string", Description: "Demand title"},
+				"description":      {Type: "string", Description: "Demand description"},
+				"status":           {Type: "string", Description: "Demand status"},
+				"priority":         {Type: "number", Description: "Priority score"},
+				"impact":           {Type: "number", Description: "Impact score"},
+				"effort":           {Type: "number", Description: "Effort score"},
+				"risk":             {Type: "number", Description: "Risk score"},
+				"urgency":          {Type: "number", Description: "Urgency score"},
+				"notes":            {Type: "string", Description: "Notes"},
+				"selected_task_id": {Type: "string", Description: "Linked task id"},
+				"tags":             {Type: "array", Description: "Optional tag list"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				itemID, err := requiredString(args, "item_id")
+				if err != nil {
+					return nil, err
+				}
+				body := map[string]any{}
+				if title, _ := optionalString(args, "title"); strings.TrimSpace(title) != "" {
+					body["title"] = strings.TrimSpace(title)
+				}
+				if description, _ := optionalString(args, "description"); strings.TrimSpace(description) != "" {
+					body["description"] = strings.TrimSpace(description)
+				}
+				if status, _ := optionalString(args, "status"); strings.TrimSpace(status) != "" {
+					body["status"] = strings.TrimSpace(status)
+				}
+				if notes, _ := optionalString(args, "notes"); strings.TrimSpace(notes) != "" {
+					body["notes"] = strings.TrimSpace(notes)
+				}
+				if selectedTaskID, _ := optionalString(args, "selected_task_id"); strings.TrimSpace(selectedTaskID) != "" {
+					body["selected_task_id"] = strings.TrimSpace(selectedTaskID)
+				}
+				if priority, err := optionalInt(args, "priority"); err != nil {
+					return nil, err
+				} else if _, ok := args["priority"]; ok {
+					body["priority"] = priority
+				}
+				if impact, err := optionalInt(args, "impact"); err != nil {
+					return nil, err
+				} else if _, ok := args["impact"]; ok {
+					body["impact"] = impact
+				}
+				if effort, err := optionalInt(args, "effort"); err != nil {
+					return nil, err
+				} else if _, ok := args["effort"]; ok {
+					body["effort"] = effort
+				}
+				if risk, err := optionalInt(args, "risk"); err != nil {
+					return nil, err
+				} else if _, ok := args["risk"]; ok {
+					body["risk"] = risk
+				}
+				if urgency, err := optionalInt(args, "urgency"); err != nil {
+					return nil, err
+				} else if _, ok := args["urgency"]; ok {
+					body["urgency"] = urgency
+				}
+				if tags, err := optionalStringSlice(args, "tags"); err != nil {
+					return nil, err
+				} else if _, ok := args["tags"]; ok {
+					body["tags"] = tags
+				}
+				if len(body) == 0 {
+					return nil, fmt.Errorf("at least one field must be provided for update_demand_item")
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodPatch, "/api/demand-pool/"+itemID, nil, body, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "reprioritize_demand_pool",
+			Description: "Bulk reprioritize demand pool items by project",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+				"items":      {Type: "array", Description: "Array of {id, priority} entries", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				items, ok := args["items"].([]any)
+				if !ok || len(items) == 0 {
+					return nil, fmt.Errorf("items is required and must be a non-empty array")
+				}
+				payloadItems := make([]map[string]any, 0, len(items))
+				for _, item := range items {
+					entry, ok := item.(map[string]any)
+					if !ok {
+						return nil, fmt.Errorf("items must contain objects")
+					}
+					idRaw, ok := entry["id"].(string)
+					if !ok || strings.TrimSpace(idRaw) == "" {
+						return nil, fmt.Errorf("each reprioritize item must include id")
+					}
+					priorityRaw, ok := entry["priority"]
+					if !ok {
+						return nil, fmt.Errorf("each reprioritize item must include priority")
+					}
+					priority := 0
+					switch v := priorityRaw.(type) {
+					case float64:
+						priority = int(v)
+					case int:
+						priority = v
+					default:
+						return nil, fmt.Errorf("priority must be numeric")
+					}
+					payloadItems = append(payloadItems, map[string]any{
+						"id":       strings.TrimSpace(idRaw),
+						"priority": priority,
+					})
+				}
+				var out []map[string]any
+				if err := client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/demand-pool/reprioritize", nil, map[string]any{"items": payloadItems}, &out); err != nil {
+					return nil, err
+				}
+				return map[string]any{"items": out, "count": len(out)}, nil
+			},
+		},
+		{
+			Name:        "promote_demand_item",
+			Description: "Promote one demand item into a project task",
+			Parameters: map[string]Param{
+				"item_id":     {Type: "string", Description: "Demand item id", Required: true},
+				"title":       {Type: "string", Description: "Task title override"},
+				"description": {Type: "string", Description: "Task description override"},
+				"status":      {Type: "string", Description: "Task status override"},
+				"depends_on":  {Type: "array", Description: "Task dependency ids"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				itemID, err := requiredString(args, "item_id")
+				if err != nil {
+					return nil, err
+				}
+				title, _ := optionalString(args, "title")
+				description, _ := optionalString(args, "description")
+				status, _ := optionalString(args, "status")
+				dependsOn, err := optionalStringSlice(args, "depends_on")
+				if err != nil {
+					return nil, err
+				}
+				body := map[string]any{}
+				if strings.TrimSpace(title) != "" {
+					body["title"] = strings.TrimSpace(title)
+				}
+				if strings.TrimSpace(description) != "" {
+					body["description"] = strings.TrimSpace(description)
+				}
+				if strings.TrimSpace(status) != "" {
+					body["status"] = strings.TrimSpace(status)
+				}
+				if len(dependsOn) > 0 {
+					body["depends_on"] = dependsOn
+				}
+				var out map[string]any
+				if err := client.doJSON(ctx, http.MethodPost, "/api/demand-pool/"+itemID+"/promote", nil, body, &out); err != nil {
+					return nil, err
+				}
+				return out, nil
 			},
 		},
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -519,12 +520,19 @@ func main() {
 		}
 	}
 
+	toolClient := &orchestrator.RESTToolClient{
+		BaseURL:    fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
+		Token:      cfg.Token,
+		HTTPClient: &http.Client{Timeout: 60 * time.Second},
+	}
+
 	orchestratorInst := orchestrator.New(orchestrator.Options{
 		APIKey:                  cfg.LLMAPIKey,
 		Model:                   cfg.LLMModel,
 		AnthropicBaseURL:        cfg.LLMBaseURL,
 		APIToolBaseURL:          fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
 		APIToken:                cfg.Token,
+		Toolset:                 orchestrator.NewExecutionToolset(toolClient),
 		ProjectRepo:             projectRepo,
 		TaskRepo:                taskRepo,
 		WorktreeRepo:            worktreeRepo,
@@ -537,6 +545,27 @@ func main() {
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
+	})
+	demandOrchestratorInst := orchestrator.New(orchestrator.Options{
+		APIKey:                  cfg.LLMAPIKey,
+		Model:                   cfg.LLMModel,
+		AnthropicBaseURL:        cfg.LLMBaseURL,
+		APIToolBaseURL:          fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
+		APIToken:                cfg.Token,
+		Toolset:                 orchestrator.NewDemandToolset(toolClient),
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		WorktreeRepo:            worktreeRepo,
+		SessionRepo:             sessionRepo,
+		HistoryRepo:             historyRepo,
+		ProjectOrchestratorRepo: projectOrchestratorRepo,
+		WorkflowRepo:            workflowRepo,
+		KnowledgeRepo:           knowledgeRepo,
+		RoleBindingRepo:         roleBindingRepo,
+		Registry:                agentRegistry,
+		PlaybookRegistry:        playbookRegistry,
+		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
+		Lane:                    "demand",
 	})
 
 	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan hub.OrchestratorServerMessage, error) {
@@ -619,7 +648,7 @@ func main() {
 		}
 	}()
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry, playbookRegistry)
+	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, demandOrchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry, playbookRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
