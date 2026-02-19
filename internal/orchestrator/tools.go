@@ -417,6 +417,23 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "close_session",
+			Description: "Close and end a session",
+			Parameters: map[string]Param{
+				"session_id": {Type: "string", Description: "Session id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := requiredString(args, "session_id")
+				if err != nil {
+					return nil, err
+				}
+				if err := client.doJSON(ctx, http.MethodDelete, "/api/sessions/"+sessionID, nil, nil, nil); err != nil {
+					return nil, err
+				}
+				return map[string]any{"status": "closed", "session_id": sessionID}, nil
+			},
+		},
+		{
 			Name:        "get_project_status",
 			Description: "Fetch project with tasks/worktrees/sessions",
 			Parameters: map[string]Param{

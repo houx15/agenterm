@@ -192,5 +192,10 @@ func (h *handler) getOrchestratorReport(w http.ResponseWriter, r *http.Request) 
 			report["review_task_summaries"] = reviewTaskSummaries
 		}
 	}
+	if h.orchestrator != nil {
+		if ledger := h.orchestrator.RecentCommandLedger(25); len(ledger) > 0 {
+			report["command_ledger_recent"] = ledger
+		}
+	}
 	jsonResponse(w, http.StatusOK, report)
 }

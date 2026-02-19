@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -215,6 +216,107 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("expected orchestrator history to be written by trigger")
+}
+
+func TestExecuteToolRequiresExplicitSessionID(t *testing.T) {
+	o := New(Options{
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"read_session_output": {
+					Name: "read_session_output",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"ok": true}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "read_session_output", map[string]any{})
+	if err == nil {
+		t.Fatalf("expected missing session_id error")
+	}
+	if !strings.Contains(err.Error(), "requires explicit session_id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSendCommandQueueSerializesPerSessionAndWritesLedger(t *testing.T) {
+	var running atomic.Int32
+	var maxRunning atomic.Int32
+	var calls atomic.Int32
+
+	ts := &Toolset{
+		tools: map[string]Tool{
+			"send_command": {
+				Name: "send_command",
+				Execute: func(ctx context.Context, args map[string]any) (any, error) {
+					cur := running.Add(1)
+					for {
+						prev := maxRunning.Load()
+						if cur <= prev {
+							break
+						}
+						if maxRunning.CompareAndSwap(prev, cur) {
+							break
+						}
+					}
+					time.Sleep(40 * time.Millisecond)
+					calls.Add(1)
+					running.Add(-1)
+					return map[string]any{"status": "sent"}, nil
+				},
+			},
+		},
+	}
+	o := New(Options{Toolset: ts})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	start := make(chan struct{})
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := o.executeTool(context.Background(), "send_command", map[string]any{
+				"session_id": "sess-1",
+				"text":       "ls\n",
+			})
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("executeTool send_command failed: %v", err)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls=%d want 2", calls.Load())
+	}
+	if maxRunning.Load() != 1 {
+		t.Fatalf("max concurrent send_command calls=%d want 1", maxRunning.Load())
+	}
+
+	ledger := o.RecentCommandLedger(10)
+	if len(ledger) != 2 {
+		t.Fatalf("ledger len=%d want 2", len(ledger))
+	}
+	for _, entry := range ledger {
+		if entry.SessionID != "sess-1" {
+			t.Fatalf("ledger session=%q want sess-1", entry.SessionID)
+		}
+		if entry.Status != "succeeded" {
+			t.Fatalf("ledger status=%q want succeeded", entry.Status)
+		}
+		if entry.Command == "" {
+			t.Fatalf("ledger command should be present")
+		}
+	}
 }
 
 func contains(haystack string, needle string) bool {

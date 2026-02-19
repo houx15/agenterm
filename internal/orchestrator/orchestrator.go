@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/user/agenterm/internal/db"
@@ -24,6 +25,7 @@ const (
 	defaultMaxToolRounds     = 10
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
+	maxCommandLedgerEntries  = 500
 )
 
 type StreamEvent struct {
@@ -83,6 +85,24 @@ type Orchestrator struct {
 	maxToolRounds     int
 	maxHistory        int
 	globalMaxParallel int
+
+	commandMu          sync.Mutex
+	sessionCommandLock map[string]*sync.Mutex
+	commandLedger      []CommandLedgerEntry
+	nextCommandID      int64
+}
+
+type CommandLedgerEntry struct {
+	ID            int64     `json:"id"`
+	ToolName      string    `json:"tool_name"`
+	SessionID     string    `json:"session_id"`
+	Command       string    `json:"command,omitempty"`
+	IssuedAt      time.Time `json:"issued_at"`
+	StartedAt     time.Time `json:"started_at,omitempty"`
+	CompletedAt   time.Time `json:"completed_at,omitempty"`
+	Status        string    `json:"status"`
+	ResultSnippet string    `json:"result_snippet,omitempty"`
+	Error         string    `json:"error,omitempty"`
 }
 
 type llmConfig struct {
@@ -146,6 +166,8 @@ func New(opts Options) *Orchestrator {
 		maxToolRounds:           maxRounds,
 		maxHistory:              maxHistory,
 		globalMaxParallel:       globalMaxParallel,
+		sessionCommandLock:      make(map[string]*sync.Mutex),
+		commandLedger:           make([]CommandLedgerEntry, 0, 64),
 	}
 }
 
@@ -251,7 +273,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 							continue
 						}
 					}
-					result, err := o.toolset.Execute(ctx, block.Name, block.Input)
+					result, err := o.executeTool(ctx, block.Name, block.Input)
 					if err != nil {
 						result = map[string]any{"error": err.Error()}
 					}
@@ -298,6 +320,24 @@ func (o *Orchestrator) GenerateProgressReport(ctx context.Context, projectID str
 		return nil, fmt.Errorf("unexpected report payload type")
 	}
 	return report, nil
+}
+
+func (o *Orchestrator) RecentCommandLedger(limit int) []CommandLedgerEntry {
+	if o == nil || limit == 0 {
+		return nil
+	}
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	if len(o.commandLedger) == 0 {
+		return nil
+	}
+	if limit < 0 || limit > len(o.commandLedger) {
+		limit = len(o.commandLedger)
+	}
+	start := len(o.commandLedger) - limit
+	out := make([]CommandLedgerEntry, 0, limit)
+	out = append(out, o.commandLedger[start:]...)
+	return out
 }
 
 func (o *Orchestrator) loadProjectState(ctx context.Context, projectID string) (*ProjectState, error) {
@@ -519,6 +559,111 @@ func toJSON(v any) string {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
 	}
 	return string(buf)
+}
+
+func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[string]any) (any, error) {
+	if o == nil || o.toolset == nil {
+		return nil, fmt.Errorf("orchestrator tools unavailable")
+	}
+	if requiresExplicitSessionID(name) {
+		if _, err := requiredString(args, "session_id"); err != nil {
+			return nil, fmt.Errorf("%s requires explicit session_id: %w", name, err)
+		}
+	}
+	if name == "send_command" {
+		return o.executeQueuedSendCommand(ctx, args)
+	}
+	return o.toolset.Execute(ctx, name, args)
+}
+
+func requiresExplicitSessionID(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "send_command", "read_session_output", "is_session_idle", "close_session":
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[string]any) (any, error) {
+	sessionID, err := requiredString(args, "session_id")
+	if err != nil {
+		return nil, err
+	}
+	commandText, _ := optionalString(args, "text")
+
+	entryID := o.appendCommandLedgerEntry(CommandLedgerEntry{
+		ToolName:  "send_command",
+		SessionID: sessionID,
+		Command:   commandText,
+		IssuedAt:  time.Now().UTC(),
+		Status:    "queued",
+	})
+
+	lock := o.getSessionCommandLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	o.updateCommandLedgerEntry(entryID, func(entry *CommandLedgerEntry) {
+		entry.Status = "running"
+		entry.StartedAt = time.Now().UTC()
+	})
+
+	result, execErr := o.toolset.Execute(ctx, "send_command", args)
+	completedAt := time.Now().UTC()
+	if execErr != nil {
+		o.updateCommandLedgerEntry(entryID, func(entry *CommandLedgerEntry) {
+			entry.Status = "failed"
+			entry.CompletedAt = completedAt
+			entry.Error = execErr.Error()
+		})
+		return nil, execErr
+	}
+
+	o.updateCommandLedgerEntry(entryID, func(entry *CommandLedgerEntry) {
+		entry.Status = "succeeded"
+		entry.CompletedAt = completedAt
+		entry.ResultSnippet = truncate(strings.TrimSpace(toJSON(result)), 220)
+	})
+	return result, nil
+}
+
+func (o *Orchestrator) getSessionCommandLock(sessionID string) *sync.Mutex {
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	lock, ok := o.sessionCommandLock[sessionID]
+	if ok {
+		return lock
+	}
+	lock = &sync.Mutex{}
+	o.sessionCommandLock[sessionID] = lock
+	return lock
+}
+
+func (o *Orchestrator) appendCommandLedgerEntry(entry CommandLedgerEntry) int64 {
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	o.nextCommandID++
+	entry.ID = o.nextCommandID
+	o.commandLedger = append(o.commandLedger, entry)
+	if len(o.commandLedger) > maxCommandLedgerEntries {
+		o.commandLedger = o.commandLedger[len(o.commandLedger)-maxCommandLedgerEntries:]
+	}
+	return entry.ID
+}
+
+func (o *Orchestrator) updateCommandLedgerEntry(id int64, mutate func(entry *CommandLedgerEntry)) {
+	if id <= 0 || mutate == nil {
+		return
+	}
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	for i := len(o.commandLedger) - 1; i >= 0; i-- {
+		if o.commandLedger[i].ID == id {
+			mutate(&o.commandLedger[i])
+			return
+		}
+	}
 }
 
 func truncate(v string, max int) string {
