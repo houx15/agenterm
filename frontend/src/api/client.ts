@@ -158,6 +158,63 @@ export function getOrchestratorReport<T>(projectID: string) {
   return apiFetch<T>(`/api/orchestrator/report?${params.toString()}`)
 }
 
+interface ListDemandPoolParams {
+  status?: string
+  tag?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export function listDemandPoolItems<T>(projectID: string, params: ListDemandPoolParams = {}) {
+  const search = new URLSearchParams()
+  if (params.status) {
+    search.set('status', params.status)
+  }
+  if (params.tag) {
+    search.set('tag', params.tag)
+  }
+  if (params.q) {
+    search.set('q', params.q)
+  }
+  if (typeof params.limit === 'number') {
+    search.set('limit', String(params.limit))
+  }
+  if (typeof params.offset === 'number') {
+    search.set('offset', String(params.offset))
+  }
+  const query = search.toString()
+  const base = `/api/projects/${encodeURIComponent(projectID)}/demand-pool`
+  return apiFetch<T>(query ? `${base}?${query}` : base)
+}
+
+export function createDemandPoolItem<T>(projectID: string, input: unknown) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/demand-pool`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateDemandPoolItem<T>(itemID: string, input: unknown) {
+  return apiFetch<T>(`/api/demand-pool/${encodeURIComponent(itemID)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteDemandPoolItem(itemID: string) {
+  return apiFetch<void>(`/api/demand-pool/${encodeURIComponent(itemID)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function promoteDemandPoolItem<T>(itemID: string, input: unknown = {}) {
+  return apiFetch<T>(`/api/demand-pool/${encodeURIComponent(itemID)}/promote`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
 export interface ASRTranscribeInput {
   appID: string
   accessKey: string

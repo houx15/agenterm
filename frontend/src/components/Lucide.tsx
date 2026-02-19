@@ -130,3 +130,15 @@ export function Activity({ size, ...props }: IconProps) {
     </IconBase>
   )
 }
+
+export function ClipboardList({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect height="18" rx="2" width="14" x="5" y="3" />
+      <line x1="9" x2="15" y1="9" y2="9" />
+      <line x1="9" x2="15" y1="13" y2="13" />
+      <line x1="9" x2="13" y1="17" y2="17" />
+      <path d="M9 3.5h6v2H9z" />
+    </IconBase>
+  )
+}

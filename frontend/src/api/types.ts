@@ -254,3 +254,25 @@ export interface Playbook {
   phases: PlaybookPhase[]
   workflow: PlaybookWorkflow
 }
+
+export type DemandPoolStatus = 'captured' | 'triaged' | 'shortlisted' | 'scheduled' | 'done' | 'rejected'
+
+export interface DemandPoolItem {
+  id: string
+  project_id: string
+  title: string
+  description: string
+  status: DemandPoolStatus | string
+  priority: number
+  impact: number
+  effort: number
+  risk: number
+  urgency: number
+  tags: string[]
+  source: string
+  created_by: string
+  selected_task_id?: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
