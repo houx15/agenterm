@@ -54,6 +54,26 @@ type Session struct {
 	LastActivityAt  time.Time `json:"last_activity_at"`
 }
 
+type DemandPoolItem struct {
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description"`
+	Status         string    `json:"status"`
+	Priority       int       `json:"priority"`
+	Impact         int       `json:"impact"`
+	Effort         int       `json:"effort"`
+	Risk           int       `json:"risk"`
+	Urgency        int       `json:"urgency"`
+	Tags           []string  `json:"tags"`
+	Source         string    `json:"source"`
+	CreatedBy      string    `json:"created_by,omitempty"`
+	SelectedTaskID string    `json:"selected_task_id,omitempty"`
+	Notes          string    `json:"notes"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type AgentConfig struct {
 	ID                    string   `json:"id" yaml:"id"`
 	Name                  string   `json:"name" yaml:"name"`
@@ -168,6 +188,15 @@ type WorktreeFilter struct {
 type SessionFilter struct {
 	TaskID string
 	Status string
+}
+
+type DemandPoolFilter struct {
+	ProjectID string
+	Status    string
+	Tag       string
+	Query     string
+	Limit     int
+	Offset    int
 }
 
 type AgentConfigFilter struct {

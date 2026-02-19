@@ -230,6 +230,37 @@ VALUES
 	('wf-hardening-04-review', 'workflow-hardening', 4, 'review', 'reviewer', 'ready_for_review commit', 'all high+ resolved', 2, '', '2026-02-17T00:00:00Z', '2026-02-17T00:00:00Z');
 `,
 	},
+	{
+		version: 4,
+		name:    "create demand pool items",
+		sql: `
+CREATE TABLE IF NOT EXISTS demand_pool_items (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	title TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL DEFAULT 'captured',
+	priority INTEGER NOT NULL DEFAULT 0,
+	impact INTEGER NOT NULL DEFAULT 0,
+	effort INTEGER NOT NULL DEFAULT 0,
+	risk INTEGER NOT NULL DEFAULT 0,
+	urgency INTEGER NOT NULL DEFAULT 0,
+	tags TEXT NOT NULL DEFAULT '[]',
+	source TEXT NOT NULL DEFAULT 'user',
+	created_by TEXT NOT NULL DEFAULT '',
+	selected_task_id TEXT,
+	notes TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+	FOREIGN KEY(selected_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_demand_pool_project_id ON demand_pool_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_demand_pool_status ON demand_pool_items(status);
+CREATE INDEX IF NOT EXISTS idx_demand_pool_project_priority ON demand_pool_items(project_id, priority DESC, created_at DESC);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

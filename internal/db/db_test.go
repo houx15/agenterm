@@ -57,6 +57,7 @@ func TestOpenCreatesDBFileAndRunsMigrations(t *testing.T) {
 	assertTableExists(t, database.SQL(), "project_knowledge_entries")
 	assertTableExists(t, database.SQL(), "review_cycles")
 	assertTableExists(t, database.SQL(), "review_issues")
+	assertTableExists(t, database.SQL(), "demand_pool_items")
 }
 
 func TestMigrationsAreIdempotent(t *testing.T) {
@@ -70,8 +71,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.SQL().QueryRow(`SELECT value FROM _meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version error = %v", err)
 	}
-	if version != "3" {
-		t.Fatalf("schema version = %s, want 3", version)
+	if version != "4" {
+		t.Fatalf("schema version = %s, want 4", version)
 	}
 }
 
@@ -315,6 +316,83 @@ func TestSessionRepoCRUDAndFilters(t *testing.T) {
 
 	if err := sessionRepo.Delete(ctx, session.ID); err != nil {
 		t.Fatalf("Delete() error = %v", err)
+	}
+}
+
+func TestDemandPoolRepoCRUDAndFilters(t *testing.T) {
+	database, _ := openTestDB(t)
+	projectRepo := NewProjectRepo(database.SQL())
+	demandRepo := NewDemandPoolRepo(database.SQL())
+	ctx := context.Background()
+
+	project := &Project{Name: "Demand Project", RepoPath: "/tmp/demand", Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project error = %v", err)
+	}
+
+	item := &DemandPoolItem{
+		ProjectID:   project.ID,
+		Title:       "Feature A",
+		Description: "Improve onboarding",
+		Status:      "captured",
+		Priority:    3,
+		Impact:      4,
+		Effort:      2,
+		Risk:        1,
+		Urgency:     5,
+		Tags:        []string{"onboarding", "ux"},
+		Source:      "user",
+	}
+	if err := demandRepo.Create(ctx, item); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	got, err := demandRepo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got == nil || got.Title != "Feature A" {
+		t.Fatalf("Get() got = %#v", got)
+	}
+
+	list, err := demandRepo.List(ctx, DemandPoolFilter{ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("List len = %d, want 1", len(list))
+	}
+
+	filtered, err := demandRepo.List(ctx, DemandPoolFilter{ProjectID: project.ID, Tag: "ux"})
+	if err != nil {
+		t.Fatalf("List(tag) error = %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("List(tag) len = %d, want 1", len(filtered))
+	}
+
+	item.Status = "triaged"
+	item.Priority = 5
+	if err := demandRepo.Update(ctx, item); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	updated, err := demandRepo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get() after update error = %v", err)
+	}
+	if updated.Status != "triaged" || updated.Priority != 5 {
+		t.Fatalf("updated item = %#v", updated)
+	}
+
+	if err := demandRepo.Delete(ctx, item.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	deleted, err := demandRepo.Get(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("Get() after delete error = %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("Get() after delete = %#v, want nil", deleted)
 	}
 }
 

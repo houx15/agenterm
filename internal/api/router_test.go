@@ -858,6 +858,87 @@ func TestPlaybookCRUDEndpoints(t *testing.T) {
 	}
 }
 
+func TestDemandPoolEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "Demand P1", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createItem := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/demand-pool", map[string]any{
+		"title":       "Add roadmap page",
+		"description": "Need roadmap and prioritization",
+		"status":      "captured",
+		"priority":    3,
+		"tags":        []string{"product", "ux"},
+	}, true)
+	if createItem.Code != http.StatusCreated {
+		t.Fatalf("create demand item status=%d body=%s", createItem.Code, createItem.Body.String())
+	}
+	var item map[string]any
+	decodeBody(t, createItem, &item)
+	itemID := item["id"].(string)
+
+	list := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/demand-pool?status=captured", nil, true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list demand items status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listed []map[string]any
+	decodeBody(t, list, &listed)
+	if len(listed) != 1 {
+		t.Fatalf("listed len=%d want 1", len(listed))
+	}
+
+	update := apiRequest(t, h, http.MethodPatch, "/api/demand-pool/"+itemID, map[string]any{
+		"status":   "triaged",
+		"priority": 9,
+	}, true)
+	if update.Code != http.StatusOK {
+		t.Fatalf("update demand item status=%d body=%s", update.Code, update.Body.String())
+	}
+
+	reprioritize := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/demand-pool/reprioritize", map[string]any{
+		"items": []map[string]any{
+			{"id": itemID, "priority": 7},
+		},
+	}, true)
+	if reprioritize.Code != http.StatusOK {
+		t.Fatalf("reprioritize status=%d body=%s", reprioritize.Code, reprioritize.Body.String())
+	}
+
+	promote := apiRequest(t, h, http.MethodPost, "/api/demand-pool/"+itemID+"/promote", map[string]any{
+		"title":       "Roadmap feature task",
+		"description": "Implement roadmap page",
+		"status":      "pending",
+		"depends_on":  []string{},
+	}, true)
+	if promote.Code != http.StatusOK {
+		t.Fatalf("promote status=%d body=%s", promote.Code, promote.Body.String())
+	}
+	var promoted map[string]any
+	decodeBody(t, promote, &promoted)
+	taskRaw, ok := promoted["task"].(map[string]any)
+	if !ok || taskRaw["id"] == "" {
+		t.Fatalf("promoted task missing: %v", promoted)
+	}
+
+	del := apiRequest(t, h, http.MethodDelete, "/api/demand-pool/"+itemID, nil, true)
+	if del.Code != http.StatusNoContent {
+		t.Fatalf("delete demand item status=%d body=%s", del.Code, del.Body.String())
+	}
+
+	getMissing := apiRequest(t, h, http.MethodGet, "/api/demand-pool/"+itemID, nil, true)
+	if getMissing.Code != http.StatusNotFound {
+		t.Fatalf("get deleted demand item status=%d body=%s", getMissing.Code, getMissing.Body.String())
+	}
+}
+
 func TestOrchestratorEndpoints(t *testing.T) {
 	gw := &fakeGateway{}
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))

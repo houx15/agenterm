@@ -49,6 +49,7 @@ type handler struct {
 	roleBindingRepo         *db.RoleBindingRepo
 	knowledgeRepo           *db.ProjectKnowledgeRepo
 	reviewRepo              *db.ReviewRepo
+	demandPoolRepo          *db.DemandPoolRepo
 	registry                *registry.Registry
 	playbookRegistry        *playbook.Registry
 	gw                      gateway
@@ -78,6 +79,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		roleBindingRepo:         db.NewRoleBindingRepo(conn),
 		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
 		reviewRepo:              db.NewReviewRepo(conn),
+		demandPoolRepo:          db.NewDemandPoolRepo(conn),
 		registry:                agentRegistry,
 		playbookRegistry:        playbookRegistry,
 		gw:                      gw,
@@ -150,6 +152,14 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("GET /api/review-cycles/{id}/issues", handler.listReviewCycleIssues)
 	mux.HandleFunc("POST /api/review-cycles/{id}/issues", handler.createReviewCycleIssue)
 	mux.HandleFunc("PATCH /api/review-issues/{id}", handler.updateReviewIssue)
+
+	mux.HandleFunc("GET /api/projects/{id}/demand-pool", handler.listDemandPoolItems)
+	mux.HandleFunc("POST /api/projects/{id}/demand-pool", handler.createDemandPoolItem)
+	mux.HandleFunc("POST /api/projects/{id}/demand-pool/reprioritize", handler.reprioritizeDemandPool)
+	mux.HandleFunc("GET /api/demand-pool/{id}", handler.getDemandPoolItem)
+	mux.HandleFunc("PATCH /api/demand-pool/{id}", handler.updateDemandPoolItem)
+	mux.HandleFunc("DELETE /api/demand-pool/{id}", handler.deleteDemandPoolItem)
+	mux.HandleFunc("POST /api/demand-pool/{id}/promote", handler.promoteDemandPoolItem)
 
 	wrapped := authMiddleware(token)(jsonMiddleware(corsMiddleware(mux)))
 	return wrapped
