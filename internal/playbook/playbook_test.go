@@ -17,18 +17,20 @@ func TestNewRegistryCreatesDefaults(t *testing.T) {
 	if r.Get("pairing-coding") == nil {
 		t.Fatalf("expected pairing-coding playbook")
 	}
-	if r.Get("tdd-coding") == nil {
-		t.Fatalf("expected tdd-coding playbook")
+	if r.Get("tdd") == nil {
+		t.Fatalf("expected tdd playbook")
 	}
-	if r.Get("compound-engineering-workflow") == nil {
-		t.Fatalf("expected compound-engineering-workflow playbook")
+	if r.Get("compound-engineering") == nil {
+		t.Fatalf("expected compound-engineering playbook")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "pairing-coding.yaml")); err != nil {
-		t.Fatalf("pairing-coding file missing: %v", err)
+	for _, name := range []string{"pairing-coding.yaml", "tdd.yaml", "compound-engineering.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("%s file missing: %v", name, err)
+		}
 	}
 }
 
-func TestMatchProjectByLanguageAndPattern(t *testing.T) {
+func TestMatchProjectDefaultsToPairingCoding(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/demo\n\ngo 1.24\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
@@ -48,8 +50,8 @@ func TestMatchProjectByLanguageAndPattern(t *testing.T) {
 	if matched == nil {
 		t.Fatalf("expected matched playbook")
 	}
-	if matched.ID != "tdd-coding" {
-		t.Fatalf("matched id=%q want tdd-coding", matched.ID)
+	if matched.ID != "pairing-coding" {
+		t.Fatalf("matched id=%q want pairing-coding", matched.ID)
 	}
 }
 
@@ -60,12 +62,10 @@ func TestSaveDeleteReload(t *testing.T) {
 	}
 
 	custom := &Playbook{
-		ID:                  "custom-playbook",
-		Name:                "Custom Playbook",
-		Description:         "desc",
-		ParallelismStrategy: "strategy",
-		Match:               Match{Languages: []string{"go"}},
-		Phases:              []Phase{{Name: "Plan", Agent: "codex", Role: "planner", Description: "discover"}},
+		ID:          "custom-playbook",
+		Name:        "Custom Playbook",
+		Description: "desc",
+		Phases:      []Phase{{Name: "Plan", Agent: "codex", Role: "planner", Description: "discover"}},
 	}
 	if err := r.Save(custom); err != nil {
 		t.Fatalf("Save() error = %v", err)

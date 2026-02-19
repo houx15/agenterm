@@ -62,17 +62,8 @@ const DEFAULT_PLAYBOOK: Playbook = {
   id: '',
   name: '',
   description: '',
-  parallelism_strategy: '',
-  match: { languages: [], project_patterns: [] },
   phases: [{ name: 'Implement', agent: 'codex', role: 'implementer', description: '' }],
   workflow: DEFAULT_WORKFLOW,
-}
-
-function parseCSV(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 function clampParallelAgents(value: number): number {
@@ -157,10 +148,6 @@ function normalizeWorkflow(input: Playbook): PlaybookWorkflow {
 function normalizePlaybook(input: Playbook): Playbook {
   return {
     ...input,
-    match: {
-      languages: toStringArray(input.match?.languages),
-      project_patterns: toStringArray(input.match?.project_patterns),
-    },
     phases: Array.isArray(input.phases) ? input.phases : DEFAULT_PLAYBOOK.phases,
     workflow: normalizeWorkflow(input),
   }
@@ -670,37 +657,6 @@ export default function Settings() {
             <label>
               Description
               <input value={playbookDraft.description} onChange={(event) => setPlaybookDraft((prev) => ({ ...prev, description: event.target.value }))} />
-            </label>
-            <label>
-              Parallelism Strategy
-              <input
-                value={playbookDraft.parallelism_strategy}
-                onChange={(event) => setPlaybookDraft((prev) => ({ ...prev, parallelism_strategy: event.target.value }))}
-              />
-            </label>
-            <label>
-              Match Languages (comma-separated)
-              <input
-                value={toStringArray(playbookDraft.match?.languages).join(', ')}
-                onChange={(event) =>
-                  setPlaybookDraft((prev) => ({
-                    ...prev,
-                    match: { ...(prev.match ?? DEFAULT_PLAYBOOK.match), languages: parseCSV(event.target.value) },
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Match Project Patterns (comma-separated)
-              <input
-                value={toStringArray(playbookDraft.match?.project_patterns).join(', ')}
-                onChange={(event) =>
-                  setPlaybookDraft((prev) => ({
-                    ...prev,
-                    match: { ...(prev.match ?? DEFAULT_PLAYBOOK.match), project_patterns: parseCSV(event.target.value) },
-                  }))
-                }
-              />
             </label>
 
             <div className="settings-workflow-editor">

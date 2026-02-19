@@ -200,11 +200,6 @@ export interface AgentConfig {
   notes?: string
 }
 
-export interface PlaybookMatch {
-  languages: string[]
-  project_patterns: string[]
-}
-
 export interface PlaybookPhase {
   name: string
   agent: string
@@ -234,8 +229,6 @@ export interface Playbook {
   id: string
   name: string
   description: string
-  match: PlaybookMatch
   phases: PlaybookPhase[]
   workflow: PlaybookWorkflow
-  parallelism_strategy: string
 }

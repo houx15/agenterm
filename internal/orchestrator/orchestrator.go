@@ -545,7 +545,6 @@ func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Proj
 				Roles:   toPromptRoles(pb.Workflow.Test.Roles),
 			},
 		},
-		Strategy: pb.ParallelismStrategy,
 	}
 }
 

@@ -1,14 +1,6 @@
-id: compound-engineering-workflow
-name: Compound Engineering Workflow
-description: Structured multi-agent workflow inspired by compound engineering with planning, execution, and hardening loops.
-parallelism_strategy: Plan centrally, execute in parallel workstreams, then converge with strict review and integration gates.
-match:
-  languages: []
-  project_patterns:
-    - docs/
-    - .github/
-    - cmd/
-    - internal/
+id: compound-engineering
+name: Compound Engineering
+description: Structured multi-agent workflow with planning, parallel build execution, and integration hardening.
 workflow:
   plan:
     enabled: true

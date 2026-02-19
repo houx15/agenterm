@@ -1,17 +1,6 @@
-id: tdd-coding
+id: tdd
 name: TDD Coding
 description: Test-driven workflow where tests/specs are written first, then implementation and refactoring.
-parallelism_strategy: Serialize red-green-refactor loops per scope, parallelize only independent test suites.
-match:
-  languages:
-    - go
-    - typescript
-    - python
-  project_patterns:
-    - go.mod
-    - package.json
-    - pyproject.toml
-    - tests/
 workflow:
   plan:
     enabled: true

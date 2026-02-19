@@ -323,7 +323,7 @@ supports_headless: true
 
 #### Playbooks
 
-Playbooks define stage-based workflows (`plan`, `build`, `test`) matched to your projects. The orchestrator selects the matching playbook when it spawns agents for a task.
+Playbooks define stage-based workflows (`plan`, `build`, `test`) for your projects.
 
 Example playbook definition:
 
@@ -331,10 +331,6 @@ Example playbook definition:
 id: pairing-coding
 name: Pairing Coding
 description: Pair-style flow with planner + codebase reader, then builder + reviewer.
-parallelism_strategy: Keep planning focused, then run builder/reviewer loops.
-match:
-  languages: []
-  project_patterns: []
 workflow:
   plan:
     enabled: true
@@ -355,11 +351,8 @@ workflow:
         responsibilities: Review and request fixes.
         allowed_agents: [claude-code, codex]
   test:
-    enabled: true
-    roles:
-      - name: tester
-        responsibilities: Run tests and validate acceptance criteria.
-        allowed_agents: [claude-code, codex]
+    enabled: false
+    roles: []
 ```
 
 #### ASR (Speech-to-Text)
@@ -442,14 +435,7 @@ Reference:
 
 ## Playbook System
 
-Playbooks are YAML files in `--playbooks-dir`. The orchestrator matches a playbook to a project using the `match` block.
-
-### Matching
-
-- **`match.languages`**: checked against the project's detected languages
-- **`match.project_patterns`**: glob patterns matched against the project's `repo_path`
-
-The first matching playbook is selected. If no playbook matches, the orchestrator falls back to first available playbook.
+Playbooks are YAML files in `--playbooks-dir`. Each project selects its playbook explicitly.
 
 ### Workflow Stages
 
@@ -474,8 +460,8 @@ Each role defines:
 Current shipped templates:
 
 - `pairing-coding`
-- `tdd-coding`
-- `compound-engineering-workflow`
+- `tdd`
+- `compound-engineering`
 
 ---
 

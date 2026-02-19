@@ -809,14 +809,9 @@ func TestPlaybookCRUDEndpoints(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
 
 	create := apiRequest(t, h, http.MethodPost, "/api/playbooks", map[string]any{
-		"id":                   "custom-playbook",
-		"name":                 "Custom Playbook",
-		"description":          "test",
-		"parallelism_strategy": "parallel unit tests after implementation",
-		"match": map[string]any{
-			"languages":        []string{"go"},
-			"project_patterns": []string{"go.mod"},
-		},
+		"id":          "custom-playbook",
+		"name":        "Custom Playbook",
+		"description": "test",
 		"phases": []map[string]any{
 			{"name": "Plan", "agent": "codex", "role": "planner", "description": "review scope"},
 			{"name": "Ship", "agent": "claude-code", "role": "implementer", "description": "deliver feature"},
@@ -837,13 +832,8 @@ func TestPlaybookCRUDEndpoints(t *testing.T) {
 	}
 
 	update := apiRequest(t, h, http.MethodPut, "/api/playbooks/custom-playbook", map[string]any{
-		"name":                 "Custom Playbook v2",
-		"description":          "updated",
-		"parallelism_strategy": "sequential first, parallel validate",
-		"match": map[string]any{
-			"languages":        []string{"go"},
-			"project_patterns": []string{"internal/"},
-		},
+		"name":        "Custom Playbook v2",
+		"description": "updated",
 		"phases": []map[string]any{
 			{"name": "Implement", "agent": "codex", "role": "implementer", "description": "write code"},
 		},
