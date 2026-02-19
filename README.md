@@ -426,6 +426,7 @@ Built-in disclosure tools:
 
 - `list_skills` — returns discovered skill summaries
 - `get_skill_details(skill_id)` — returns full skill body for one selected skill
+- `install_online_skill(url, overwrite?)` — installs a skill from online GitHub/raw URL into local `skills/`
 
 Discovered roots (searched upward from current working directory):
 

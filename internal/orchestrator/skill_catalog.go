@@ -1,12 +1,17 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,6 +23,8 @@ var defaultSkillRoots = []string{
 	".agents/skills",
 	".claude/skills",
 }
+
+var skillDownloadClient = &http.Client{Timeout: 20 * time.Second}
 
 type SkillSpec struct {
 	ID          string
@@ -194,4 +201,107 @@ func SkillSummaryPromptBlock() string {
 	}
 	lines = append(lines, "Call get_skill_details(skill_id) only when you decide to apply that skill.")
 	return strings.Join(lines, "\n")
+}
+
+func resolveInstallSkillRoot(start string) string {
+	dirs := discoverSkillRootDirs(start)
+	for _, dir := range dirs {
+		if filepath.Base(dir) == "skills" {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				return dir
+			}
+		}
+	}
+	if strings.TrimSpace(start) == "" {
+		return "skills"
+	}
+	return filepath.Join(start, "skills")
+}
+
+func normalizeOnlineSkillURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", fmt.Errorf("url is required")
+	}
+	if strings.HasPrefix(rawURL, "https://raw.githubusercontent.com/") {
+		return rawURL, nil
+	}
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid url: %w", err)
+	}
+	if !strings.EqualFold(u.Hostname(), "github.com") {
+		return "", fmt.Errorf("only github.com and raw.githubusercontent.com skill urls are supported")
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 6 || !strings.EqualFold(parts[2], "tree") {
+		return "", fmt.Errorf("expected github tree url like /org/repo/tree/branch/skills/<skill-id>")
+	}
+	org := parts[0]
+	repo := parts[1]
+	branch := parts[3]
+	relativePath := strings.Join(parts[4:], "/")
+	if !strings.HasPrefix(relativePath, "skills/") {
+		return "", fmt.Errorf("url must point to a skill folder under skills/")
+	}
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s/SKILL.md", org, repo, branch, relativePath), nil
+}
+
+func InstallSkillFromURL(ctx context.Context, rawURL string, overwrite bool) (*SkillSpec, error) {
+	normalizedURL, err := normalizeOnlineSkillURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizedURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := skillDownloadClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("download skill failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	fm, markdown := splitFrontmatter(string(body))
+	if strings.TrimSpace(fm) == "" || strings.TrimSpace(markdown) == "" {
+		return nil, fmt.Errorf("invalid SKILL.md format: frontmatter and body are required")
+	}
+	var meta skillFrontmatter
+	if err := yaml.Unmarshal([]byte(fm), &meta); err != nil {
+		return nil, fmt.Errorf("invalid skill frontmatter: %w", err)
+	}
+	skillID := strings.TrimSpace(strings.ToLower(meta.Name))
+	if !skillNamePattern.MatchString(skillID) {
+		return nil, fmt.Errorf("invalid skill name: %q", meta.Name)
+	}
+	if strings.TrimSpace(meta.Description) == "" {
+		return nil, fmt.Errorf("invalid skill description: required")
+	}
+	wd, _ := os.Getwd()
+	root := resolveInstallSkillRoot(wd)
+	targetDir := filepath.Join(root, skillID)
+	targetPath := filepath.Join(targetDir, "SKILL.md")
+	if !overwrite {
+		if _, err := os.Stat(targetPath); err == nil {
+			return nil, fmt.Errorf("skill %q already exists; set overwrite=true to replace", skillID)
+		}
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(targetPath, body, 0o644); err != nil {
+		return nil, err
+	}
+	spec, ok := parseSkillFile(targetPath, skillID)
+	if !ok {
+		return nil, fmt.Errorf("installed skill failed local validation")
+	}
+	return &spec, nil
 }

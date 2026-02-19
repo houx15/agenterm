@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -129,6 +131,56 @@ func TestProgressiveDisclosureSkillTools(t *testing.T) {
 
 	if _, err := ts.Execute(context.Background(), "get_skill_details", map[string]any{"skill_id": "unknown-skill"}); err == nil {
 		t.Fatalf("expected unknown skill error")
+	}
+}
+
+func TestInstallOnlineSkill(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	const skillContent = `---
+name: sample-online-skill
+description: Sample online skill.
+---
+# Sample Online Skill
+
+Details for online-installed skill.
+`
+	originalClient := skillDownloadClient
+	skillDownloadClient = &http.Client{
+		Transport: toolsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(skillContent)),
+				Header:     http.Header{"Content-Type": []string{"text/markdown"}},
+			}, nil
+		}),
+	}
+	t.Cleanup(func() { skillDownloadClient = originalClient })
+
+	ts := NewToolset(nil)
+	raw, err := ts.Execute(context.Background(), "install_online_skill", map[string]any{
+		"url": "https://raw.githubusercontent.com/anthropics/skills/main/skills/sample-online-skill/SKILL.md",
+	})
+	if err != nil {
+		t.Fatalf("install_online_skill failed: %v", err)
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("result type=%T want map[string]any", raw)
+	}
+	if m["id"] != "sample-online-skill" {
+		t.Fatalf("id=%v want sample-online-skill", m["id"])
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "skills", "sample-online-skill", "SKILL.md")); err != nil {
+		t.Fatalf("installed skill file missing: %v", err)
 	}
 }
 

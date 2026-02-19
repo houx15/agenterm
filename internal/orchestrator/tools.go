@@ -196,6 +196,34 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "install_online_skill",
+			Description: "Install a skill package from an online GitHub skill URL into local skills/",
+			Parameters: map[string]Param{
+				"url":       {Type: "string", Description: "GitHub tree URL or raw SKILL.md URL", Required: true},
+				"overwrite": {Type: "boolean", Description: "Replace existing local skill if true"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				rawURL, err := requiredString(args, "url")
+				if err != nil {
+					return nil, err
+				}
+				overwrite, err := optionalBool(args, "overwrite")
+				if err != nil {
+					return nil, err
+				}
+				spec, err := InstallSkillFromURL(ctx, rawURL, overwrite)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{
+					"id":          spec.ID,
+					"name":        spec.Name,
+					"description": spec.Description,
+					"path":        spec.Path,
+				}, nil
+			},
+		},
+		{
 			Name:        "create_project",
 			Description: "Create a new project",
 			Parameters: map[string]Param{
@@ -712,4 +740,19 @@ func optionalInt(args map[string]any, key string) (int, error) {
 	default:
 		return 0, fmt.Errorf("%s must be a number", key)
 	}
+}
+
+func optionalBool(args map[string]any, key string) (bool, error) {
+	if args == nil {
+		return false, nil
+	}
+	v, ok := args[key]
+	if !ok || v == nil {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be a boolean", key)
+	}
+	return b, nil
 }
