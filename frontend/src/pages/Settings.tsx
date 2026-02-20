@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Hammer, Map, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { CircleHelp, Hammer, Map, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   createAgent,
   createPlaybook,
@@ -61,27 +61,76 @@ const DEFAULT_AGENT: AgentConfig = {
   notes: '',
 }
 
-function createDefaultRole(name = ''): PlaybookWorkflowRole {
+function createDefaultRole(name = '', mode: PlaybookWorkflowRole['mode'] = 'worker'): PlaybookWorkflowRole {
+  const normalizedMode = mode ?? 'worker'
+  const defaultsByMode: Record<string, Partial<PlaybookWorkflowRole>> = {
+    planner: {
+      mode: 'planner',
+      inputs_required: ['goal'],
+      actions_allowed: ['get_project_status', 'create_task', 'write_task_spec', 'create_session'],
+      outputs_contract: { type: 'plan_result', required: ['strategy', 'task_graph'] },
+      gates: { requires_user_approval: true, pass_condition: 'user_plan_approved' },
+      retry_policy: { max_iterations: 2, escalate_on: ['unclear_scope'] },
+      completion_criteria: ['Task graph accepted by user'],
+    },
+    worker: {
+      mode: 'worker',
+      inputs_required: ['spec_path'],
+      actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'close_session'],
+      outputs_contract: { type: 'work_result', required: ['commit_sha', 'summary'] },
+      gates: { requires_user_approval: false, pass_condition: 'changes_compiled_and_tested' },
+      retry_policy: { max_iterations: 3, escalate_on: ['no_progress'] },
+      completion_criteria: ['Spec implemented and committed'],
+    },
+    reviewer: {
+      mode: 'reviewer',
+      inputs_required: ['spec_path', 'commit_sha'],
+      actions_allowed: ['send_command', 'read_session_output', 'is_session_idle'],
+      outputs_contract: { type: 'review_result', required: ['verdict', 'issues'] },
+      gates: { requires_user_approval: false, pass_condition: "verdict == 'pass'" },
+      retry_policy: { max_iterations: 3, escalate_on: ['same_issue_repeated'] },
+      completion_criteria: ['Review verdict is pass'],
+    },
+    tester: {
+      mode: 'tester',
+      inputs_required: ['spec_path'],
+      actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'close_session'],
+      outputs_contract: { type: 'test_result', required: ['summary', 'failed_cases'] },
+      gates: { requires_user_approval: false, pass_condition: 'failed_cases == 0' },
+      retry_policy: { max_iterations: 3, escalate_on: ['flaky_tests'] },
+      completion_criteria: ['All required checks pass'],
+    },
+  }
+  const defaults = defaultsByMode[normalizedMode] ?? defaultsByMode.worker
   return {
     name,
     responsibilities: '',
     allowed_agents: [],
-    mode: 'worker',
-    inputs_required: [],
-    actions_allowed: [],
+    mode: defaults.mode ?? normalizedMode,
+    inputs_required: [...(defaults.inputs_required ?? [])],
+    actions_allowed: [...(defaults.actions_allowed ?? [])],
     handoff_to: [],
-    completion_criteria: [],
-    outputs_contract: { type: '', required: [] },
-    gates: { requires_user_approval: false, pass_condition: '' },
-    retry_policy: { max_iterations: 0, escalate_on: [] },
+    completion_criteria: [...(defaults.completion_criteria ?? [])],
+    outputs_contract: {
+      type: defaults.outputs_contract?.type ?? '',
+      required: [...(defaults.outputs_contract?.required ?? [])],
+    },
+    gates: {
+      requires_user_approval: !!defaults.gates?.requires_user_approval,
+      pass_condition: defaults.gates?.pass_condition ?? '',
+    },
+    retry_policy: {
+      max_iterations: defaults.retry_policy?.max_iterations ?? 0,
+      escalate_on: [...(defaults.retry_policy?.escalate_on ?? [])],
+    },
     suggested_prompt: '',
   }
 }
 
 const DEFAULT_WORKFLOW: PlaybookWorkflow = {
-  plan: { enabled: true, roles: [{ ...createDefaultRole('planner'), mode: 'planner' }], stage_policy: {} },
-  build: { enabled: true, roles: [{ ...createDefaultRole('implementer'), mode: 'worker' }], stage_policy: {} },
-  test: { enabled: true, roles: [{ ...createDefaultRole('tester'), mode: 'tester' }], stage_policy: {} },
+  plan: { enabled: true, roles: [createDefaultRole('planner', 'planner')], stage_policy: {} },
+  build: { enabled: true, roles: [createDefaultRole('implementer', 'worker')], stage_policy: {} },
+  test: { enabled: true, roles: [createDefaultRole('tester', 'tester')], stage_policy: {} },
 }
 
 const DEFAULT_PLAYBOOK: Playbook = {
@@ -159,6 +208,36 @@ const ROLE_TEMPLATES: Record<RoleTemplateKey, Partial<PlaybookWorkflowRole>> = {
   },
 }
 
+function withDetailedDefaults(role: PlaybookWorkflowRole): PlaybookWorkflowRole {
+  const base = createDefaultRole(role.name, role.mode)
+  return {
+    ...role,
+    inputs_required: role.inputs_required && role.inputs_required.length > 0 ? [...role.inputs_required] : [...(base.inputs_required ?? [])],
+    actions_allowed: role.actions_allowed && role.actions_allowed.length > 0 ? [...role.actions_allowed] : [...(base.actions_allowed ?? [])],
+    completion_criteria:
+      role.completion_criteria && role.completion_criteria.length > 0 ? [...role.completion_criteria] : [...(base.completion_criteria ?? [])],
+    outputs_contract: {
+      type: role.outputs_contract?.type?.trim() ? role.outputs_contract.type : base.outputs_contract?.type ?? '',
+      required:
+        role.outputs_contract?.required && role.outputs_contract.required.length > 0
+          ? [...role.outputs_contract.required]
+          : [...(base.outputs_contract?.required ?? [])],
+    },
+    gates: {
+      requires_user_approval: role.gates?.requires_user_approval ?? base.gates?.requires_user_approval ?? false,
+      pass_condition: role.gates?.pass_condition?.trim() ? role.gates.pass_condition : base.gates?.pass_condition ?? '',
+    },
+    retry_policy: {
+      max_iterations:
+        typeof role.retry_policy?.max_iterations === 'number' ? role.retry_policy.max_iterations : base.retry_policy?.max_iterations ?? 0,
+      escalate_on:
+        role.retry_policy?.escalate_on && role.retry_policy.escalate_on.length > 0
+          ? [...role.retry_policy.escalate_on]
+          : [...(base.retry_policy?.escalate_on ?? [])],
+    },
+  }
+}
+
 function normalizeRole(role: unknown): PlaybookWorkflowRole {
   const record = role && typeof role === 'object' && !Array.isArray(role) ? (role as Record<string, unknown>) : {}
   const modeRaw = typeof record.mode === 'string' ? record.mode.trim().toLowerCase() : ''
@@ -172,7 +251,7 @@ function normalizeRole(role: unknown): PlaybookWorkflowRole {
     record.retry_policy && typeof record.retry_policy === 'object' && !Array.isArray(record.retry_policy)
       ? (record.retry_policy as Record<string, unknown>)
       : {}
-  return {
+  return withDetailedDefaults({
     name: typeof record.name === 'string' ? record.name : '',
     responsibilities: typeof record.responsibilities === 'string' ? record.responsibilities : '',
     allowed_agents: toStringArray(record.allowed_agents),
@@ -197,7 +276,7 @@ function normalizeRole(role: unknown): PlaybookWorkflowRole {
           : 0,
       escalate_on: toStringArray(retryPolicy.escalate_on),
     },
-  }
+  })
 }
 
 function normalizeStage(stage: unknown): PlaybookWorkflowStage {
@@ -369,6 +448,14 @@ const STAGE_META: Record<WorkflowStageKey, { label: string; icon: typeof Map }> 
   test: { label: 'Test Stage', icon: ShieldCheck },
 }
 
+function InfoHint({ text }: { text: string }) {
+  return (
+    <span className="settings-info-icon" title={text} aria-label={text}>
+      <CircleHelp size={13} />
+    </span>
+  )
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<TabKey>('agents')
   const [agents, setAgents] = useState<AgentConfig[]>([])
@@ -483,10 +570,10 @@ export default function Settings() {
       roles:
         enabled && stage.roles.length === 0
           ? [
-              {
-                ...createDefaultRole(stageKey === 'build' ? 'implementer' : stageKey),
-                mode: stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker',
-              },
+              createDefaultRole(
+                stageKey === 'build' ? 'implementer' : stageKey,
+                stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker',
+              ),
             ]
           : stage.roles,
     }))
@@ -497,10 +584,7 @@ export default function Settings() {
       ...stage,
       roles: [
         ...stage.roles,
-        {
-          ...createDefaultRole(),
-          mode: stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker',
-        },
+        createDefaultRole('', stageKey === 'plan' ? 'planner' : stageKey === 'test' ? 'tester' : 'worker'),
       ],
     }))
   }
@@ -978,14 +1062,20 @@ export default function Settings() {
                             </div>
 
                             <label>
-                              Role Name
+                              <span className="settings-label-inline">Role Name</span>
                               <input value={role.name} onChange={(event) => updateRole(stageKey, roleIndex, { name: event.target.value })} />
                             </label>
                             <label>
-                              Mode
+                              <span className="settings-label-inline">
+                                Role Type
+                                <InfoHint text="Choose planner, worker, reviewer, or tester. Changing this preloads recommended detailed defaults." />
+                              </span>
                               <select
                                 value={role.mode ?? 'worker'}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { mode: event.target.value as PlaybookWorkflowRole['mode'] })}
+                                onChange={(event) => {
+                                  const nextMode = event.target.value as PlaybookWorkflowRole['mode']
+                                  updateRole(stageKey, roleIndex, withDetailedDefaults({ ...role, mode: nextMode }))
+                                }}
                               >
                                 <option value="planner">planner</option>
                                 <option value="worker">worker</option>
@@ -994,17 +1084,11 @@ export default function Settings() {
                               </select>
                             </label>
 
-                            <label>
-                              Responsibilities
-                              <textarea
-                                rows={2}
-                                value={role.responsibilities}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { responsibilities: event.target.value })}
-                              />
-                            </label>
-
                             <div className="settings-role-agents">
-                              <span>Available Models (Agent IDs)</span>
+                              <span className="settings-label-inline">
+                                Available Models (Agent IDs)
+                                <InfoHint text="Basic setting: select which agents this role can use." />
+                              </span>
                               {agents.length === 0 ? (
                                 <small>No agents available. Create agents first.</small>
                               ) : (
@@ -1024,7 +1108,10 @@ export default function Settings() {
                             </div>
 
                             <label>
-                              Suggested Prompt (optional)
+                              <span className="settings-label-inline">
+                                Suggested Prompt (optional)
+                                <InfoHint text="Basic setting: orchestrator forwards this guidance when dispatching this role." />
+                              </span>
                               <textarea
                                 rows={2}
                                 value={role.suggested_prompt ?? ''}
@@ -1032,138 +1119,187 @@ export default function Settings() {
                               />
                             </label>
 
-                            <label>
-                              Inputs Required (comma-separated)
-                              <input
-                                value={(role.inputs_required ?? []).join(', ')}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { inputs_required: parseCSV(event.target.value) })}
-                              />
-                            </label>
+                            <details className="settings-role-details">
+                              <summary>
+                                <span>Detailed Settings</span>
+                                <InfoHint text="Advanced role controls. Defaults are prefilled so you only edit what you need." />
+                              </summary>
 
-                            <div className="settings-role-agents">
-                              <span>Actions Allowed</span>
-                              <div className="settings-role-agents-grid">
-                                {TOOL_OPTIONS.map((action) => (
-                                  <label key={`${stageKey}-${roleIndex}-action-${action}`} className="settings-role-agent-item">
-                                    <input
-                                      checked={(role.actions_allowed ?? []).includes(action)}
-                                      onChange={(event) => toggleRoleAction(stageKey, roleIndex, action, event.target.checked)}
-                                      type="checkbox"
-                                    />
-                                    <span>{action}</span>
-                                  </label>
-                                ))}
+                              <label>
+                                <span className="settings-label-inline">
+                                  Responsibilities
+                                  <InfoHint text="What this role is accountable for in plain language." />
+                                </span>
+                                <textarea
+                                  rows={2}
+                                  value={role.responsibilities}
+                                  onChange={(event) => updateRole(stageKey, roleIndex, { responsibilities: event.target.value })}
+                                />
+                              </label>
+
+                              <label>
+                                <span className="settings-label-inline">
+                                  Inputs Required (comma-separated)
+                                  <InfoHint text="Artifacts or context this role must have before starting." />
+                                </span>
+                                <input
+                                  value={(role.inputs_required ?? []).join(', ')}
+                                  onChange={(event) => updateRole(stageKey, roleIndex, { inputs_required: parseCSV(event.target.value) })}
+                                />
+                              </label>
+
+                              <div className="settings-role-agents">
+                                <span className="settings-label-inline">
+                                  Actions Allowed
+                                  <InfoHint text="Tool allowlist for this role. Keep minimal for safety." />
+                                </span>
+                                <div className="settings-role-agents-grid">
+                                  {TOOL_OPTIONS.map((action) => (
+                                    <label key={`${stageKey}-${roleIndex}-action-${action}`} className="settings-role-agent-item">
+                                      <input
+                                        checked={(role.actions_allowed ?? []).includes(action)}
+                                        onChange={(event) => toggleRoleAction(stageKey, roleIndex, action, event.target.checked)}
+                                        type="checkbox"
+                                      />
+                                      <span>{action}</span>
+                                    </label>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
 
-                            <label>
-                              Handoff To (comma-separated role names)
-                              <input
-                                value={(role.handoff_to ?? []).join(', ')}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { handoff_to: parseCSV(event.target.value) })}
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Handoff To (comma-separated role names)
+                                  <InfoHint text="Roles that should receive control after this role finishes." />
+                                </span>
+                                <input
+                                  value={(role.handoff_to ?? []).join(', ')}
+                                  onChange={(event) => updateRole(stageKey, roleIndex, { handoff_to: parseCSV(event.target.value) })}
+                                />
+                              </label>
 
-                            <label>
-                              Completion Criteria (comma-separated)
-                              <input
-                                value={(role.completion_criteria ?? []).join(', ')}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { completion_criteria: parseCSV(event.target.value) })}
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Completion Criteria (comma-separated)
+                                  <InfoHint text="Conditions used to mark this role as complete." />
+                                </span>
+                                <input
+                                  value={(role.completion_criteria ?? []).join(', ')}
+                                  onChange={(event) => updateRole(stageKey, roleIndex, { completion_criteria: parseCSV(event.target.value) })}
+                                />
+                              </label>
 
-                            <label>
-                              Outputs Contract Type
-                              <input
-                                value={role.outputs_contract?.type ?? ''}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    outputs_contract: {
-                                      type: event.target.value,
-                                      required: [...(role.outputs_contract?.required ?? [])],
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Outputs Contract Type
+                                  <InfoHint text="Structured output class expected from this role (e.g. review_result)." />
+                                </span>
+                                <input
+                                  value={role.outputs_contract?.type ?? ''}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      outputs_contract: {
+                                        type: event.target.value,
+                                        required: [...(role.outputs_contract?.required ?? [])],
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
 
-                            <label>
-                              Outputs Contract Required Fields (comma-separated)
-                              <input
-                                value={(role.outputs_contract?.required ?? []).join(', ')}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    outputs_contract: {
-                                      type: role.outputs_contract?.type ?? '',
-                                      required: parseCSV(event.target.value),
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Outputs Contract Required Fields (comma-separated)
+                                  <InfoHint text="Required keys in role output payload." />
+                                </span>
+                                <input
+                                  value={(role.outputs_contract?.required ?? []).join(', ')}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      outputs_contract: {
+                                        type: role.outputs_contract?.type ?? '',
+                                        required: parseCSV(event.target.value),
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
 
-                            <label className="settings-field-checkbox">
-                              <span>Gate: Requires User Approval</span>
-                              <input
-                                type="checkbox"
-                                checked={!!role.gates?.requires_user_approval}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    gates: {
-                                      requires_user_approval: event.target.checked,
-                                      pass_condition: role.gates?.pass_condition ?? '',
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label className="settings-field-checkbox">
+                                <span className="settings-label-inline">
+                                  Gate: Requires User Approval
+                                  <InfoHint text="If enabled, this role cannot run mutating actions without explicit user confirmation." />
+                                </span>
+                                <input
+                                  type="checkbox"
+                                  checked={!!role.gates?.requires_user_approval}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      gates: {
+                                        requires_user_approval: event.target.checked,
+                                        pass_condition: role.gates?.pass_condition ?? '',
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
 
-                            <label>
-                              Gate: Pass Condition
-                              <input
-                                value={role.gates?.pass_condition ?? ''}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    gates: {
-                                      requires_user_approval: !!role.gates?.requires_user_approval,
-                                      pass_condition: event.target.value,
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Gate: Pass Condition
+                                  <InfoHint text="Expression or marker that indicates the role completed successfully." />
+                                </span>
+                                <input
+                                  value={role.gates?.pass_condition ?? ''}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      gates: {
+                                        requires_user_approval: !!role.gates?.requires_user_approval,
+                                        pass_condition: event.target.value,
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
 
-                            <label>
-                              Retry Policy: Max Iterations
-                              <input
-                                type="number"
-                                min={0}
-                                value={role.retry_policy?.max_iterations ?? 0}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    retry_policy: {
-                                      max_iterations: clampNonNegative(Number(event.target.value || 0)),
-                                      escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Retry Policy: Max Iterations
+                                  <InfoHint text="Maximum automatic loops before escalating." />
+                                </span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={role.retry_policy?.max_iterations ?? 0}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      retry_policy: {
+                                        max_iterations: clampNonNegative(Number(event.target.value || 0)),
+                                        escalate_on: [...(role.retry_policy?.escalate_on ?? [])],
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
 
-                            <label>
-                              Retry Policy: Escalate On (comma-separated)
-                              <input
-                                value={(role.retry_policy?.escalate_on ?? []).join(', ')}
-                                onChange={(event) =>
-                                  updateRole(stageKey, roleIndex, {
-                                    retry_policy: {
-                                      max_iterations: role.retry_policy?.max_iterations ?? 0,
-                                      escalate_on: parseCSV(event.target.value),
-                                    },
-                                  })
-                                }
-                              />
-                            </label>
+                              <label>
+                                <span className="settings-label-inline">
+                                  Retry Policy: Escalate On (comma-separated)
+                                  <InfoHint text="Signals that should trigger human escalation." />
+                                </span>
+                                <input
+                                  value={(role.retry_policy?.escalate_on ?? []).join(', ')}
+                                  onChange={(event) =>
+                                    updateRole(stageKey, roleIndex, {
+                                      retry_policy: {
+                                        max_iterations: role.retry_policy?.max_iterations ?? 0,
+                                        escalate_on: parseCSV(event.target.value),
+                                      },
+                                    })
+                                  }
+                                />
+                              </label>
+                            </details>
                           </div>
                         ))}
 
@@ -1171,31 +1307,46 @@ export default function Settings() {
                           <div className="settings-stage-role-head">
                             <strong>Stage Policy</strong>
                           </div>
-                          <label>
-                            Enter Gate
-                            <input
-                              value={stage.stage_policy?.enter_gate ?? ''}
-                              onChange={(event) => updateStagePolicy(stageKey, { enter_gate: event.target.value })}
-                            />
-                          </label>
-                          <label>
-                            Exit Gate
-                            <input
-                              value={stage.stage_policy?.exit_gate ?? ''}
-                              onChange={(event) => updateStagePolicy(stageKey, { exit_gate: event.target.value })}
-                            />
-                          </label>
-                          <label>
-                            Max Parallel Worktrees
-                            <input
-                              type="number"
-                              min={0}
-                              value={stage.stage_policy?.max_parallel_worktrees ?? 0}
-                              onChange={(event) =>
-                                updateStagePolicy(stageKey, { max_parallel_worktrees: clampNonNegative(Number(event.target.value || 0)) })
-                              }
-                            />
-                          </label>
+                          <details className="settings-role-details">
+                            <summary>
+                              <span>Detailed Stage Policy</span>
+                              <InfoHint text="Advanced stage-level gates and parallelism limits." />
+                            </summary>
+                            <label>
+                              <span className="settings-label-inline">
+                                Enter Gate
+                                <InfoHint text="Condition that must hold before this stage can start." />
+                              </span>
+                              <input
+                                value={stage.stage_policy?.enter_gate ?? ''}
+                                onChange={(event) => updateStagePolicy(stageKey, { enter_gate: event.target.value })}
+                              />
+                            </label>
+                            <label>
+                              <span className="settings-label-inline">
+                                Exit Gate
+                                <InfoHint text="Condition that must hold before transitioning to the next stage." />
+                              </span>
+                              <input
+                                value={stage.stage_policy?.exit_gate ?? ''}
+                                onChange={(event) => updateStagePolicy(stageKey, { exit_gate: event.target.value })}
+                              />
+                            </label>
+                            <label>
+                              <span className="settings-label-inline">
+                                Max Parallel Worktrees
+                                <InfoHint text="Upper bound for concurrent worktrees in this stage. 0 means default behavior." />
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={stage.stage_policy?.max_parallel_worktrees ?? 0}
+                                onChange={(event) =>
+                                  updateStagePolicy(stageKey, { max_parallel_worktrees: clampNonNegative(Number(event.target.value || 0)) })
+                                }
+                              />
+                            </label>
+                          </details>
                         </div>
 
                         <button type="button" className="secondary-btn settings-stage-add" onClick={() => addRole(stageKey)}>

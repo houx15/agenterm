@@ -1552,6 +1552,44 @@ textarea {
   color: var(--text-secondary);
 }
 
+.settings-label-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.settings-info-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  cursor: help;
+}
+
+.settings-role-details {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+  background: #fafcff;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.settings-role-details summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  user-select: none;
+}
+
+.settings-role-details summary::-webkit-details-marker {
+  display: none;
+}
+
 .settings-role-agents {
   display: grid;
   gap: 0.35rem;
