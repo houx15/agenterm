@@ -767,6 +767,17 @@ textarea {
   transform: translateY(-1px);
 }
 
+.danger-btn {
+  border-color: #efb7bf;
+  color: #9e2038;
+  background: #fff3f5;
+}
+
+.danger-btn:hover {
+  border-color: #d84d64;
+  box-shadow: 0 8px 20px rgba(216, 77, 100, 0.18);
+}
+
 .action-btn.danger {
   border-color: #7f2d2d;
   color: #ff9e9e;

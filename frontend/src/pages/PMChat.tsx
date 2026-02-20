@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { getOrchestratorReport, listProjects, listProjectTasks, listSessions } from '../api/client'
+import { deleteProject, getOrchestratorReport, listProjects, listProjectTasks, listSessions } from '../api/client'
 import type { OrchestratorProgressReport, OrchestratorServerMessage, Project, Session, Task } from '../api/types'
 import { useAppContext } from '../App'
 import ChatPanel from '../components/ChatPanel'
@@ -37,6 +37,9 @@ export default function PMChat() {
   const [reportLoading, setReportLoading] = useState(false)
   const [reportError, setReportError] = useState('')
   const [activePane, setActivePane] = useState<'execution' | 'demand'>('execution')
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const [projectID, setProjectID] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '')
 
@@ -204,6 +207,24 @@ export default function PMChat() {
     }
   }, [projectID])
 
+  const confirmDeleteProject = useCallback(async () => {
+    if (!selectedProject) {
+      return
+    }
+    setDeletingProject(true)
+    setDeleteError('')
+    try {
+      await deleteProject(selectedProject.id)
+      setDeleteModalOpen(false)
+      await refreshAll()
+      await refreshProjectData()
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete project')
+    } finally {
+      setDeletingProject(false)
+    }
+  }, [refreshAll, refreshProjectData, selectedProject])
+
   const infoPanel = (
     <div className="pm-info-panel">
       <section className="pm-project-detail">
@@ -331,6 +352,9 @@ export default function PMChat() {
                 >
                   Demand Pool
                 </button>
+                <button className="secondary-btn danger-btn" onClick={() => setDeleteModalOpen(true)} type="button">
+                  Delete Project
+                </button>
               </div>
             )}
             {activePane === 'execution' && isMobile && selectedProject && (
@@ -379,6 +403,23 @@ export default function PMChat() {
           <div className="settings-actions">
             <button className="secondary-btn" onClick={() => setShowMobileInfo(false)} type="button">
               <span>Close</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal onClose={() => setDeleteModalOpen(false)} open={deleteModalOpen} title="Delete Project">
+        <div className="modal-form">
+          <p className="empty-text">
+            Delete project <strong>{selectedProject?.name ?? ''}</strong>? This will archive it and hide it from active workflow views.
+          </p>
+          {deleteError && <p className="dashboard-error">{deleteError}</p>}
+          <div className="settings-actions">
+            <button className="secondary-btn" disabled={deletingProject} onClick={() => setDeleteModalOpen(false)} type="button">
+              Cancel
+            </button>
+            <button className="secondary-btn danger-btn" disabled={deletingProject} onClick={() => void confirmDeleteProject()} type="button">
+              {deletingProject ? 'Deleting…' : 'Delete'}
             </button>
           </div>
         </div>

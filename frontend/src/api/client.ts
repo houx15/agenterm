@@ -95,6 +95,12 @@ export function createProject<T>(input: CreateProjectInput) {
   })
 }
 
+export function deleteProject(projectID: string) {
+  return apiFetch<void>(`/api/projects/${encodeURIComponent(projectID)}`, {
+    method: 'DELETE',
+  })
+}
+
 export function listDirectories<T = ListDirectoriesResponse>(path?: string) {
   const search = new URLSearchParams()
   if (path && path.trim()) {
