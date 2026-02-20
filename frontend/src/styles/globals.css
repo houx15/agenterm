@@ -1445,6 +1445,11 @@ textarea {
   color: var(--text-secondary);
 }
 
+.demand-readonly-hint {
+  color: var(--warning);
+  font-size: 0.86rem;
+}
+
 .demand-controls {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { House, MessageSquareText, Settings, SquareTerminal } from './Lucide'
+import { ClipboardList, House, MessageSquareText, Settings, SquareTerminal } from './Lucide'
 
 interface SidebarProps {
   closeOnNavigate?: () => void
@@ -25,6 +25,10 @@ export default function Sidebar({ closeOnNavigate }: SidebarProps) {
         <NavLink to="/pm-chat" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           <MessageSquareText size={15} />
           <span>PM Chat</span>
+        </NavLink>
+        <NavLink to="/demand-pool" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
+          <ClipboardList size={15} />
+          <span>Demand Pool</span>
         </NavLink>
         <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           <Settings size={15} />

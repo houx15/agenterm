@@ -13,6 +13,7 @@ export default function Layout() {
     '/': 'Dashboard',
     '/sessions': 'Sessions',
     '/pm-chat': 'PM Chat',
+    '/demand-pool': 'Demand Pool',
     '/settings': 'Settings',
   }
   const topbarTitle = location.pathname.startsWith('/projects/') ? 'Project Detail' : titleByPath[location.pathname] ?? location.pathname.slice(1)
@@ -21,6 +22,8 @@ export default function Layout() {
       ? app.activeWindow ?? 'Select a session'
       : location.pathname === '/pm-chat'
         ? 'Plan, monitor, and steer execution'
+        : location.pathname === '/demand-pool'
+          ? 'Read-only demand overview (edit in PM Chat)'
         : app.connected
           ? 'Realtime sync online'
           : 'Realtime sync offline'

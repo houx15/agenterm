@@ -19,6 +19,7 @@ interface DemandPoolProps {
   projectID?: string
   projectName?: string
   embedded?: boolean
+  readOnly?: boolean
 }
 
 type EditableDemandFields = Pick<DemandPoolItem, 'title' | 'description' | 'status' | 'priority' | 'impact' | 'effort' | 'risk' | 'urgency' | 'notes'>
@@ -48,7 +49,7 @@ function tagsToText(tags: string[]): string {
   return tags.join(', ')
 }
 
-export default function DemandPool({ projectID: pinnedProjectID = '', projectName, embedded = false }: DemandPoolProps) {
+export default function DemandPool({ projectID: pinnedProjectID = '', projectName, embedded = false, readOnly = false }: DemandPoolProps) {
   const [projects, setProjects] = useState<Project[]>([])
   const [projectID, setProjectID] = useState(pinnedProjectID)
   const [items, setItems] = useState<DemandPoolItem[]>([])
@@ -207,6 +208,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function submitQuickAdd() {
+    if (readOnly) {
+      return
+    }
     if (!projectID || !quickTitle.trim()) {
       return
     }
@@ -230,6 +234,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function submitModal() {
+    if (readOnly) {
+      return
+    }
     if (!projectID || !draft.title.trim()) {
       setError('Title is required.')
       return
@@ -262,6 +269,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function promoteItem(item: DemandPoolItem) {
+    if (readOnly) {
+      return
+    }
     setBusyItemID(item.id)
     setError('')
     setMessage('')
@@ -277,6 +287,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function removeItem(item: DemandPoolItem) {
+    if (readOnly) {
+      return
+    }
     setBusyItemID(item.id)
     setError('')
     setMessage('')
@@ -292,6 +305,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function sendDemandChat() {
+    if (readOnly) {
+      return
+    }
     if (!projectID || !demandInput.trim()) {
       return
     }
@@ -342,6 +358,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function saveReprioritization() {
+    if (readOnly) {
+      return
+    }
     if (!projectID || !hasPriorityChanges) {
       return
     }
@@ -372,6 +391,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function rerankNow() {
+    if (readOnly) {
+      return
+    }
     if (!projectID) {
       return
     }
@@ -395,6 +417,9 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
   }
 
   async function generateDigest() {
+    if (readOnly) {
+      return
+    }
     if (!projectID) {
       return
     }
@@ -422,11 +447,14 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
         <div>
           {embedded ? <h3>Demand Pool</h3> : <h2>Demand Pool</h2>}
           <p>Capture ideas and prioritize them separately from active development execution.</p>
+          {readOnly && <p className="demand-readonly-hint">Read-only view. Add/edit demands in PM Chat.</p>}
         </div>
-        <button className="primary-btn" onClick={openCreateModal} type="button">
-          <Lightbulb size={16} />
-          <span>Rich Add</span>
-        </button>
+        {!readOnly && (
+          <button className="primary-btn" onClick={openCreateModal} type="button">
+            <Lightbulb size={16} />
+            <span>Rich Add</span>
+          </button>
+        )}
       </div>
 
       <div className="dashboard-section demand-controls">
@@ -463,47 +491,51 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
         </button>
       </div>
 
-      <div className="dashboard-section demand-quick-add">
-        <label>
-          <span>Quick Add</span>
-          <input
-            placeholder={projectID ? `Add an idea for ${resolvedProjectName}` : 'Select a project first'}
-            value={quickTitle}
-            onChange={(event) => setQuickTitle(event.target.value)}
-          />
-        </label>
-        <label>
-          <span>Tags</span>
-          <input placeholder="ux, backend, infra" value={quickTags} onChange={(event) => setQuickTags(event.target.value)} />
-        </label>
-        <button className="primary-btn" disabled={!projectID || !quickTitle.trim() || busyItemID === 'quick-add'} onClick={() => void submitQuickAdd()} type="button">
-          Capture
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="dashboard-section demand-quick-add">
+          <label>
+            <span>Quick Add</span>
+            <input
+              placeholder={projectID ? `Add an idea for ${resolvedProjectName}` : 'Select a project first'}
+              value={quickTitle}
+              onChange={(event) => setQuickTitle(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Tags</span>
+            <input placeholder="ux, backend, infra" value={quickTags} onChange={(event) => setQuickTags(event.target.value)} />
+          </label>
+          <button className="primary-btn" disabled={!projectID || !quickTitle.trim() || busyItemID === 'quick-add'} onClick={() => void submitQuickAdd()} type="button">
+            Capture
+          </button>
+        </div>
+      )}
 
       {(message || error) && (
         <p className={`settings-message ${error ? 'text-error' : ''}`.trim()}>{error || message}</p>
       )}
 
       <div className="dashboard-section demand-list">
-        <div className="demand-list-toolbar">
-          <button className="secondary-btn" disabled={!hasPriorityChanges || busyItemID === 'reprioritize'} onClick={() => void saveReprioritization()} type="button">
-            <Sparkles size={14} />
-            <span>Save Priority Changes</span>
-          </button>
-          <button className="secondary-btn" disabled={!hasPriorityChanges} onClick={resetLocalPriorities} type="button">
-            <RefreshCw size={14} />
-            <span>Reset</span>
-          </button>
-          <button className="primary-btn" disabled={busyItemID === 'rerank'} onClick={() => void rerankNow()} type="button">
-            <Sparkles size={14} />
-            <span>AI Re-rank Now</span>
-          </button>
-          <button className="secondary-btn" disabled={busyItemID === 'digest'} onClick={() => void generateDigest()} type="button">
-            <FileText size={14} />
-            <span>Generate Digest</span>
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="demand-list-toolbar">
+            <button className="secondary-btn" disabled={!hasPriorityChanges || busyItemID === 'reprioritize'} onClick={() => void saveReprioritization()} type="button">
+              <Sparkles size={14} />
+              <span>Save Priority Changes</span>
+            </button>
+            <button className="secondary-btn" disabled={!hasPriorityChanges} onClick={resetLocalPriorities} type="button">
+              <RefreshCw size={14} />
+              <span>Reset</span>
+            </button>
+            <button className="primary-btn" disabled={busyItemID === 'rerank'} onClick={() => void rerankNow()} type="button">
+              <Sparkles size={14} />
+              <span>AI Re-rank Now</span>
+            </button>
+            <button className="secondary-btn" disabled={busyItemID === 'digest'} onClick={() => void generateDigest()} type="button">
+              <FileText size={14} />
+              <span>Generate Digest</span>
+            </button>
+          </div>
+        )}
         {loading ? (
           <p className="empty-text">Loading demand pool...</p>
         ) : sortedItems.length === 0 ? (
@@ -530,48 +562,56 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
                     </td>
                     <td>{item.status}</td>
                     <td>
-                      <div className="demand-priority-cell">
-                        <button className="icon-only-btn secondary-btn" disabled={index === 0} onClick={() => moveItemPriority(item.id, 'up')} type="button">
-                          <ArrowUp size={13} />
-                        </button>
-                        <button
-                          className="icon-only-btn secondary-btn"
-                          disabled={index === sortedItems.length - 1}
-                          onClick={() => moveItemPriority(item.id, 'down')}
-                          type="button"
-                        >
-                          <ArrowDown size={13} />
-                        </button>
-                        <input
-                          type="number"
-                          value={localPriorities[item.id] ?? item.priority}
-                          onChange={(event) => setItemPriority(item.id, Number(event.target.value) || 0)}
-                        />
-                      </div>
+                      {readOnly ? (
+                        item.priority
+                      ) : (
+                        <div className="demand-priority-cell">
+                          <button className="icon-only-btn secondary-btn" disabled={index === 0} onClick={() => moveItemPriority(item.id, 'up')} type="button">
+                            <ArrowUp size={13} />
+                          </button>
+                          <button
+                            className="icon-only-btn secondary-btn"
+                            disabled={index === sortedItems.length - 1}
+                            onClick={() => moveItemPriority(item.id, 'down')}
+                            type="button"
+                          >
+                            <ArrowDown size={13} />
+                          </button>
+                          <input
+                            type="number"
+                            value={localPriorities[item.id] ?? item.priority}
+                            onChange={(event) => setItemPriority(item.id, Number(event.target.value) || 0)}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td>
                       {item.impact}/{item.effort}
                     </td>
                     <td>{item.tags.join(', ') || '-'}</td>
                     <td>
-                      <div className="demand-row-actions">
-                        <button className="secondary-btn" onClick={() => openEditModal(item)} type="button">
-                          <Pencil size={14} />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          className="primary-btn"
-                          disabled={busyItemID === item.id || item.status === 'scheduled' || item.status === 'done' || Boolean(item.selected_task_id)}
-                          onClick={() => void promoteItem(item)}
-                          type="button"
-                        >
-                          <Rocket size={14} />
-                          <span>Promote</span>
-                        </button>
-                        <button className="action-btn danger" disabled={busyItemID === item.id} onClick={() => void removeItem(item)} type="button">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      {readOnly ? (
+                        <span className="empty-text">View only</span>
+                      ) : (
+                        <div className="demand-row-actions">
+                          <button className="secondary-btn" onClick={() => openEditModal(item)} type="button">
+                            <Pencil size={14} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            className="primary-btn"
+                            disabled={busyItemID === item.id || item.status === 'scheduled' || item.status === 'done' || Boolean(item.selected_task_id)}
+                            onClick={() => void promoteItem(item)}
+                            type="button"
+                          >
+                            <Rocket size={14} />
+                            <span>Promote</span>
+                          </button>
+                          <button className="action-btn danger" disabled={busyItemID === item.id} onClick={() => void removeItem(item)} type="button">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -615,17 +655,19 @@ export default function DemandPool({ projectID: pinnedProjectID = '', projectNam
             ))
           )}
         </div>
-        <div className="demand-chat-input">
-          <textarea
-            rows={3}
-            placeholder="Ask for triage suggestions, reprioritization ideas, or demand-to-task promotion guidance."
-            value={demandInput}
-            onChange={(event) => setDemandInput(event.target.value)}
-          />
-          <button className="primary-btn" disabled={!projectID || !demandInput.trim() || busyItemID === 'demand-chat'} onClick={() => void sendDemandChat()} type="button">
-            Send
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="demand-chat-input">
+            <textarea
+              rows={3}
+              placeholder="Ask for triage suggestions, reprioritization ideas, or demand-to-task promotion guidance."
+              value={demandInput}
+              onChange={(event) => setDemandInput(event.target.value)}
+            />
+            <button className="primary-btn" disabled={!projectID || !demandInput.trim() || busyItemID === 'demand-chat'} onClick={() => void sendDemandChat()} type="button">
+              Send
+            </button>
+          </div>
+        )}
       </div>
 
       <Modal
