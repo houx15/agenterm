@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,6 +147,69 @@ func TestAuthMiddleware(t *testing.T) {
 	auth := apiRequest(t, h, http.MethodGet, "/api/projects", nil, true)
 	if auth.Code != http.StatusOK {
 		t.Fatalf("status=%d want %d", auth.Code, http.StatusOK)
+	}
+}
+
+func TestListDirectoriesDefaultsToHome(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+
+	resp := apiRequest(t, h, http.MethodGet, "/api/fs/directories", nil, true)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var body map[string]any
+	decodeBody(t, resp, &body)
+	path, _ := body["path"].(string)
+	if path == "" || !filepath.IsAbs(path) {
+		t.Fatalf("expected absolute path, got=%q", path)
+	}
+}
+
+func TestListDirectoriesReturnsChildrenWithAbsolutePaths(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "alpha"), 0o755); err != nil {
+		t.Fatalf("mkdir alpha: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "beta"), 0o755); err != nil {
+		t.Fatalf("mkdir beta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	resp := apiRequest(t, h, http.MethodGet, "/api/fs/directories?path="+url.QueryEscape(root), nil, true)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.Code, resp.Body.String())
+	}
+
+	var body struct {
+		Path        string `json:"path"`
+		Parent      string `json:"parent"`
+		Directories []struct {
+			Name string `json:"name"`
+			Path string `json:"path"`
+		} `json:"directories"`
+	}
+	decodeBody(t, resp, &body)
+
+	if body.Path != filepath.Clean(root) {
+		t.Fatalf("path=%q want %q", body.Path, filepath.Clean(root))
+	}
+	if body.Parent == "" {
+		t.Fatalf("expected parent path to be set")
+	}
+	if len(body.Directories) != 2 {
+		t.Fatalf("directories=%d want 2", len(body.Directories))
+	}
+	for _, dir := range body.Directories {
+		if !filepath.IsAbs(dir.Path) {
+			t.Fatalf("expected absolute child path, got=%q", dir.Path)
+		}
+		if dir.Name != "alpha" && dir.Name != "beta" {
+			t.Fatalf("unexpected dir name=%q", dir.Name)
+		}
 	}
 }
 

@@ -134,6 +134,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/playbooks", handler.createPlaybook)
 	mux.HandleFunc("PUT /api/playbooks/{id}", handler.updatePlaybook)
 	mux.HandleFunc("DELETE /api/playbooks/{id}", handler.deletePlaybook)
+	mux.HandleFunc("GET /api/fs/directories", handler.listDirectories)
 
 	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
 	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)

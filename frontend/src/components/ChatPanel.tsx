@@ -25,7 +25,7 @@ export default function ChatPanel({
   isFetchingReport = false,
 }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
-  const endRef = useRef<HTMLDivElement | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
   const speech = useSpeechToText({
     onTranscript: (text) => {
       setInputValue((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
@@ -53,7 +53,15 @@ export default function ChatPanel({
   )
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    const node = listRef.current
+    if (!node) {
+      return
+    }
+    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight
+    if (distanceFromBottom > 120 && !isStreaming) {
+      return
+    }
+    node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' })
   }, [resolvedMessages, isStreaming])
 
   return (
@@ -63,7 +71,7 @@ export default function ChatPanel({
         <small>{connectionStatus}</small>
       </div>
 
-      <div className="pm-chat-messages">
+      <div className="pm-chat-messages" ref={listRef}>
         {resolvedMessages.length === 0 && <div className="empty-view">Ask the PM to plan or report progress.</div>}
 
         {resolvedMessages.map((message, idx) => (
@@ -78,7 +86,6 @@ export default function ChatPanel({
 
         {isStreaming && <div className="pm-streaming-indicator">PM is working...</div>}
 
-        <div ref={endRef} />
       </div>
 
       <div className="pm-chat-input-row">

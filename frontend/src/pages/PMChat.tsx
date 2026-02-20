@@ -5,7 +5,8 @@ import type { OrchestratorProgressReport, OrchestratorServerMessage, Project, Se
 import { useAppContext } from '../App'
 import ChatPanel from '../components/ChatPanel'
 import type { MessageTaskLink, SessionMessage } from '../components/ChatMessage'
-import { ChevronLeft, ChevronRight, FolderOpen, MessageSquareText } from '../components/Lucide'
+import { ChevronDown, ChevronRight, FolderOpen, MessageSquareText } from '../components/Lucide'
+import Modal from '../components/Modal'
 import TaskDAG from '../components/TaskDAG'
 import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
 import DemandPool from './DemandPool'
@@ -25,11 +26,12 @@ export default function PMChat() {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
-  const [projectStats, setProjectStats] = useState<Record<string, { sessionCount: number; needsResponse: number }>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [detailCollapsed, setDetailCollapsed] = useState(false)
-  const [showMobileProject, setShowMobileProject] = useState(false)
+  const [projectInfoCollapsed, setProjectInfoCollapsed] = useState(false)
+  const [progressCollapsed, setProgressCollapsed] = useState(false)
+  const [taskGroupCollapsed, setTaskGroupCollapsed] = useState(false)
+  const [showMobileInfo, setShowMobileInfo] = useState(false)
   const [progressReport, setProgressReport] = useState<OrchestratorProgressReport | null>(null)
   const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
@@ -40,23 +42,6 @@ export default function PMChat() {
 
   const orchestrator = useOrchestratorWS(projectID)
 
-  const loadProjectStats = useCallback(async (projectList: Project[]) => {
-    if (projectList.length === 0) {
-      setProjectStats({})
-      return
-    }
-    const entries = await Promise.all(
-      projectList.map(async (project) => {
-        const sessionList = await listSessions<Session[]>({ projectID: project.id })
-        const needsResponse = sessionList.filter((session) =>
-          ['waiting', 'human_takeover', 'blocked', 'needs_input', 'reviewing'].includes((session.status || '').toLowerCase()),
-        ).length
-        return [project.id, { sessionCount: sessionList.length, needsResponse }] as const
-      }),
-    )
-    setProjectStats(Object.fromEntries(entries))
-  }, [])
-
   const loadProjectData = useCallback(async () => {
     if (!projectID) {
       setTasks([])
@@ -65,10 +50,7 @@ export default function PMChat() {
       return
     }
 
-    const [taskList, sessionList] = await Promise.all([
-      listProjectTasks<Task[]>(projectID),
-      listSessions<Session[]>({ projectID }),
-    ])
+    const [taskList, sessionList] = await Promise.all([listProjectTasks<Task[]>(projectID), listSessions<Session[]>({ projectID })])
 
     setTasks(taskList)
     setSessions(sessionList)
@@ -80,7 +62,6 @@ export default function PMChat() {
     try {
       const projectList = await listProjects<Project[]>()
       setProjects(projectList)
-      await loadProjectStats(projectList)
       if (projectList.length === 0) {
         setProjectID('')
         return
@@ -95,7 +76,7 @@ export default function PMChat() {
       setError(err instanceof Error ? err.message : 'Failed to load projects')
       setLoading(false)
     }
-  }, [loadProjectStats, projectID, setSearchParams])
+  }, [projectID, setSearchParams])
 
   const refreshProjectData = useCallback(async () => {
     try {
@@ -115,28 +96,6 @@ export default function PMChat() {
   }, [refreshProjectData])
 
   useEffect(() => {
-    if (!projectID) {
-      return
-    }
-
-    const intervalID = window.setInterval(() => {
-      void refreshProjectData()
-    }, 5000)
-
-    return () => window.clearInterval(intervalID)
-  }, [projectID, refreshProjectData])
-
-  useEffect(() => {
-    const onResize = () => {
-      if (window.innerWidth >= 900) {
-        setShowMobileProject(false)
-      }
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
-
-  useEffect(() => {
     if (shouldRefreshFromOrchestratorEvent(orchestrator.lastEvent)) {
       void refreshProjectData()
     }
@@ -148,16 +107,6 @@ export default function PMChat() {
     }
     void refreshProjectData()
   }, [app.lastMessage, projectID, refreshProjectData])
-
-  useEffect(() => {
-    if (!projects.length) {
-      return
-    }
-    const intervalID = window.setInterval(() => {
-      void loadProjectStats(projects)
-    }, 8000)
-    return () => window.clearInterval(intervalID)
-  }, [loadProjectStats, projects])
 
   useEffect(() => {
     setProgressReport(null)
@@ -192,9 +141,6 @@ export default function PMChat() {
 
   const onSelectProject = (nextProjectID: string) => {
     setProjectID(nextProjectID)
-    if (window.innerWidth < 900) {
-      setShowMobileProject(true)
-    }
     if (nextProjectID) {
       setSearchParams({ project: nextProjectID }, { replace: true })
     } else {
@@ -218,6 +164,7 @@ export default function PMChat() {
     }
     const summary = buildReportSummaryText(progressReport)
     return [
+      ...orchestrator.messages,
       {
         id: `progress-report-${reportUpdatedAt}`,
         text: `Progress report (${new Date(reportUpdatedAt).toLocaleTimeString()}):\n${summary}`,
@@ -226,7 +173,6 @@ export default function PMChat() {
         kind: 'text',
         timestamp: reportUpdatedAt,
       },
-      ...orchestrator.messages,
     ]
   }, [orchestrator.messages, progressReport, reportUpdatedAt])
 
@@ -258,166 +204,158 @@ export default function PMChat() {
     }
   }, [projectID])
 
+  const infoPanel = (
+    <div className="pm-info-panel">
+      <section className="pm-project-detail">
+        <div className="pm-panel-header">
+          <h3>
+            <FolderOpen size={14} /> Project Detail
+          </h3>
+          <button className="secondary-btn" onClick={() => setProjectInfoCollapsed((prev) => !prev)} type="button">
+            {projectInfoCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+        {!projectInfoCollapsed && selectedProject && (
+          <div className="pm-project-detail-body">
+            <div className="pm-project-detail-meta">
+              <p>Repository: {selectedProject.repo_path}</p>
+              <p>Status: {selectedProject.status}</p>
+              <p>Playbook: {selectedProject.playbook || 'auto'}</p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="pm-report-panel">
+        <div className="pm-panel-header">
+          <h3>Progress Report</h3>
+          <div className="pm-header-actions">
+            <button className="secondary-btn" onClick={() => void requestProgressReport()} disabled={reportLoading || !selectedProject} type="button">
+              {reportLoading ? 'Loading…' : 'Refresh'}
+            </button>
+            <button className="secondary-btn" onClick={() => setProgressCollapsed((prev) => !prev)} type="button">
+              {progressCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </div>
+        </div>
+        {!progressCollapsed && (
+          <div className="pm-report-panel-body">
+            <small>{reportUpdatedAt ? `Updated ${new Date(reportUpdatedAt).toLocaleTimeString()}` : 'No report yet'}</small>
+            {reportError && <p className="dashboard-error">{reportError}</p>}
+            {!reportError && progressReport && <p>{buildReportSummaryText(progressReport)}</p>}
+            {!reportError && !progressReport && <p className="empty-text">Press refresh to request a summary.</p>}
+          </div>
+        )}
+      </section>
+
+      <section className="pm-project-detail">
+        <div className="pm-panel-header">
+          <h3>Task Group</h3>
+          <button className="secondary-btn" onClick={() => setTaskGroupCollapsed((prev) => !prev)} type="button">
+            {taskGroupCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
+        {!taskGroupCollapsed && (
+          <div className="pm-project-detail-body">
+            <div className="pm-project-status-grid">
+              {tasksByStatus.map(([status, count]) => (
+                <div className="pm-status-card" key={status}>
+                  <strong>{count}</strong>
+                  <small>{status}</small>
+                </div>
+              ))}
+            </div>
+            <TaskDAG tasks={tasks} sessionsByTask={sessionsByTask} onOpenTask={openTaskSession} />
+          </div>
+        )}
+      </section>
+    </div>
+  )
+
   return (
     <section className="pm-chat-page">
-      <div className="pm-chat-layout-v2">
-        <aside className={`pm-project-list ${isMobile && showMobileProject ? 'hidden-mobile' : ''}`.trim()}>
-          <div className="pm-panel-header">
-            <h3>PMs</h3>
-            <small>{projects.length}</small>
+      <div className="pm-chat-layout-v2 pm-chat-layout-shell">
+        <div className="pm-chat-header">
+          <div className="project-selector">
+            <span>Project</span>
+            <select
+              onChange={(event) => onSelectProject(event.target.value)}
+              value={projectID}
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="pm-project-items">
-            {projects.map((project) => {
-              const stat = projectStats[project.id] ?? { sessionCount: 0, needsResponse: 0 }
-              const active = project.id === projectID
-              return (
-                <button
-                  className={`pm-project-item ${active ? 'active' : ''}`.trim()}
-                  key={project.id}
-                  onClick={() => onSelectProject(project.id)}
-                  type="button"
-                >
-                  <span className="pm-project-item-name">{project.name}</span>
-                  <span className="pm-project-item-meta">{stat.sessionCount} sessions</span>
-                  {stat.needsResponse > 0 && <span className="pm-notification-badge">{stat.needsResponse}</span>}
-                </button>
-              )
-            })}
-            {projects.length === 0 && <p className="empty-view">No projects</p>}
-          </div>
-        </aside>
-
-        <div className={`pm-project-content ${isMobile && !showMobileProject ? 'hidden-mobile' : ''}`.trim()}>
-          <div className="pm-chat-header">
-            {isMobile && (
-              <button className="secondary-btn" onClick={() => setShowMobileProject(false)} type="button">
-                <ChevronLeft size={14} />
-                <span>Back</span>
+          {selectedProject && (
+            <div className="pm-pane-toggle">
+              <button
+                className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
+                onClick={() => setActivePane('execution')}
+                type="button"
+              >
+                Execution
               </button>
-            )}
-            <h2>{selectedProject?.name ?? 'PM Chat'}</h2>
-            {selectedProject && (
-              <div className="pm-pane-toggle">
-                <button
-                  className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
-                  onClick={() => setActivePane('execution')}
-                  type="button"
-                >
-                  Execution
-                </button>
-                <button
-                  className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
-                  onClick={() => setActivePane('demand')}
-                  type="button"
-                >
-                  Demand Pool
-                </button>
-              </div>
-            )}
-          </div>
-
-          {loading && <p className="empty-view">Loading PM chat context...</p>}
-          {error && <p className="dashboard-error">{error}</p>}
-
-          {!loading && !error && selectedProject && activePane === 'execution' && (
-            <>
-              <section className="pm-report-panel">
-                <div className="pm-panel-header">
-                  <h3>Progress</h3>
-                  <small>{reportUpdatedAt ? `Updated ${new Date(reportUpdatedAt).toLocaleTimeString()}` : 'No report yet'}</small>
-                </div>
-                <div className="pm-report-panel-body">
-                  {reportError && <p className="dashboard-error">{reportError}</p>}
-                  {!reportError && progressReport && <p>{buildReportSummaryText(progressReport)}</p>}
-                  {!reportError && !progressReport && <p className="empty-text">Press "Report Progress" to request a summary.</p>}
-                </div>
-              </section>
-
-              <section className="pm-project-detail">
-                <div className="pm-panel-header">
-                  <h3>
-                    <FolderOpen size={14} /> Project Detail
-                  </h3>
-                  <button className="secondary-btn" onClick={() => setDetailCollapsed((prev) => !prev)} type="button">
-                    {detailCollapsed ? (
-                      <>
-                        <ChevronRight size={14} />
-                        <span>Expand</span>
-                      </>
-                    ) : (
-                      <>
-                        <ChevronLeft size={14} />
-                        <span>Collapse</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-                {!detailCollapsed && (
-                  <div className="pm-project-detail-body">
-                    <div className="pm-project-detail-meta">
-                      <p>Repository: {selectedProject.repo_path}</p>
-                      <p>Status: {selectedProject.status}</p>
-                    </div>
-                    <div className="pm-project-status-grid">
-                      {tasksByStatus.map(([status, count]) => (
-                        <div className="pm-status-card" key={status}>
-                          <strong>{count}</strong>
-                          <small>{status}</small>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="pm-project-session-list">
-                      <h4>Sessions</h4>
-                      {sessions.length === 0 && <p className="empty-text">No sessions in this project yet.</p>}
-                      {sessions.map((session) => (
-                        <button
-                          className="pm-project-session-item"
-                          key={session.id}
-                          onClick={() => {
-                            if (!session.tmux_window_id) {
-                              return
-                            }
-                            app.setActiveWindow(session.tmux_window_id)
-                            navigate('/sessions')
-                          }}
-                          type="button"
-                        >
-                          <span>{session.agent_type}</span>
-                          <small>{session.status}</small>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <div className="pm-chat-main">
-                <TaskDAG tasks={tasks} sessionsByTask={sessionsByTask} onOpenTask={openTaskSession} />
-                <ChatPanel
-                  messages={chatMessages}
-                  taskLinks={taskLinks}
-                  isStreaming={orchestrator.isStreaming}
-                  connectionStatus={orchestrator.connectionStatus}
-                  onSend={orchestrator.send}
-                  onTaskClick={openTaskSession}
-                  onReportProgress={requestProgressReport}
-                  isFetchingReport={reportLoading}
-                />
-              </div>
-            </>
-          )}
-
-          {!loading && !error && selectedProject && activePane === 'demand' && (
-            <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
-          )}
-
-          {!loading && !error && !selectedProject && (
-            <div className="empty-view">
-              <MessageSquareText size={16} /> Select a project to open PM Chat
+              <button
+                className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
+                onClick={() => setActivePane('demand')}
+                type="button"
+              >
+                Demand Pool
+              </button>
             </div>
           )}
+          {activePane === 'execution' && isMobile && selectedProject && (
+            <button className="secondary-btn" onClick={() => setShowMobileInfo(true)} type="button">
+              <span>Project Info</span>
+            </button>
+          )}
         </div>
+
+        {loading && <p className="empty-view">Loading PM chat context...</p>}
+        {error && <p className="dashboard-error">{error}</p>}
+
+        {!loading && !error && selectedProject && activePane === 'execution' && (
+          <div className="pm-execution-layout">
+            {!isMobile && infoPanel}
+            <div className="pm-chat-only">
+              <ChatPanel
+                messages={chatMessages}
+                taskLinks={taskLinks}
+                isStreaming={orchestrator.isStreaming}
+                connectionStatus={orchestrator.connectionStatus}
+                onSend={orchestrator.send}
+                onTaskClick={openTaskSession}
+                onReportProgress={requestProgressReport}
+                isFetchingReport={reportLoading}
+              />
+            </div>
+          </div>
+        )}
+
+        {!loading && !error && selectedProject && activePane === 'demand' && (
+          <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
+        )}
+
+        {!loading && !error && !selectedProject && (
+          <div className="empty-view">
+            <MessageSquareText size={16} /> Select a project to open PM Chat
+          </div>
+        )}
       </div>
+
+      <Modal onClose={() => setShowMobileInfo(false)} open={showMobileInfo} title="Project Info">
+        <div className="modal-form">
+          {selectedProject ? infoPanel : <p className="empty-text">No project selected.</p>}
+          <div className="settings-actions">
+            <button className="secondary-btn" onClick={() => setShowMobileInfo(false)} type="button">
+              <span>Close</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </section>
   )
 }

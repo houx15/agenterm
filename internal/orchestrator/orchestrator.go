@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -1598,7 +1599,8 @@ func (o *Orchestrator) createOpenAIMessage(ctx context.Context, req anthropicReq
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL, bytes.NewReader(buf))
+	endpoint := normalizeOpenAIEndpoint(cfg.BaseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}
@@ -1615,7 +1617,7 @@ func (o *Orchestrator) createOpenAIMessage(ctx context.Context, req anthropicReq
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("openai api status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("openai api status=%d endpoint=%s body=%s", resp.StatusCode, endpoint, strings.TrimSpace(string(body)))
 	}
 
 	var out openAIResponse
@@ -1648,6 +1650,35 @@ func (o *Orchestrator) createOpenAIMessage(ctx context.Context, req anthropicReq
 		})
 	}
 	return &anthropicResponse{Content: blocks}, nil
+}
+
+func normalizeOpenAIEndpoint(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultOpenAIURL
+	}
+	if strings.HasSuffix(trimmed, "/chat/completions") || strings.HasSuffix(trimmed, "/responses") {
+		return trimmed
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		if strings.HasSuffix(trimmed, "/v1") {
+			return trimmed + "/chat/completions"
+		}
+		return strings.TrimRight(trimmed, "/") + "/v1/chat/completions"
+	}
+
+	path := strings.TrimRight(parsed.Path, "/")
+	switch {
+	case path == "":
+		parsed.Path = "/v1/chat/completions"
+	case path == "/v1":
+		parsed.Path = "/v1/chat/completions"
+	default:
+		parsed.Path = path + "/chat/completions"
+	}
+	return parsed.String()
 }
 
 func toOpenAITools(input []map[string]any) []openAITool {

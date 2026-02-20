@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { listDirectories } from '../api/client'
 import type { AgentConfig, Playbook } from '../api/types'
 import Modal from './Modal'
 
@@ -22,8 +23,10 @@ interface CreateProjectModalProps {
   onSubmit: (values: CreateProjectValues) => Promise<void> | void
 }
 
-interface DirectoryPickerWindow extends Window {
-  showDirectoryPicker?: () => Promise<{ name?: string }>
+interface BrowseState {
+  path: string
+  parent?: string
+  directories: Array<{ name: string; path: string }>
 }
 
 export default function CreateProjectModal({
@@ -35,7 +38,6 @@ export default function CreateProjectModal({
   onClose,
   onSubmit,
 }: CreateProjectModalProps) {
-  const folderInputRef = useRef<HTMLInputElement | null>(null)
   const [name, setName] = useState('')
   const [repoPath, setRepoPath] = useState('')
   const [orchestratorAgentID, setOrchestratorAgentID] = useState('')
@@ -43,6 +45,11 @@ export default function CreateProjectModal({
   const [playbook, setPlaybook] = useState('')
   const [workers, setWorkers] = useState(2)
   const [error, setError] = useState('')
+  const [browseOpen, setBrowseOpen] = useState(false)
+  const [browsePathInput, setBrowsePathInput] = useState('')
+  const [browseState, setBrowseState] = useState<BrowseState | null>(null)
+  const [browseBusy, setBrowseBusy] = useState(false)
+  const [browseError, setBrowseError] = useState('')
   const orchestratorAgents = useMemo(() => agents.filter((item) => item.supports_orchestrator), [agents])
 
   const defaultPlaybook = useMemo(() => playbooks[0]?.id ?? '', [playbooks])
@@ -64,37 +71,42 @@ export default function CreateProjectModal({
     const selected = orchestratorAgents.find((item) => item.id === defaultOrchestratorAgentID)
     setOrchestratorModel((selected?.model || '').trim() || defaultModel)
     setWorkers(2)
+    setBrowseOpen(false)
+    setBrowsePathInput('')
+    setBrowseState(null)
+    setBrowseBusy(false)
+    setBrowseError('')
   }, [defaultModel, defaultOrchestratorAgentID, defaultPlaybook, open, orchestratorAgents])
 
-  useEffect(() => {
-    if (!folderInputRef.current) {
-      return
+  const loadBrowsePath = async (path?: string) => {
+    setBrowseBusy(true)
+    setBrowseError('')
+    try {
+      const next = await listDirectories(path)
+      setBrowseState(next)
+      setBrowsePathInput(next.path)
+    } catch (err) {
+      setBrowseError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBrowseBusy(false)
     }
-    const input = folderInputRef.current as HTMLInputElement & {
-      webkitdirectory?: boolean
-      directory?: boolean
-    }
-    input.webkitdirectory = true
-    input.directory = true
-  }, [])
+  }
 
-  const pickFolder = async () => {
-    const pickerWindow = window as DirectoryPickerWindow
-    if (pickerWindow.showDirectoryPicker) {
-      try {
-        const handle = await pickerWindow.showDirectoryPicker()
-        if (handle?.name) {
-          setRepoPath((prev) => prev || handle.name || '')
-          if (!name) {
-            setName(handle.name || '')
-          }
-        }
-        return
-      } catch {
-        // fall back to input picker
+  const openBrowse = async () => {
+    setBrowseOpen(true)
+    await loadBrowsePath(repoPath.trim() || undefined)
+  }
+
+  const selectDirectory = (path: string) => {
+    setRepoPath(path)
+    if (!name) {
+      const segments = path.split(/[\\/]/).filter(Boolean)
+      if (segments.length > 0) {
+        setName(segments[segments.length - 1])
       }
     }
-    folderInputRef.current?.click()
+    setBrowseOpen(false)
+    setBrowseError('')
   }
 
   const submit = async () => {
@@ -132,33 +144,64 @@ export default function CreateProjectModal({
               placeholder="/Users/you/code/my-project"
               value={repoPath}
             />
-            <button className="secondary-btn" onClick={() => void pickFolder()} type="button">
+            <button className="secondary-btn" onClick={() => void openBrowse()} type="button">
               Browse
             </button>
           </div>
-          <input
-            className="sr-only"
-            onChange={(event) => {
-              const file = event.target.files?.[0] as (File & { path?: string }) | undefined
-              const fallbackName = file?.webkitRelativePath?.split('/')[0] ?? ''
-              const picked = (file?.path || '').trim()
-              if (picked) {
-                setRepoPath(picked)
-                if (!name) {
-                  const segments = picked.split(/[\\/]/).filter(Boolean)
-                  setName(segments[segments.length - 1] ?? '')
-                }
-              } else if (fallbackName) {
-                setRepoPath((prev) => prev || fallbackName)
-                if (!name) {
-                  setName(fallbackName)
-                }
-              }
-            }}
-            ref={folderInputRef}
-            type="file"
-          />
         </label>
+        {browseOpen && (
+          <div className="folder-browser">
+            <div className="folder-browser-path-row">
+              <input
+                onChange={(event) => setBrowsePathInput(event.target.value)}
+                placeholder="/Users/you"
+                value={browsePathInput}
+              />
+              <button
+                className="secondary-btn"
+                disabled={browseBusy}
+                onClick={() => void loadBrowsePath(browsePathInput)}
+                type="button"
+              >
+                Open
+              </button>
+              <button
+                className="secondary-btn"
+                disabled={browseBusy || !browseState?.parent}
+                onClick={() => void loadBrowsePath(browseState?.parent)}
+                type="button"
+              >
+                Up
+              </button>
+            </div>
+            {browseBusy ? (
+              <p className="folder-browser-hint">Loading folders...</p>
+            ) : browseState ? (
+              <>
+                <p className="folder-browser-hint">Current: {browseState.path}</p>
+                <div className="folder-browser-actions">
+                  <button className="secondary-btn" onClick={() => selectDirectory(browseState.path)} type="button">
+                    Use This Folder
+                  </button>
+                </div>
+                <div className="folder-browser-list">
+                  {browseState.directories.map((dir) => (
+                    <button
+                      className="folder-browser-item"
+                      key={dir.path}
+                      onClick={() => void loadBrowsePath(dir.path)}
+                      type="button"
+                    >
+                      {dir.name}
+                    </button>
+                  ))}
+                  {browseState.directories.length === 0 && <p className="folder-browser-hint">No subfolders</p>}
+                </div>
+              </>
+            ) : null}
+            {browseError && <p className="dashboard-error">{browseError}</p>}
+          </div>
+        )}
 
         <label className="settings-field">
           <span>Orchestrator Agent</span>

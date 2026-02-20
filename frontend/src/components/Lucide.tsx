@@ -114,6 +114,14 @@ export function ChevronRight({ size, ...props }: IconProps) {
   )
 }
 
+export function ChevronDown({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <polyline points="6 9 12 15 18 9" />
+    </IconBase>
+  )
+}
+
 export function FolderOpen({ size, ...props }: IconProps) {
   return (
     <IconBase size={size} {...props}>

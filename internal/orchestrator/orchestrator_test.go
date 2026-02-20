@@ -219,6 +219,27 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 	t.Fatalf("expected orchestrator history to be written by trigger")
 }
 
+func TestNormalizeOpenAIEndpoint(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: defaultOpenAIURL},
+		{in: "https://api.openai.com", want: "https://api.openai.com/v1/chat/completions"},
+		{in: "https://api.openai.com/v1", want: "https://api.openai.com/v1/chat/completions"},
+		{in: "https://api.openai.com/v1/chat/completions", want: "https://api.openai.com/v1/chat/completions"},
+		{in: "https://example.com/openai", want: "https://example.com/openai/chat/completions"},
+		{in: "https://example.com/v1/responses", want: "https://example.com/v1/responses"},
+	}
+
+	for _, tc := range cases {
+		got := normalizeOpenAIEndpoint(tc.in)
+		if got != tc.want {
+			t.Fatalf("normalizeOpenAIEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestLoadHistoryRestoresStructuredToolContext(t *testing.T) {
 	database := openOrchestratorTestDB(t)
 	projectRepo := db.NewProjectRepo(database.SQL())

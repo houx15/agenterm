@@ -7,6 +7,17 @@ export interface CreateProjectInput {
   status?: string
 }
 
+export interface DirectoryEntry {
+  name: string
+  path: string
+}
+
+export interface ListDirectoriesResponse {
+  path: string
+  parent?: string
+  directories: DirectoryEntry[]
+}
+
 export function getToken(): string {
   const urlToken = new URLSearchParams(window.location.search).get('token')
   if (urlToken) {
@@ -82,6 +93,15 @@ export function createProject<T>(input: CreateProjectInput) {
     method: 'POST',
     body: JSON.stringify(input),
   })
+}
+
+export function listDirectories<T = ListDirectoriesResponse>(path?: string) {
+  const search = new URLSearchParams()
+  if (path && path.trim()) {
+    search.set('path', path.trim())
+  }
+  const query = search.toString()
+  return apiFetch<T>(query ? `/api/fs/directories?${query}` : '/api/fs/directories')
 }
 
 export interface UpdateProjectOrchestratorInput {
