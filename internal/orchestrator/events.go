@@ -23,6 +23,10 @@ type EventTrigger struct {
 
 	mu         sync.Mutex
 	lastStatus map[string]string
+
+	idleMu          sync.Mutex
+	idleInFlight    map[string]bool
+	idleLastTrigger map[string]time.Time
 }
 
 func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.TaskRepo, projectRepo *db.ProjectRepo, worktreeRepo *db.WorktreeRepo) *EventTrigger {
@@ -33,6 +37,8 @@ func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.
 		projectRepo:  projectRepo,
 		worktreeRepo: worktreeRepo,
 		lastStatus:   make(map[string]string),
+		idleInFlight: make(map[string]bool),
+		idleLastTrigger: make(map[string]time.Time),
 	}
 }
 
@@ -41,6 +47,15 @@ func (et *EventTrigger) SetOnEvent(fn func(projectID string, event string, data 
 }
 
 func (et *EventTrigger) OnSessionIdle(sessionID string) {
+	projectID := et.projectIDForSession(sessionID)
+	if projectID == "" {
+		return
+	}
+	if !et.beginIdleDispatch(projectID) {
+		return
+	}
+	defer et.endIdleDispatch(projectID)
+
 	et.emitProjectPhaseEventForSession(sessionID, "dispatch")
 	et.emitForSession(sessionID, fmt.Sprintf("Session %s is idle. Evaluate whether to dispatch next tasks or request review.", sessionID))
 }
@@ -57,7 +72,12 @@ func (et *EventTrigger) OnTimer(projectID string) {
 		return
 	}
 	et.emitEvent(projectID, "project_phase_changed", map[string]any{"phase": "status_check", "source": "timer"})
-	drain(ch)
+	summary := collectStreamSummary(ch)
+	et.emitEvent(projectID, "orchestrator_timer_summary", map[string]any{
+		"text":       summary.Text,
+		"tool_calls": summary.ToolCalls,
+		"errors":     summary.Errors,
+	})
 	report, reportErr := et.orchestrator.GenerateProgressReport(ctx, projectID)
 	if reportErr == nil {
 		if blockers, ok := report["blockers"].([]any); ok && len(blockers) > 0 {
@@ -154,13 +174,43 @@ func (et *EventTrigger) emitForSession(sessionID string, syntheticMessage string
 		return
 	}
 	et.emitEvent(task.ProjectID, "orchestrator_trigger_started", map[string]any{"session_id": sessionID, "message": syntheticMessage})
-	drain(ch)
+	summary := collectStreamSummary(ch)
+	et.emitEvent(task.ProjectID, "orchestrator_trigger_summary", map[string]any{
+		"session_id": sessionID,
+		"text":       summary.Text,
+		"tool_calls": summary.ToolCalls,
+		"errors":     summary.Errors,
+	})
 	et.emitEvent(task.ProjectID, "orchestrator_trigger_completed", map[string]any{"session_id": sessionID})
 }
 
-func drain(ch <-chan StreamEvent) {
-	for range ch {
+type streamSummary struct {
+	Text      string
+	ToolCalls int
+	Errors    []string
+}
+
+func collectStreamSummary(ch <-chan StreamEvent) streamSummary {
+	var summary streamSummary
+	textParts := make([]string, 0, 8)
+	for evt := range ch {
+		switch evt.Type {
+		case "token":
+			if text := strings.TrimSpace(evt.Text); text != "" {
+				textParts = append(textParts, text)
+			}
+		case "tool_call":
+			summary.ToolCalls++
+		case "error":
+			if msg := strings.TrimSpace(evt.Error); msg != "" {
+				summary.Errors = append(summary.Errors, msg)
+			}
+		}
 	}
+	if len(textParts) > 0 {
+		summary.Text = strings.TrimSpace(strings.Join(textParts, "\n"))
+	}
+	return summary
 }
 
 func (et *EventTrigger) emitEvent(projectID string, event string, data map[string]any) {
@@ -239,4 +289,50 @@ func (et *EventTrigger) shouldNotifyOnBlocked(ctx context.Context, projectID str
 		return true
 	}
 	return profile.NotifyOnBlocked
+}
+
+func (et *EventTrigger) projectIDForSession(sessionID string) string {
+	if et == nil || et.sessionRepo == nil || et.taskRepo == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	sess, err := et.sessionRepo.Get(ctx, sessionID)
+	if err != nil || sess == nil {
+		return ""
+	}
+	task, err := et.taskRepo.Get(ctx, sess.TaskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return strings.TrimSpace(task.ProjectID)
+}
+
+func (et *EventTrigger) beginIdleDispatch(projectID string) bool {
+	projectID = strings.TrimSpace(projectID)
+	if et == nil || projectID == "" {
+		return false
+	}
+	et.idleMu.Lock()
+	defer et.idleMu.Unlock()
+	if et.idleInFlight[projectID] {
+		return false
+	}
+	const minInterval = 3 * time.Second
+	if last, ok := et.idleLastTrigger[projectID]; ok && time.Since(last) < minInterval {
+		return false
+	}
+	et.idleInFlight[projectID] = true
+	et.idleLastTrigger[projectID] = time.Now()
+	return true
+}
+
+func (et *EventTrigger) endIdleDispatch(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if et == nil || projectID == "" {
+		return
+	}
+	et.idleMu.Lock()
+	delete(et.idleInFlight, projectID)
+	et.idleMu.Unlock()
 }

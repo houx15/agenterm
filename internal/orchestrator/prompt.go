@@ -79,29 +79,29 @@ func roleCatalog(stage PlaybookStage) string {
 
 func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook) string {
 	var b strings.Builder
-	b.WriteString("You are the AgenTerm Orchestrator, an AI project manager.\\n")
-	b.WriteString("You decompose requests into actionable tasks, prefer safe parallel execution, and report clearly.\\n\\n")
-	b.WriteString("Rules:\\n")
-	b.WriteString("1) Never send commands to sessions in status human_takeover.\\n")
-	b.WriteString("2) Prefer parallelizable task decomposition when dependencies allow.\\n")
-	b.WriteString("3) Use tools for every state-changing action.\\n")
-	b.WriteString("4) Keep actions bounded and avoid runaway loops.\\n")
-	b.WriteString("5) Explain intent before major actions and summarize outcomes.\\n\\n")
-	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\\n")
-	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\\n\\n")
-	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\\n")
-	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\\n\\n")
+	b.WriteString("You are the AgenTerm Orchestrator, an AI project manager.\n")
+	b.WriteString("You decompose requests into actionable tasks, prefer safe parallel execution, and report clearly.\n\n")
+	b.WriteString("Rules:\n")
+	b.WriteString("1) Never send commands to sessions in status human_takeover.\n")
+	b.WriteString("2) Prefer parallelizable task decomposition when dependencies allow.\n")
+	b.WriteString("3) Use tools for every state-changing action.\n")
+	b.WriteString("4) Keep actions bounded and avoid runaway loops.\n")
+	b.WriteString("5) Explain intent before major actions and summarize outcomes.\n\n")
+	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\n")
+	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\n\n")
+	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\n")
+	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
-		b.WriteString(block + "\\n\\n")
+		b.WriteString(block + "\n\n")
 	}
 
 	if projectState == nil || projectState.Project == nil {
-		b.WriteString("Current project state: unavailable.\\n")
+		b.WriteString("Current project state: unavailable.\n")
 	} else {
-		b.WriteString(fmt.Sprintf("Project: %s (%s)\\n", projectState.Project.Name, projectState.Project.ID))
-		b.WriteString(fmt.Sprintf("Repo: %s\\n", projectState.Project.RepoPath))
-		b.WriteString(fmt.Sprintf("Status: %s\\n", projectState.Project.Status))
-		b.WriteString(fmt.Sprintf("Tasks: %d | Worktrees: %d | Sessions: %d\\n", len(projectState.Tasks), len(projectState.Worktrees), len(projectState.Sessions)))
+		b.WriteString(fmt.Sprintf("Project: %s (%s)\n", projectState.Project.Name, projectState.Project.ID))
+		b.WriteString(fmt.Sprintf("Repo: %s\n", projectState.Project.RepoPath))
+		b.WriteString(fmt.Sprintf("Status: %s\n", projectState.Project.Status))
+		b.WriteString(fmt.Sprintf("Tasks: %d | Worktrees: %d | Sessions: %d\n", len(projectState.Tasks), len(projectState.Worktrees), len(projectState.Sessions)))
 
 		statusCounts := map[string]int{}
 		for _, t := range projectState.Tasks {
@@ -117,14 +117,14 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 			for _, k := range keys {
 				parts = append(parts, fmt.Sprintf("%s=%d", k, statusCounts[k]))
 			}
-			b.WriteString("Task statuses: " + strings.Join(parts, ", ") + "\\n")
+			b.WriteString("Task statuses: " + strings.Join(parts, ", ") + "\n")
 		}
-		b.WriteString("\\n")
+		b.WriteString("\n")
 	}
 
-	b.WriteString("Available agents:\\n")
+	b.WriteString("Available agents:\n")
 	if len(agents) == 0 {
-		b.WriteString("- none\\n")
+		b.WriteString("- none\n")
 	} else {
 		for _, a := range agents {
 			line := fmt.Sprintf("- %s (%s): model=%s, max_parallel=%d, speed=%s, cost=%s",
@@ -139,22 +139,22 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 			if len(a.Languages) > 0 {
 				line += ", languages=" + strings.Join(a.Languages, "/")
 			}
-			b.WriteString(line + "\\n")
+			b.WriteString(line + "\n")
 		}
 	}
-	b.WriteString("\\n")
+	b.WriteString("\n")
 
 	if playbook != nil {
-		b.WriteString(fmt.Sprintf("Matched playbook: %s (%s)\\n", playbook.Name, playbook.ID))
-		b.WriteString("Workflow stages:\\n")
-		b.WriteString("- plan: " + roleCatalog(playbook.Workflow.Plan) + "\\n")
-		b.WriteString("- build: " + roleCatalog(playbook.Workflow.Build) + "\\n")
-		b.WriteString("- test: " + roleCatalog(playbook.Workflow.Test) + "\\n")
+		b.WriteString(fmt.Sprintf("Matched playbook: %s (%s)\n", playbook.Name, playbook.ID))
+		b.WriteString("Workflow stages:\n")
+		b.WriteString("- plan: " + roleCatalog(playbook.Workflow.Plan) + "\n")
+		b.WriteString("- build: " + roleCatalog(playbook.Workflow.Build) + "\n")
+		b.WriteString("- test: " + roleCatalog(playbook.Workflow.Test) + "\n")
 		if strings.TrimSpace(playbook.Strategy) != "" {
-			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\\n")
+			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\n")
 		}
 	} else {
-		b.WriteString("Matched playbook: none\\n")
+		b.WriteString("Matched playbook: none\n")
 	}
 
 	return b.String()

@@ -22,6 +22,7 @@ const (
 	defaultOpenAIModel       = "gpt-4o-mini"
 	defaultAnthropicURL      = "https://api.anthropic.com/v1/messages"
 	defaultOpenAIURL         = "https://api.openai.com/v1/chat/completions"
+	defaultMaxTokens         = 4096
 	defaultMaxToolRounds     = 10
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
@@ -97,6 +98,9 @@ type Orchestrator struct {
 
 	roleLoopMu       sync.Mutex
 	roleLoopAttempts map[string]map[string]int
+
+	projectChatMu    sync.Mutex
+	projectChatLocks map[string]*sync.Mutex
 }
 
 type CommandLedgerEntry struct {
@@ -181,6 +185,7 @@ func New(opts Options) *Orchestrator {
 		sessionCommandLock:      make(map[string]*sync.Mutex),
 		commandLedger:           make([]CommandLedgerEntry, 0, 64),
 		roleLoopAttempts:        make(map[string]map[string]int),
+		projectChatLocks:        make(map[string]*sync.Mutex),
 	}
 }
 
@@ -198,9 +203,12 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	if strings.TrimSpace(userMessage) == "" {
 		return nil, fmt.Errorf("message is required")
 	}
+	projectID = strings.TrimSpace(projectID)
+	unlock := o.lockProjectChat(projectID)
 
 	state, err := o.loadProjectState(ctx, projectID)
 	if err != nil {
+		unlock()
 		return nil, err
 	}
 	agents := []*registry.AgentConfig{}
@@ -209,6 +217,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	}
 	llmCfg, err := o.resolveLLMConfig(ctx, projectID, agents)
 	if err != nil {
+		unlock()
 		return nil, err
 	}
 	approval := evaluateApprovalGate(userMessage)
@@ -257,13 +266,14 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 
 	ch := make(chan StreamEvent, 32)
 	go func() {
+		defer unlock()
 		defer close(ch)
 		finalTexts := make([]string, 0, 4)
 
 		for round := 0; round < o.maxToolRounds; round++ {
 			resp, err := o.createMessage(ctx, anthropicRequest{
 				Model:     llmCfg.Model,
-				MaxTokens: 1024,
+				MaxTokens: defaultMaxTokens,
 				System:    systemPrompt,
 				Tools:     o.toolset.JSONSchemas(),
 				Messages:  messages,
@@ -357,6 +367,27 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	}()
 
 	return ch, nil
+}
+
+func (o *Orchestrator) lockProjectChat(projectID string) func() {
+	if o == nil {
+		return func() {}
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return func() {}
+	}
+	o.projectChatMu.Lock()
+	lock := o.projectChatLocks[projectID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		o.projectChatLocks[projectID] = lock
+	}
+	o.projectChatMu.Unlock()
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+	}
 }
 
 type approvalGate struct {
