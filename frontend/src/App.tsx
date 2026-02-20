@@ -9,7 +9,6 @@ import PMChat from './pages/PMChat'
 import ProjectDetail from './pages/ProjectDetail'
 import Sessions from './pages/Sessions'
 import Settings from './pages/Settings'
-import DemandPool from './pages/DemandPool'
 
 interface AppContextValue {
   token: string
@@ -32,7 +31,6 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       { path: 'pm-chat', element: <PMChat /> },
-      { path: 'demand-pool', element: <DemandPool /> },
       { path: 'projects/:projectId', element: <ProjectDetail /> },
       { path: 'sessions', element: <Sessions /> },
       { path: 'settings', element: <Settings /> },

@@ -8,6 +8,7 @@ import type { MessageTaskLink, SessionMessage } from '../components/ChatMessage'
 import { ChevronLeft, ChevronRight, FolderOpen, MessageSquareText } from '../components/Lucide'
 import TaskDAG from '../components/TaskDAG'
 import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
+import DemandPool from './DemandPool'
 
 function shouldRefreshFromOrchestratorEvent(event: OrchestratorServerMessage | null): boolean {
   if (!event) {
@@ -33,6 +34,7 @@ export default function PMChat() {
   const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
   const [reportError, setReportError] = useState('')
+  const [activePane, setActivePane] = useState<'execution' | 'demand'>('execution')
 
   const [projectID, setProjectID] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '')
 
@@ -294,12 +296,30 @@ export default function PMChat() {
               </button>
             )}
             <h2>{selectedProject?.name ?? 'PM Chat'}</h2>
+            {selectedProject && (
+              <div className="pm-pane-toggle">
+                <button
+                  className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
+                  onClick={() => setActivePane('execution')}
+                  type="button"
+                >
+                  Execution
+                </button>
+                <button
+                  className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
+                  onClick={() => setActivePane('demand')}
+                  type="button"
+                >
+                  Demand Pool
+                </button>
+              </div>
+            )}
           </div>
 
           {loading && <p className="empty-view">Loading PM chat context...</p>}
           {error && <p className="dashboard-error">{error}</p>}
 
-          {!loading && !error && selectedProject && (
+          {!loading && !error && selectedProject && activePane === 'execution' && (
             <>
               <section className="pm-report-panel">
                 <div className="pm-panel-header">
@@ -385,6 +405,10 @@ export default function PMChat() {
                 />
               </div>
             </>
+          )}
+
+          {!loading && !error && selectedProject && activePane === 'demand' && (
+            <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
           )}
 
           {!loading && !error && !selectedProject && (

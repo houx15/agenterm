@@ -846,6 +846,11 @@ textarea {
   margin: 0;
 }
 
+.pm-pane-toggle {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
 .pm-project-detail {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1418,6 +1423,10 @@ textarea {
 .demand-page {
   display: grid;
   gap: 0.8rem;
+}
+
+.demand-page-embedded {
+  padding: 0;
 }
 
 .demand-header {

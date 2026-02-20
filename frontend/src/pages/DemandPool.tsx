@@ -15,6 +15,12 @@ import {
 import type { DemandPoolItem, DemandPoolStatus, OrchestratorHistoryMessage, Project } from '../api/types'
 import Modal from '../components/Modal'
 
+interface DemandPoolProps {
+  projectID?: string
+  projectName?: string
+  embedded?: boolean
+}
+
 type EditableDemandFields = Pick<DemandPoolItem, 'title' | 'description' | 'status' | 'priority' | 'impact' | 'effort' | 'risk' | 'urgency' | 'notes'>
 
 const STATUS_OPTIONS: DemandPoolStatus[] = ['captured', 'triaged', 'shortlisted', 'scheduled', 'done', 'rejected']
@@ -42,9 +48,9 @@ function tagsToText(tags: string[]): string {
   return tags.join(', ')
 }
 
-export default function DemandPool() {
+export default function DemandPool({ projectID: pinnedProjectID = '', projectName, embedded = false }: DemandPoolProps) {
   const [projects, setProjects] = useState<Project[]>([])
-  const [projectID, setProjectID] = useState('')
+  const [projectID, setProjectID] = useState(pinnedProjectID)
   const [items, setItems] = useState<DemandPoolItem[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [queryFilter, setQueryFilter] = useState('')
@@ -65,6 +71,7 @@ export default function DemandPool() {
   const [digestSummary, setDigestSummary] = useState('')
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projects, projectID])
+  const resolvedProjectName = projectName || selectedProject?.name || 'selected project'
 
   const loadDemandItems = useCallback(async () => {
     if (!projectID) {
@@ -123,6 +130,16 @@ export default function DemandPool() {
   }, [projectID])
 
   useEffect(() => {
+    if (pinnedProjectID) {
+      setProjectID(pinnedProjectID)
+    }
+  }, [pinnedProjectID])
+
+  useEffect(() => {
+    if (pinnedProjectID) {
+      setProjects([])
+      return
+    }
     let cancelled = false
     const load = async () => {
       try {
@@ -151,7 +168,7 @@ export default function DemandPool() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [pinnedProjectID])
 
   useEffect(() => {
     void loadDemandItems()
@@ -400,10 +417,10 @@ export default function DemandPool() {
   }
 
   return (
-    <section className="page-block demand-page">
+    <section className={`${embedded ? 'demand-page demand-page-embedded' : 'page-block demand-page'}`.trim()}>
       <div className="demand-header">
         <div>
-          <h2>Demand Pool</h2>
+          {embedded ? <h3>Demand Pool</h3> : <h2>Demand Pool</h2>}
           <p>Capture ideas and prioritize them separately from active development execution.</p>
         </div>
         <button className="primary-btn" onClick={openCreateModal} type="button">
@@ -413,16 +430,18 @@ export default function DemandPool() {
       </div>
 
       <div className="dashboard-section demand-controls">
-        <label>
-          <span>Project</span>
-          <select value={projectID} onChange={(event) => setProjectID(event.target.value)}>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!pinnedProjectID && (
+          <label>
+            <span>Project</span>
+            <select value={projectID} onChange={(event) => setProjectID(event.target.value)}>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           <span>Status</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
@@ -448,7 +467,7 @@ export default function DemandPool() {
         <label>
           <span>Quick Add</span>
           <input
-            placeholder={selectedProject ? `Add an idea for ${selectedProject.name}` : 'Add an idea'}
+            placeholder={projectID ? `Add an idea for ${resolvedProjectName}` : 'Select a project first'}
             value={quickTitle}
             onChange={(event) => setQuickTitle(event.target.value)}
           />
