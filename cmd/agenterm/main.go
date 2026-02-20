@@ -415,6 +415,7 @@ func main() {
 	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
 	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
 	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
+	roleLoopAttemptRepo := db.NewRoleLoopAttemptRepo(appDB.SQL())
 
 	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
 		Interval:     30 * time.Second,
@@ -542,6 +543,7 @@ func main() {
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
+		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
@@ -562,6 +564,7 @@ func main() {
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
+		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,

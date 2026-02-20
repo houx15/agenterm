@@ -268,6 +268,22 @@ CREATE INDEX IF NOT EXISTS idx_demand_pool_project_priority ON demand_pool_items
 ALTER TABLE orchestrator_messages ADD COLUMN message_json TEXT NOT NULL DEFAULT '';
 `,
 	},
+	{
+		version: 6,
+		name:    "create role loop attempts",
+		sql: `
+CREATE TABLE IF NOT EXISTS role_loop_attempts (
+	task_id TEXT NOT NULL,
+	role_name TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (task_id, role_name),
+	FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_role_loop_attempts_task_id ON role_loop_attempts(task_id);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

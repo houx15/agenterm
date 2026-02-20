@@ -138,6 +138,13 @@ type RoleBinding struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type RoleLoopAttempt struct {
+	TaskID    string    `json:"task_id"`
+	RoleName  string    `json:"role_name"`
+	Attempts  int       `json:"attempts"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type ProjectKnowledgeEntry struct {
 	ID        string    `json:"id"`
 	ProjectID string    `json:"project_id"`
