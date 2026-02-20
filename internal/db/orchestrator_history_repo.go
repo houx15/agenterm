@@ -8,11 +8,12 @@ import (
 )
 
 type OrchestratorMessage struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
+	ID          string `json:"id"`
+	ProjectID   string `json:"project_id"`
+	Role        string `json:"role"`
+	Content     string `json:"content"`
+	MessageJSON string `json:"message_json,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type OrchestratorHistoryRepo struct {
@@ -50,9 +51,9 @@ func (r *OrchestratorHistoryRepo) Create(ctx context.Context, msg *OrchestratorM
 		msg.CreatedAt = formatTimestamp(nowUTC())
 	}
 	_, err := r.db.ExecContext(ctx, `
-INSERT INTO orchestrator_messages (id, project_id, role, content, created_at)
-VALUES (?, ?, ?, ?, ?)
-`, msg.ID, msg.ProjectID, msg.Role, msg.Content, msg.CreatedAt)
+INSERT INTO orchestrator_messages (id, project_id, role, content, message_json, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`, msg.ID, msg.ProjectID, msg.Role, msg.Content, msg.MessageJSON, msg.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert orchestrator message: %w", err)
 	}
@@ -70,7 +71,7 @@ func (r *OrchestratorHistoryRepo) ListByProject(ctx context.Context, projectID s
 		limit = 50
 	}
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, project_id, role, content, created_at
+SELECT id, project_id, role, content, message_json, created_at
 FROM orchestrator_messages
 WHERE project_id = ?
 ORDER BY created_at DESC
@@ -84,7 +85,7 @@ LIMIT ?
 	items := make([]*OrchestratorMessage, 0)
 	for rows.Next() {
 		msg := &OrchestratorMessage{}
-		if err := rows.Scan(&msg.ID, &msg.ProjectID, &msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.ProjectID, &msg.Role, &msg.Content, &msg.MessageJSON, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan orchestrator message: %w", err)
 		}
 		items = append(items, msg)
@@ -124,7 +125,7 @@ func (r *OrchestratorHistoryRepo) ListByProjectAndRoles(ctx context.Context, pro
 		return r.ListByProject(ctx, projectID, limit)
 	}
 	query := `
-SELECT id, project_id, role, content, created_at
+SELECT id, project_id, role, content, message_json, created_at
 FROM orchestrator_messages
 WHERE project_id = ?
   AND role IN (` + placeholders(len(cleanRoles)) + `)
@@ -146,7 +147,7 @@ LIMIT ?
 	items := make([]*OrchestratorMessage, 0)
 	for rows.Next() {
 		msg := &OrchestratorMessage{}
-		if err := rows.Scan(&msg.ID, &msg.ProjectID, &msg.Role, &msg.Content, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.ProjectID, &msg.Role, &msg.Content, &msg.MessageJSON, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan orchestrator message: %w", err)
 		}
 		items = append(items, msg)

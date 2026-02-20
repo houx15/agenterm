@@ -254,21 +254,17 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		}
 	}
 	history := o.loadHistory(ctx, projectID)
-	messages := append(history, anthropicMessage{Role: "user", Content: []anthropicContentBlock{{Type: "text", Text: userMessage}}})
+	userMsg := anthropicMessage{Role: "user", Content: []anthropicContentBlock{{Type: "text", Text: userMessage}}}
+	messages := append(history, userMsg)
 
 	if o.historyRepo != nil {
-		_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{
-			ProjectID: projectID,
-			Role:      o.storageRole("user"),
-			Content:   userMessage,
-		})
+		_ = o.persistHistoryMessage(ctx, projectID, userMsg)
 	}
 
 	ch := make(chan StreamEvent, 32)
 	go func() {
 		defer unlock()
 		defer close(ch)
-		finalTexts := make([]string, 0, 4)
 
 		for round := 0; round < o.maxToolRounds; round++ {
 			resp, err := o.createMessage(ctx, anthropicRequest{
@@ -285,6 +281,9 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 
 			assistantMsg := anthropicMessage{Role: "assistant", Content: resp.Content}
 			messages = append(messages, assistantMsg)
+			if o.historyRepo != nil {
+				_ = o.persistHistoryMessage(ctx, projectID, assistantMsg)
+			}
 
 			toolUsed := false
 			for _, block := range resp.Content {
@@ -292,7 +291,6 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 				case "text":
 					text := strings.TrimSpace(block.Text)
 					if text != "" {
-						finalTexts = append(finalTexts, text)
 						ch <- StreamEvent{Type: "token", Text: text}
 					}
 				case "tool_use":
@@ -313,6 +311,16 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 								Content:   toJSON(result),
 							}},
 						})
+						if o.historyRepo != nil {
+							_ = o.persistHistoryMessage(ctx, projectID, anthropicMessage{
+								Role: "user",
+								Content: []anthropicContentBlock{{
+									Type:      "tool_result",
+									ToolUseID: block.ID,
+									Content:   toJSON(result),
+								}},
+							})
+						}
 						continue
 					}
 					if block.Name == "create_session" {
@@ -328,6 +336,16 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 									Content:   toJSON(result),
 								}},
 							})
+							if o.historyRepo != nil {
+								_ = o.persistHistoryMessage(ctx, projectID, anthropicMessage{
+									Role: "user",
+									Content: []anthropicContentBlock{{
+										Type:      "tool_result",
+										ToolUseID: block.ID,
+										Content:   toJSON(result),
+									}},
+								})
+							}
 							continue
 						}
 					}
@@ -345,17 +363,21 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 							Content:   resultJSON,
 						}},
 					})
+					if o.historyRepo != nil {
+						_ = o.persistHistoryMessage(ctx, projectID, anthropicMessage{
+							Role: "user",
+							Content: []anthropicContentBlock{{
+								Type:      "tool_result",
+								ToolUseID: block.ID,
+								Content:   resultJSON,
+							}},
+						})
+					}
 				}
 			}
 
 			if !toolUsed {
-				final := strings.TrimSpace(strings.Join(finalTexts, "\n"))
-				if final != "" && o.historyRepo != nil {
-					_ = o.historyRepo.Create(ctx, &db.OrchestratorMessage{
-						ProjectID: projectID,
-						Role:      o.storageRole("assistant"),
-						Content:   final,
-					})
+				if o.historyRepo != nil {
 					_ = o.historyRepo.TrimProjectAndRoles(ctx, projectID, o.maxHistory, o.storageRoles())
 				}
 				ch <- StreamEvent{Type: "done"}
@@ -587,12 +609,71 @@ func (o *Orchestrator) loadHistory(ctx context.Context, projectID string) []anth
 		if !ok {
 			continue
 		}
+		content := parseStoredMessageContent(item.MessageJSON, item.Content)
 		messages = append(messages, anthropicMessage{
 			Role:    role,
-			Content: []anthropicContentBlock{{Type: "text", Text: item.Content}},
+			Content: content,
 		})
 	}
 	return messages
+}
+
+func parseStoredMessageContent(rawJSON string, fallbackText string) []anthropicContentBlock {
+	rawJSON = strings.TrimSpace(rawJSON)
+	if rawJSON != "" {
+		var blocks []anthropicContentBlock
+		if err := json.Unmarshal([]byte(rawJSON), &blocks); err == nil && len(blocks) > 0 {
+			return blocks
+		}
+	}
+	if strings.TrimSpace(fallbackText) == "" {
+		return []anthropicContentBlock{{Type: "text", Text: "[empty]"}}
+	}
+	return []anthropicContentBlock{{Type: "text", Text: fallbackText}}
+}
+
+func (o *Orchestrator) persistHistoryMessage(ctx context.Context, projectID string, msg anthropicMessage) error {
+	if o == nil || o.historyRepo == nil || strings.TrimSpace(projectID) == "" {
+		return nil
+	}
+	raw, err := json.Marshal(msg.Content)
+	if err != nil {
+		return err
+	}
+	return o.historyRepo.Create(ctx, &db.OrchestratorMessage{
+		ProjectID:   projectID,
+		Role:        o.storageRole(msg.Role),
+		Content:     summarizeHistoryContent(msg.Content),
+		MessageJSON: string(raw),
+	})
+}
+
+func summarizeHistoryContent(blocks []anthropicContentBlock) string {
+	texts := make([]string, 0, 2)
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				texts = append(texts, text)
+			}
+		case "tool_use":
+			name := strings.TrimSpace(block.Name)
+			if name == "" {
+				name = "unknown"
+			}
+			texts = append(texts, "[tool_use:"+name+"]")
+		case "tool_result":
+			snippet := truncate(strings.TrimSpace(block.Content), 120)
+			if snippet == "" {
+				snippet = "ok"
+			}
+			texts = append(texts, "[tool_result:"+snippet+"]")
+		}
+	}
+	if len(texts) == 0 {
+		return "[structured message]"
+	}
+	return strings.Join(texts, "\n")
 }
 
 func (o *Orchestrator) ListHistory(ctx context.Context, projectID string, limit int) ([]*db.OrchestratorMessage, error) {

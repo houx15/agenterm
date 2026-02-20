@@ -261,6 +261,13 @@ CREATE INDEX IF NOT EXISTS idx_demand_pool_status ON demand_pool_items(status);
 CREATE INDEX IF NOT EXISTS idx_demand_pool_project_priority ON demand_pool_items(project_id, priority DESC, created_at DESC);
 `,
 	},
+	{
+		version: 5,
+		name:    "add structured orchestrator history payload",
+		sql: `
+ALTER TABLE orchestrator_messages ADD COLUMN message_json TEXT NOT NULL DEFAULT '';
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

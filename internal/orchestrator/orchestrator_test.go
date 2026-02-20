@@ -219,6 +219,47 @@ func TestEventTriggerOnSessionIdle(t *testing.T) {
 	t.Fatalf("expected orchestrator history to be written by trigger")
 }
 
+func TestLoadHistoryRestoresStructuredToolContext(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	historyRepo := db.NewOrchestratorHistoryRepo(database.SQL())
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	assistantJSON := `[{"type":"tool_use","id":"tu-1","name":"create_task","input":{"title":"A"}}]`
+	toolResultJSON := `[{"type":"tool_result","tool_use_id":"tu-1","content":"{\"ok\":true}"}]`
+	if err := historyRepo.Create(context.Background(), &db.OrchestratorMessage{
+		ProjectID:   project.ID,
+		Role:        "assistant",
+		Content:     "[tool_use:create_task]",
+		MessageJSON: assistantJSON,
+	}); err != nil {
+		t.Fatalf("create assistant history: %v", err)
+	}
+	if err := historyRepo.Create(context.Background(), &db.OrchestratorMessage{
+		ProjectID:   project.ID,
+		Role:        "user",
+		Content:     "[tool_result]",
+		MessageJSON: toolResultJSON,
+	}); err != nil {
+		t.Fatalf("create tool_result history: %v", err)
+	}
+
+	o := New(Options{HistoryRepo: historyRepo})
+	msgs := o.loadHistory(context.Background(), project.ID)
+	if len(msgs) != 2 {
+		t.Fatalf("messages len=%d want 2", len(msgs))
+	}
+	if len(msgs[0].Content) == 0 || msgs[0].Content[0].Type != "tool_use" {
+		t.Fatalf("first message should contain tool_use, got %+v", msgs[0].Content)
+	}
+	if len(msgs[1].Content) == 0 || msgs[1].Content[0].Type != "tool_result" {
+		t.Fatalf("second message should contain tool_result, got %+v", msgs[1].Content)
+	}
+}
+
 func TestExecuteToolRequiresExplicitSessionID(t *testing.T) {
 	o := New(Options{
 		Toolset: &Toolset{
