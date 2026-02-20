@@ -291,6 +291,71 @@ func (sm *Manager) GetOutput(ctx context.Context, sessionID string, since time.T
 	return handle.monitor.OutputSince(since), nil
 }
 
+type SessionReadyState struct {
+	Ready          bool      `json:"ready"`
+	Reason         string    `json:"reason"`
+	Status         string    `json:"status"`
+	LastActivityAt time.Time `json:"last_activity_at"`
+	PromptDetected bool      `json:"prompt_detected"`
+	ObservedOutput bool      `json:"observed_output"`
+	LastClass      string    `json:"last_class"`
+	LastText       string    `json:"last_text"`
+}
+
+func (sm *Manager) GetSessionReadyState(ctx context.Context, sessionID string) (SessionReadyState, error) {
+	session, err := sm.sessionRepo.Get(ctx, sessionID)
+	if err != nil {
+		return SessionReadyState{}, err
+	}
+	if session == nil {
+		return SessionReadyState{}, errNotFound("session")
+	}
+	if err := sm.ensureMonitorForSession(ctx, session); err != nil {
+		return SessionReadyState{}, err
+	}
+
+	sm.mu.RLock()
+	handle := sm.monitors[sessionID]
+	sm.mu.RUnlock()
+	if handle.monitor == nil {
+		return SessionReadyState{
+			Ready:          false,
+			Reason:         "monitor_unavailable",
+			Status:         session.Status,
+			LastActivityAt: session.LastActivityAt,
+		}, nil
+	}
+
+	monitorState := handle.monitor.ReadyState()
+	state := SessionReadyState{
+		Status:         session.Status,
+		LastActivityAt: session.LastActivityAt,
+		PromptDetected: monitorState.PromptDetected,
+		ObservedOutput: monitorState.ObservedOutput,
+		LastClass:      monitorState.LastClass,
+		LastText:       monitorState.LastText,
+	}
+	if monitorState.PromptDetected {
+		state.Ready = true
+		state.Reason = "prompt_detected"
+		return state, nil
+	}
+	if monitorState.ObservedOutput {
+		state.Ready = true
+		state.Reason = "output_observed"
+		return state, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(session.Status)) {
+	case "idle", "waiting_review", "human_takeover", "completed", "failed":
+		state.Ready = true
+		state.Reason = "status_" + strings.ToLower(strings.TrimSpace(session.Status))
+	default:
+		state.Ready = false
+		state.Reason = "booting"
+	}
+	return state, nil
+}
+
 func (sm *Manager) SetTakeover(ctx context.Context, sessionID string, takeover bool) error {
 	session, err := sm.sessionRepo.Get(ctx, sessionID)
 	if err != nil {

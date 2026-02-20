@@ -121,6 +121,28 @@ func (m *Monitor) OutputSince(since time.Time) []OutputEntry {
 	return m.buffer.Since(since)
 }
 
+type ReadyState struct {
+	PromptDetected bool   `json:"prompt_detected"`
+	ObservedOutput bool   `json:"observed_output"`
+	LastClass      string `json:"last_class"`
+	LastText       string `json:"last_text"`
+}
+
+func (m *Monitor) ReadyState() ReadyState {
+	if m == nil {
+		return ReadyState{}
+	}
+	hasOutput := len(m.buffer.Last(1)) > 0
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return ReadyState{
+		PromptDetected: m.lastClass == string(parser.ClassPrompt) && parser.PromptShellPattern.MatchString(strings.TrimSpace(m.lastText)),
+		ObservedOutput: hasOutput,
+		LastClass:      m.lastClass,
+		LastText:       m.lastText,
+	}
+}
+
 func (m *Monitor) IngestParsed(text string, class string, ts time.Time) {
 	text = strings.TrimSpace(text)
 	if text == "" {

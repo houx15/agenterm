@@ -24,6 +24,7 @@ const (
 	defaultOpenAIURL         = "https://api.openai.com/v1/chat/completions"
 	defaultMaxTokens         = 4096
 	defaultMaxToolRounds     = 10
+	defaultMaxIdlePollRounds = 240
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
 	maxCommandLedgerEntries  = 500
@@ -270,8 +271,19 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	go func() {
 		defer unlock()
 		defer close(ch)
+		actionRounds := 0
+		idlePollRounds := 0
+		sessionActionRounds := make(map[string]int)
 
-		for round := 0; round < o.maxToolRounds; round++ {
+		for {
+			if actionRounds >= o.maxToolRounds {
+				ch <- StreamEvent{Type: "error", Error: "max action rounds reached"}
+				return
+			}
+			if idlePollRounds >= defaultMaxIdlePollRounds {
+				ch <- StreamEvent{Type: "error", Error: "max idle poll rounds reached"}
+				return
+			}
 			resp, err := o.createMessage(ctx, anthropicRequest{
 				Model:     llmCfg.Model,
 				MaxTokens: defaultMaxTokens,
@@ -291,6 +303,8 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 			}
 
 			toolUsed := false
+			actionUsed := false
+			idleOnlyRound := true
 			for _, block := range resp.Content {
 				switch block.Type {
 				case "text":
@@ -300,6 +314,10 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 					}
 				case "tool_use":
 					toolUsed = true
+					if strings.TrimSpace(block.Name) != "is_session_idle" {
+						actionUsed = true
+						idleOnlyRound = false
+					}
 					ch <- StreamEvent{Type: "tool_call", Name: block.Name, Args: block.Input}
 					if isMutatingTool(block.Name) && !approval.Confirmed {
 						result := map[string]any{
@@ -354,6 +372,29 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 							continue
 						}
 					}
+					if strings.TrimSpace(block.Name) == "send_command" {
+						sessionID, _ := optionalString(block.Input, "session_id")
+						sessionID = strings.TrimSpace(sessionID)
+						if sessionID != "" {
+							sessionActionRounds[sessionID] = sessionActionRounds[sessionID] + 1
+							if sessionActionRounds[sessionID] > o.maxToolRounds {
+								result := map[string]any{
+									"error":  "session_round_limit_reached",
+									"reason": fmt.Sprintf("session %s reached max action rounds (%d) for this turn", sessionID, o.maxToolRounds),
+								}
+								ch <- StreamEvent{Type: "tool_result", Name: block.Name, Result: result}
+								messages = append(messages, anthropicMessage{
+									Role: "user",
+									Content: []anthropicContentBlock{{
+										Type:      "tool_result",
+										ToolUseID: block.ID,
+										Content:   toJSON(result),
+									}},
+								})
+								continue
+							}
+						}
+					}
 					result, err := o.executeTool(ctx, block.Name, block.Input)
 					if err != nil {
 						result = map[string]any{"error": err.Error()}
@@ -388,9 +429,13 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 				ch <- StreamEvent{Type: "done"}
 				return
 			}
+			if actionUsed {
+				actionRounds++
+			}
+			if idleOnlyRound {
+				idlePollRounds++
+			}
 		}
-
-		ch <- StreamEvent{Type: "error", Error: "max tool call rounds reached"}
 	}()
 
 	return ch, nil

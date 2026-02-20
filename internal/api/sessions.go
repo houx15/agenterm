@@ -365,12 +365,29 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	idle := session.Status == "idle" || session.Status == "waiting_review" || session.Status == "human_takeover"
+	status := strings.ToLower(strings.TrimSpace(session.Status))
+	idle := status == "idle"
 	jsonResponse(w, http.StatusOK, map[string]any{
 		"idle":          idle,
 		"last_activity": session.LastActivityAt,
 		"status":        session.Status,
+		"waiting_review": status == "waiting_review",
+		"human_takeover": status == "human_takeover",
 	})
+}
+
+func (h *handler) getSessionReady(w http.ResponseWriter, r *http.Request) {
+	if h.lifecycle == nil {
+		jsonError(w, http.StatusNotImplemented, "session lifecycle manager unavailable")
+		return
+	}
+	state, err := h.lifecycle.GetSessionReadyState(r.Context(), r.PathValue("id"))
+	if err != nil {
+		status, msg := mapSessionError(err)
+		jsonError(w, status, msg)
+		return
+	}
+	jsonResponse(w, http.StatusOK, state)
 }
 
 func (h *handler) getSessionCloseCheck(w http.ResponseWriter, r *http.Request) {

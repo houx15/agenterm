@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Param struct {
@@ -499,6 +500,51 @@ func defaultTools(client *RESTToolClient) []Tool {
 					return nil, err
 				}
 				return out, nil
+			},
+		},
+		{
+			Name:        "wait_for_session_ready",
+			Description: "Wait until a session appears ready to accept interactive prompts",
+			Parameters: map[string]Param{
+				"session_id":      {Type: "string", Description: "Session id", Required: true},
+				"timeout_seconds": {Type: "number", Description: "Max seconds to wait before timeout"},
+				"poll_ms":         {Type: "number", Description: "Polling interval in milliseconds"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := requiredString(args, "session_id")
+				if err != nil {
+					return nil, err
+				}
+				timeoutSeconds, _ := optionalInt(args, "timeout_seconds")
+				if timeoutSeconds <= 0 {
+					timeoutSeconds = 45
+				}
+				pollMS, _ := optionalInt(args, "poll_ms")
+				if pollMS <= 0 {
+					pollMS = 500
+				}
+				deadline := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
+				for {
+					var state map[string]any
+					if err := client.doJSON(ctx, http.MethodGet, "/api/sessions/"+sessionID+"/ready", nil, nil, &state); err != nil {
+						return nil, err
+					}
+					ready, _ := state["ready"].(bool)
+					if ready {
+						state["waited_ms"] = timeoutSeconds*1000 - int(time.Until(deadline)/time.Millisecond)
+						return state, nil
+					}
+					if time.Now().After(deadline) {
+						state["timeout"] = true
+						state["waited_ms"] = timeoutSeconds * 1000
+						return state, nil
+					}
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-time.After(time.Duration(pollMS) * time.Millisecond):
+					}
+				}
 			},
 		},
 		{

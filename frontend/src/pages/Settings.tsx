@@ -745,7 +745,12 @@ export default function Settings() {
             </label>
             <label>
               Command
-              <input value={agentDraft.command} onChange={(event) => setAgentDraft((prev) => ({ ...prev, command: event.target.value }))} />
+              <textarea
+                rows={3}
+                value={agentDraft.command}
+                placeholder={`claude --dangerously-skip-permissions\n# or multiline bootstrap commands`}
+                onChange={(event) => setAgentDraft((prev) => ({ ...prev, command: event.target.value }))}
+              />
             </label>
             <label>
               Model

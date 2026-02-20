@@ -685,8 +685,11 @@ func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
 	}
 	var idleResp map[string]any
 	decodeBody(t, idle, &idleResp)
-	if v, ok := idleResp["idle"].(bool); !ok || !v {
-		t.Fatalf("expected idle=true, got=%v", idleResp["idle"])
+	if v, ok := idleResp["idle"].(bool); !ok || v {
+		t.Fatalf("expected idle=false for human_takeover, got=%v", idleResp["idle"])
+	}
+	if v, ok := idleResp["human_takeover"].(bool); !ok || !v {
+		t.Fatalf("expected human_takeover=true, got=%v", idleResp["human_takeover"])
 	}
 }
 

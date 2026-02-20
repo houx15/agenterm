@@ -77,6 +77,25 @@ func roleCatalog(stage PlaybookStage) string {
 	return strings.Join(parts, " | ")
 }
 
+func rolePromptGuidance(stageName string, stage PlaybookStage) string {
+	if !stage.Enabled || len(stage.Roles) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, role := range stage.Roles {
+		prompt := strings.TrimSpace(role.SuggestedPrompt)
+		if prompt == "" {
+			continue
+		}
+		name := strings.TrimSpace(role.Name)
+		if name == "" {
+			name = "unnamed-role"
+		}
+		b.WriteString(fmt.Sprintf("- %s/%s prompt guidance:\n%s\n", stageName, name, prompt))
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook) string {
 	var b strings.Builder
 	b.WriteString("You are the AgenTerm Orchestrator, an AI project manager.\n")
@@ -91,6 +110,8 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\n\n")
 	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\n")
 	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\n\n")
+	b.WriteString("10) For interactive TUI command submission via send_command, end text with a trailing newline so input is actually submitted.\n")
+	b.WriteString("11) After create_session, call wait_for_session_ready before sending task prompts to avoid sending into shell before agent UI is ready.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\n\n")
 	}
@@ -152,6 +173,24 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 		b.WriteString("- test: " + roleCatalog(playbook.Workflow.Test) + "\n")
 		if strings.TrimSpace(playbook.Strategy) != "" {
 			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\n")
+		}
+		guidanceBlocks := []string{
+			rolePromptGuidance("plan", playbook.Workflow.Plan),
+			rolePromptGuidance("build", playbook.Workflow.Build),
+			rolePromptGuidance("test", playbook.Workflow.Test),
+		}
+		nonEmpty := make([]string, 0, len(guidanceBlocks))
+		for _, block := range guidanceBlocks {
+			block = strings.TrimSpace(block)
+			if block != "" {
+				nonEmpty = append(nonEmpty, block)
+			}
+		}
+		if len(nonEmpty) > 0 {
+			b.WriteString("\nRole Prompt Guidance:\n")
+			for _, block := range nonEmpty {
+				b.WriteString(block + "\n")
+			}
 		}
 	} else {
 		b.WriteString("Matched playbook: none\n")
