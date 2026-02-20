@@ -361,7 +361,7 @@ func (g *Gateway) SendRaw(windowID string, keys string) error {
 			if err := flushPending(); err != nil {
 				return err
 			}
-			if _, err := g.stdin.Write([]byte(fmt.Sprintf("send-keys -t %s Enter\n", windowID))); err != nil {
+			if _, err := g.stdin.Write([]byte(fmt.Sprintf("send-keys -t %s C-m\n", windowID))); err != nil {
 				return err
 			}
 			continue
@@ -399,6 +399,8 @@ func (g *Gateway) buildSendKeysCommands(windowID string, keys string) []string {
 	switch keys {
 	case "\n", "Enter":
 		return []string{fmt.Sprintf("send-keys -t %s Enter\n", windowID)}
+	case "C-m":
+		return []string{fmt.Sprintf("send-keys -t %s C-m\n", windowID)}
 	case "\x03", "C-c":
 		return []string{fmt.Sprintf("send-keys -t %s C-c\n", windowID)}
 	case "\x1b", "Escape":

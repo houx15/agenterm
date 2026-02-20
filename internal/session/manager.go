@@ -257,8 +257,19 @@ func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text strin
 		return err
 	}
 	normalized := normalizeSessionCommandText(text)
-	if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
-		return err
+	submit := strings.HasSuffix(normalized, "\r")
+	if submit {
+		normalized = strings.TrimSuffix(normalized, "\r")
+	}
+	if normalized != "" {
+		if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
+			return err
+		}
+	}
+	if submit {
+		if err := gw.SendKeys(session.TmuxWindowID, "C-m"); err != nil {
+			return err
+		}
 	}
 
 	session.Status = "working"
@@ -357,6 +368,11 @@ func (sm *Manager) GetSessionReadyState(ctx context.Context, sessionID string) (
 		return state, nil
 	}
 	if sm.requiresPromptReady(session.AgentType) {
+		if isClaudeLandingState(monitorState.LastText) {
+			state.Ready = true
+			state.Reason = "claude_landing_detected"
+			return state, nil
+		}
 		if monitorState.PromptDetected {
 			state.Ready = true
 			state.Reason = "prompt_detected"
@@ -405,6 +421,14 @@ func isComposeInputState(lastText string) bool {
 		return false
 	}
 	return strings.Contains(text, "ctrl+gtoeditinvim") || strings.Contains(text, "ctrl+g to edit in vim")
+}
+
+func isClaudeLandingState(lastText string) bool {
+	text := strings.ToLower(strings.TrimSpace(lastText))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "/ide forcursor") || strings.Contains(text, "try\"")
 }
 
 func (sm *Manager) SetTakeover(ctx context.Context, sessionID string, takeover bool) error {

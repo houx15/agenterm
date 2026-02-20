@@ -74,3 +74,21 @@ func TestNormalizeSessionCommandText(t *testing.T) {
 		}
 	}
 }
+
+func TestIsClaudeLandingState(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		{text: "", want: false},
+		{text: "normal shell prompt", want: false},
+		{text: "/ide forCursor", want: true},
+		{text: "❯ Try\"fixlint\"", want: true},
+	}
+	for _, tc := range cases {
+		got := isClaudeLandingState(tc.text)
+		if got != tc.want {
+			t.Fatalf("isClaudeLandingState(%q)=%v want %v", tc.text, got, tc.want)
+		}
+	}
+}

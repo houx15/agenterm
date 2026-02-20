@@ -127,6 +127,11 @@ func TestGatewayEscapeKeys(t *testing.T) {
 			expected: []string{"send-keys -t @1 Enter\n"},
 		},
 		{
+			name:     "single ctrl-m",
+			input:    "C-m",
+			expected: []string{"send-keys -t @1 C-m\n"},
+		},
+		{
 			name:     "single ctrl-c",
 			input:    "\x03",
 			expected: []string{"send-keys -t @1 C-c\n"},
@@ -182,7 +187,7 @@ func TestGatewaySendRawNotStarted(t *testing.T) {
 	}
 }
 
-func TestGatewaySendRawUsesEnterForNewlines(t *testing.T) {
+func TestGatewaySendRawUsesCtrlMForNewlines(t *testing.T) {
 	g := New("test")
 	capture := &captureWriteCloser{}
 	g.stdin = capture
@@ -192,8 +197,8 @@ func TestGatewaySendRawUsesEnterForNewlines(t *testing.T) {
 	}
 
 	got := capture.String()
-	if !strings.Contains(got, "send-keys -t @1 Enter\n") {
-		t.Fatalf("expected Enter key command in output, got: %q", got)
+	if !strings.Contains(got, "send-keys -t @1 C-m\n") {
+		t.Fatalf("expected C-m key command in output, got: %q", got)
 	}
 	if strings.Contains(got, " -H 0a") || strings.Contains(got, " -H 0d") {
 		t.Fatalf("expected newline bytes to map to Enter key, got: %q", got)
