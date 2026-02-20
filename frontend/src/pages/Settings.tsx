@@ -26,6 +26,8 @@ type WorkflowStageKey = keyof PlaybookWorkflow
 type RoleTemplateKey = 'planner' | 'worker' | 'reviewer' | 'tester'
 type NoticeKind = 'success' | 'error' | 'info'
 
+const TEMPLATE_PLAYBOOK_IDS = ['pairing-coding', 'tdd', 'compound-engineering'] as const
+
 const TOOL_OPTIONS = [
   'get_project_status',
   'create_task',
@@ -519,6 +521,7 @@ export default function Settings() {
   const [asrSettings, setAsrSettings] = useState(() => loadASRSettings())
   const [asrSaved, setAsrSaved] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'agent' | 'playbook'; id: string; name: string } | null>(null)
+  const [newPlaybookTemplateID, setNewPlaybookTemplateID] = useState<string>('pairing-coding')
 
   const isNewAgent = selectedAgentID === ''
   const isNewPlaybook = selectedPlaybookID === ''
@@ -568,6 +571,23 @@ export default function Settings() {
 
   const selectedAgent = useMemo(() => agents.find((item) => item.id === selectedAgentID) ?? null, [agents, selectedAgentID])
   const selectedPlaybook = useMemo(() => playbooks.find((item) => item.id === selectedPlaybookID) ?? null, [playbooks, selectedPlaybookID])
+  const templatePlaybooks = useMemo(() => {
+    const preferred = playbooks.filter((pb) => TEMPLATE_PLAYBOOK_IDS.includes(pb.id as (typeof TEMPLATE_PLAYBOOK_IDS)[number]))
+    if (preferred.length > 0) {
+      return preferred
+    }
+    return playbooks
+  }, [playbooks])
+
+  useEffect(() => {
+    if (templatePlaybooks.length === 0) {
+      setNewPlaybookTemplateID('')
+      return
+    }
+    if (!templatePlaybooks.some((item) => item.id === newPlaybookTemplateID)) {
+      setNewPlaybookTemplateID(templatePlaybooks[0].id)
+    }
+  }, [newPlaybookTemplateID, templatePlaybooks])
 
   function startNewAgent() {
     setSelectedAgentID('')
@@ -590,6 +610,27 @@ export default function Settings() {
     setSelectedPlaybookID('')
     setPlaybookDraft(DEFAULT_PLAYBOOK)
     clearNotice()
+  }
+
+  function startNewPlaybookFromTemplate(templateID: string) {
+    const template = playbooks.find((item) => item.id === templateID)
+    if (!template) {
+      startNewPlaybook()
+      pushNotice('error', 'Template not found. Started a blank playbook draft.')
+      return
+    }
+    const baseName = template.name.trim() || template.id
+    const baseID = template.id.trim()
+    setSelectedPlaybookID('')
+    setPlaybookDraft({
+      ...template,
+      id: baseID ? `${baseID}-custom` : '',
+      name: `${baseName} Copy`,
+      phases: [...template.phases],
+      workflow: cloneWorkflow(template.workflow),
+    })
+    clearNotice()
+    pushNotice('info', `Draft created from template: ${template.name}`)
   }
 
   function selectAgent(id: string) {
@@ -1052,6 +1093,23 @@ export default function Settings() {
             <button type="button" className="primary-btn" onClick={startNewPlaybook}>
               + New Playbook
             </button>
+            <div className="settings-template-create">
+              <select value={newPlaybookTemplateID} onChange={(event) => setNewPlaybookTemplateID(event.target.value)}>
+                {templatePlaybooks.map((item) => (
+                  <option key={`template-${item.id}`} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => startNewPlaybookFromTemplate(newPlaybookTemplateID)}
+                disabled={templatePlaybooks.length === 0}
+              >
+                New from Template
+              </button>
+            </div>
             {isNewPlaybook && (
               <button type="button" className="session-row active">
                 <strong>{playbookDraft.name.trim() || 'New Playbook (Draft)'}</strong>

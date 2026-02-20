@@ -1412,6 +1412,11 @@ textarea {
   align-content: start;
 }
 
+.settings-template-create {
+  display: grid;
+  gap: 0.45rem;
+}
+
 .settings-editor {
   border: 1px solid var(--border);
   border-radius: 10px;
