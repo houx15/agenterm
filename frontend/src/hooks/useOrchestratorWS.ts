@@ -125,6 +125,21 @@ type AssistantEnvelope = {
   }
 }
 
+function sanitizeAssistantText(text: string): string {
+  if (!text) {
+    return ''
+  }
+  const stripped = text
+    .replace(/\[tool_result:[\s\S]*?\]/gi, '')
+    .replace(/\[tool_call:[\s\S]*?\]/gi, '')
+    .replace(/\[✅[\s\S]*?\]/g, '')
+  const cleanedLines = stripped
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => !/^\s*command\s*$/i.test(line))
+  return cleanedLines.join('\n').trim()
+}
+
 function extractJSONObjectChunks(text: string): string[] {
   const chunks: string[] = []
   const raw = text.trim()
@@ -209,11 +224,12 @@ function asStringArray(value: unknown): string[] {
 function normalizeAssistantMessage(
   rawText: string,
 ): { text: string; status: 'discussion' | 'confirmation'; confirmationOptions?: MessageActionOption[] } {
+  const sanitizedRaw = sanitizeAssistantText(rawText)
   const envelopes = parseAssistantEnvelopes(rawText)
   if (envelopes.length === 0) {
-    const fallbackOptions = buildConfirmationOptions(rawText)
+    const fallbackOptions = buildConfirmationOptions(sanitizedRaw)
     return {
-      text: rawText,
+      text: sanitizedRaw,
       status: fallbackOptions ? 'confirmation' : 'discussion',
       confirmationOptions: fallbackOptions,
     }
@@ -256,7 +272,7 @@ function normalizeAssistantMessage(
     lines.push(confirmationPrompt)
   }
 
-  const text = lines.join('\n').trim() || rawText
+  const text = sanitizeAssistantText(lines.join('\n').trim())
   if (!confirmationNeeded) {
     return {
       text,
@@ -397,17 +413,22 @@ export function useOrchestratorWS(projectId: string) {
     }
 
     setMessages((prev) =>
-      prev.map((item) => {
+      prev.flatMap((item) => {
         if (item.id !== activeID) {
-          return item
+          return [item]
         }
         const normalized = normalizeAssistantMessage(item.text)
-        return {
-          ...item,
-          text: normalized.text,
-          confirmationOptions: normalized.confirmationOptions,
-          status: normalized.status,
+        if (!normalized.text.trim()) {
+          return []
         }
+        return [
+          {
+            ...item,
+            text: normalized.text,
+            confirmationOptions: normalized.confirmationOptions,
+            status: normalized.status,
+          },
+        ]
       }),
     )
 
