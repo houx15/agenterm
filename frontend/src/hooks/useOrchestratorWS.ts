@@ -99,6 +99,7 @@ function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessa
     className: role === 'user' ? 'input' : 'output',
     role,
     kind: 'text',
+    status: 'discussion',
     isUser: role === 'user',
     timestamp: Date.parse(item.created_at) || Date.now(),
     confirmationOptions: role === 'assistant' ? buildConfirmationOptions(text) : undefined,
@@ -195,6 +196,7 @@ export function useOrchestratorWS(projectId: string) {
           className: 'output',
           role: 'assistant',
           kind: 'text',
+          status: 'discussion',
         }),
       ),
     )
@@ -217,6 +219,7 @@ export function useOrchestratorWS(projectId: string) {
         return {
           ...item,
           confirmationOptions: buildConfirmationOptions(item.text),
+          status: buildConfirmationOptions(item.text) ? 'confirmation' : 'discussion',
         }
       }),
     )
@@ -302,6 +305,7 @@ export function useOrchestratorWS(projectId: string) {
             className: 'prompt',
             role: 'tool',
             kind: 'tool_call',
+            status: 'command',
             timestamp: Date.now(),
           }),
         )
@@ -319,6 +323,7 @@ export function useOrchestratorWS(projectId: string) {
               className: 'prompt',
               role: 'assistant',
               kind: 'text',
+              status: 'confirmation',
               confirmationOptions: approvalPrompt.confirmationOptions,
               timestamp: Date.now(),
             }),
@@ -332,6 +337,7 @@ export function useOrchestratorWS(projectId: string) {
             className: 'code',
             role: 'tool',
             kind: 'tool_result',
+            status: 'command',
             timestamp: Date.now(),
           }),
         )
@@ -352,6 +358,7 @@ export function useOrchestratorWS(projectId: string) {
             className: 'error',
             role: 'error',
             kind: 'error',
+            status: 'command',
             timestamp: Date.now(),
           }),
         )
@@ -426,6 +433,7 @@ export function useOrchestratorWS(projectId: string) {
           isUser: true,
           role: 'user',
           kind: 'text',
+          status: 'discussion',
           timestamp: Date.now(),
         }),
       )

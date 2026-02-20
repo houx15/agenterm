@@ -1220,6 +1220,26 @@ textarea {
   gap: 0.45rem;
 }
 
+.pm-chat-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.pm-chat-message.command .pm-chat-status,
+.pm-chat-message.kind-tool_call .pm-chat-status,
+.pm-chat-message.kind-tool_result .pm-chat-status {
+  color: #8ea6d8;
+}
+
+.pm-chat-message.confirmation .pm-chat-status {
+  color: #74c18b;
+}
+
 .pm-chat-message.user {
   justify-items: end;
 }

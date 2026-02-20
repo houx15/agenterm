@@ -1,5 +1,6 @@
 import type { ActionMessage } from '../api/types'
 import type { ReactNode } from 'react'
+import { Hammer, MessageSquare, ShieldCheck } from 'lucide-react'
 
 export interface MessageTaskLink {
   id: string
@@ -13,6 +14,7 @@ export interface MessageActionOption {
 
 type ChatRole = 'user' | 'assistant' | 'tool' | 'system' | 'error'
 type ChatKind = 'text' | 'tool_call' | 'tool_result' | 'error'
+type ChatStatus = 'discussion' | 'command' | 'confirmation'
 
 export interface SessionMessage {
   id?: string
@@ -23,6 +25,7 @@ export interface SessionMessage {
   isUser?: boolean
   role?: ChatRole
   kind?: ChatKind
+  status?: ChatStatus
   taskLinks?: MessageTaskLink[]
   confirmationOptions?: MessageActionOption[]
 }
@@ -38,8 +41,15 @@ export default function ChatMessage({ message, variant = 'terminal', onTaskClick
   if (variant === 'pm') {
     const roleClass = message.isUser ? 'user' : (message.role ?? 'assistant')
     const kindClass = message.kind ? `kind-${message.kind}` : 'kind-text'
+    const statusClass = message.status ?? 'discussion'
     return (
-      <div className={`pm-chat-message ${roleClass} ${kindClass}`.trim()}>
+      <div className={`pm-chat-message ${roleClass} ${kindClass} ${statusClass}`.trim()}>
+        <div className="pm-chat-status">
+          {message.status === 'command' && <Hammer size={12} />}
+          {message.status === 'confirmation' && <ShieldCheck size={12} />}
+          {(!message.status || message.status === 'discussion') && <MessageSquare size={12} />}
+          <span>{message.status ?? 'discussion'}</span>
+        </div>
         <div className="pm-chat-bubble">{renderTextWithTaskLinks(message.text, message.taskLinks, onTaskClick)}</div>
         {message.confirmationOptions && message.confirmationOptions.length > 0 && (
           <div className="pm-confirm-row">

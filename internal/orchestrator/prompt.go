@@ -96,7 +96,18 @@ func rolePromptGuidance(stageName string, stage PlaybookStage) string {
 	return strings.TrimSpace(b.String())
 }
 
-func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook) string {
+func stageExecutionContract(stage string) string {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "plan":
+		return "Plan stage objectives: start planning TUI, analyze codebase, produce staged implementation plan, define parallel worktrees, and write specs under docs/. Ask user confirmation before transitioning to build."
+	case "test":
+		return "Test stage objectives: verify all implementation work is committed/pushed, run a testing TUI to build and execute test plan against specs, and report automated vs manual follow-ups."
+	default:
+		return "Build stage objectives: execute approved plan per phase/worktree, dispatch coding and review sessions, run review-fix loops until issues are closed, merge finished worktrees, then prepare transition to test."
+	}
+}
+
+func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook, activeStage string) string {
 	var b strings.Builder
 	b.WriteString("You are the AgenTerm Orchestrator, an AI project manager.\n")
 	b.WriteString("You decompose requests into actionable tasks, prefer safe parallel execution, and report clearly.\n\n")
@@ -114,9 +125,17 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\n\n")
 	b.WriteString("10) For interactive TUI command submission via send_command, end text with a trailing newline so input is actually submitted.\n")
 	b.WriteString("11) After create_session, call wait_for_session_ready before sending task prompts to avoid sending into shell before agent UI is ready.\n\n")
+	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\n\n")
 	}
+
+	stage := strings.ToLower(strings.TrimSpace(activeStage))
+	if stage == "" {
+		stage = "build"
+	}
+	b.WriteString(fmt.Sprintf("Active execution stage: %s\n", stage))
+	b.WriteString("Stage contract: " + stageExecutionContract(stage) + "\n\n")
 
 	if projectState == nil || projectState.Project == nil {
 		b.WriteString("Current project state: unavailable.\n")

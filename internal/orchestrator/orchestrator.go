@@ -33,6 +33,12 @@ const (
 	demandLane               = "demand"
 )
 
+const (
+	stagePlan  = "plan"
+	stageBuild = "build"
+	stageTest  = "test"
+)
+
 type StreamEvent struct {
 	Type   string         `json:"type"`
 	Text   string         `json:"text,omitempty"`
@@ -236,7 +242,8 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		if matchedPlaybook == nil {
 			matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
 		}
-		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook)
+		activeStage := deriveExecutionStage(state, matchedPlaybook)
+		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook, activeStage)
 	}
 	systemPrompt += "\n\nApproval gate:\n"
 	if approval.Confirmed {
@@ -1005,6 +1012,9 @@ func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[st
 	if o == nil || o.toolset == nil {
 		return nil, fmt.Errorf("orchestrator tools unavailable")
 	}
+	if err := o.enforceStageToolGate(ctx, name, args); err != nil {
+		return nil, err
+	}
 	if err := o.enforceRoleContractForTool(ctx, name, args); err != nil {
 		return nil, err
 	}
@@ -1317,6 +1327,229 @@ func containsFold(values []string, candidate string) bool {
 		}
 	}
 	return false
+}
+
+func deriveExecutionStage(state *ProjectState, pb *Playbook) string {
+	if state == nil || state.Project == nil {
+		return firstEnabledStage(pb)
+	}
+	status := strings.ToLower(strings.TrimSpace(state.Project.Status))
+	switch status {
+	case "plan", "planning":
+		return stagePlan
+	case "test", "testing", "qa", "verifying":
+		return stageTest
+	case "build", "building", "developing":
+		return stageBuild
+	}
+
+	if hasOpenExecutionTasks(state.Tasks) || hasActiveWorktrees(state.Worktrees) {
+		return stageBuild
+	}
+	if hasCompletedExecutionTasks(state.Tasks) && !hasOpenExecutionTasks(state.Tasks) && !hasActiveWorktrees(state.Worktrees) {
+		if pb != nil && pb.Workflow.Test.Enabled {
+			return stageTest
+		}
+		return stageBuild
+	}
+	if len(state.Tasks) == 0 && len(state.Worktrees) == 0 {
+		if pb != nil && pb.Workflow.Plan.Enabled {
+			return stagePlan
+		}
+	}
+	return firstEnabledStage(pb)
+}
+
+func firstEnabledStage(pb *Playbook) string {
+	if pb != nil {
+		if pb.Workflow.Plan.Enabled {
+			return stagePlan
+		}
+		if pb.Workflow.Build.Enabled {
+			return stageBuild
+		}
+		if pb.Workflow.Test.Enabled {
+			return stageTest
+		}
+	}
+	return stageBuild
+}
+
+func hasOpenExecutionTasks(tasks []*db.Task) bool {
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(task.Status)) {
+		case "", "pending", "planned", "planning", "ready", "todo", "queued", "running", "in_progress", "reviewing", "waiting_review", "blocked":
+			return true
+		}
+	}
+	return false
+}
+
+func hasCompletedExecutionTasks(tasks []*db.Task) bool {
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(task.Status)) {
+		case "done", "completed", "merged", "closed":
+			return true
+		}
+	}
+	return false
+}
+
+func hasActiveWorktrees(worktrees []*db.Worktree) bool {
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(wt.Status)) {
+		case "", "active", "created", "in_progress", "running", "open":
+			return true
+		}
+	}
+	return false
+}
+
+func stageToolAllowed(stage string, toolName string) bool {
+	toolName = strings.TrimSpace(toolName)
+	if toolName == "" {
+		return true
+	}
+	allowedByStage := map[string]map[string]struct{}{
+		stagePlan: {
+			"list_skills":            {},
+			"get_skill_details":      {},
+			"get_project_status":     {},
+			"create_task":            {},
+			"create_worktree":        {},
+			"write_task_spec":        {},
+			"create_session":         {},
+			"wait_for_session_ready": {},
+			"send_command":           {},
+			"read_session_output":    {},
+			"is_session_idle":        {},
+			"can_close_session":      {},
+			"close_session":          {},
+		},
+		stageBuild: {
+			"list_skills":            {},
+			"get_skill_details":      {},
+			"get_project_status":     {},
+			"create_task":            {},
+			"create_worktree":        {},
+			"write_task_spec":        {},
+			"merge_worktree":         {},
+			"resolve_merge_conflict": {},
+			"create_session":         {},
+			"wait_for_session_ready": {},
+			"send_command":           {},
+			"read_session_output":    {},
+			"is_session_idle":        {},
+			"can_close_session":      {},
+			"close_session":          {},
+		},
+		stageTest: {
+			"list_skills":            {},
+			"get_skill_details":      {},
+			"get_project_status":     {},
+			"write_task_spec":        {},
+			"create_session":         {},
+			"wait_for_session_ready": {},
+			"send_command":           {},
+			"read_session_output":    {},
+			"is_session_idle":        {},
+			"can_close_session":      {},
+			"close_session":          {},
+		},
+	}
+	stage = strings.ToLower(strings.TrimSpace(stage))
+	allowed, ok := allowedByStage[stage]
+	if !ok {
+		allowed = allowedByStage[stageBuild]
+	}
+	_, ok = allowed[toolName]
+	return ok
+}
+
+func (o *Orchestrator) enforceStageToolGate(ctx context.Context, toolName string, args map[string]any) error {
+	if o == nil || o.lane != executionLane {
+		return nil
+	}
+	projectID, err := o.projectIDForTool(ctx, toolName, args)
+	if err != nil || strings.TrimSpace(projectID) == "" {
+		return nil
+	}
+	state, err := o.loadProjectState(ctx, projectID)
+	if err != nil {
+		if o.projectRepo == nil {
+			return nil
+		}
+		project, getErr := o.projectRepo.Get(ctx, projectID)
+		if getErr != nil || project == nil {
+			return nil
+		}
+		state = &ProjectState{Project: project}
+	}
+	matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
+	if matchedPlaybook == nil {
+		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
+	}
+	stage := deriveExecutionStage(state, matchedPlaybook)
+	if stageToolAllowed(stage, toolName) {
+		return nil
+	}
+	return fmt.Errorf("stage_tool_not_allowed: tool %q is not allowed during %s stage", strings.TrimSpace(toolName), stage)
+}
+
+func (o *Orchestrator) projectIDForTool(ctx context.Context, toolName string, args map[string]any) (string, error) {
+	if o == nil {
+		return "", nil
+	}
+	toolName = strings.TrimSpace(toolName)
+	switch toolName {
+	case "create_task", "create_worktree", "write_task_spec", "get_project_status":
+		return optionalString(args, "project_id")
+	case "create_session":
+		taskID, err := optionalString(args, "task_id")
+		if err != nil || strings.TrimSpace(taskID) == "" || o.taskRepo == nil {
+			return "", err
+		}
+		task, err := o.taskRepo.Get(ctx, strings.TrimSpace(taskID))
+		if err != nil || task == nil {
+			return "", err
+		}
+		return strings.TrimSpace(task.ProjectID), nil
+	case "send_command", "read_session_output", "is_session_idle", "close_session", "can_close_session", "wait_for_session_ready":
+		sessionID, err := optionalString(args, "session_id")
+		if err != nil || strings.TrimSpace(sessionID) == "" || o.sessionRepo == nil || o.taskRepo == nil {
+			return "", err
+		}
+		sess, err := o.sessionRepo.Get(ctx, strings.TrimSpace(sessionID))
+		if err != nil || sess == nil {
+			return "", err
+		}
+		task, err := o.taskRepo.Get(ctx, sess.TaskID)
+		if err != nil || task == nil {
+			return "", err
+		}
+		return strings.TrimSpace(task.ProjectID), nil
+	case "merge_worktree", "resolve_merge_conflict":
+		worktreeID, err := optionalString(args, "worktree_id")
+		if err != nil || strings.TrimSpace(worktreeID) == "" || o.worktreeRepo == nil {
+			return "", err
+		}
+		wt, err := o.worktreeRepo.Get(ctx, strings.TrimSpace(worktreeID))
+		if err != nil || wt == nil {
+			return "", err
+		}
+		return strings.TrimSpace(wt.ProjectID), nil
+	default:
+		return "", nil
+	}
 }
 
 func toolAllowedByRole(toolName string, role playbook.StageRole) bool {

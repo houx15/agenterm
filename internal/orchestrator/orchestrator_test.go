@@ -48,7 +48,7 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	prompt := BuildSystemPrompt(&ProjectState{
 		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
 		Tasks:   []*db.Task{{Status: "pending"}, {Status: "running"}},
-	}, []*registry.AgentConfig{{ID: "codex", Name: "Codex", Capabilities: []string{"code"}, Languages: []string{"go"}, SpeedTier: "fast", CostTier: "medium"}}, nil)
+	}, []*registry.AgentConfig{{ID: "codex", Name: "Codex", Capabilities: []string{"code"}, Languages: []string{"go"}, SpeedTier: "fast", CostTier: "medium"}}, nil, "plan")
 
 	if !contains(prompt, "Demo") {
 		t.Fatalf("prompt missing project name: %s", prompt)
@@ -61,6 +61,12 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	}
 	if !contains(prompt, "You are a coordinator, not a coding worker") {
 		t.Fatalf("prompt missing coordinator-only rule")
+	}
+	if !contains(prompt, "Active execution stage: plan") {
+		t.Fatalf("prompt missing active stage")
+	}
+	if !contains(prompt, "Plan stage objectives") {
+		t.Fatalf("prompt missing stage contract")
 	}
 }
 
@@ -707,6 +713,76 @@ func TestCreateSessionRespectsRoleHandoffPrerequisites(t *testing.T) {
 		"agent_type": "codex",
 	}); err != nil {
 		t.Fatalf("worker create_session after handoff should succeed: %v", err)
+	}
+}
+
+func TestStageToolGateBlocksMergeDuringPlan(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	worktreeRepo := db.NewWorktreeRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "planning"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	worktree := &db.Worktree{ProjectID: project.ID, BranchName: "feat/demo", Path: filepath.Join(t.TempDir(), "wt"), Status: "active"}
+	if err := worktreeRepo.Create(context.Background(), worktree); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:  projectRepo,
+		WorktreeRepo: worktreeRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"merge_worktree": {
+					Name: "merge_worktree",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "merged"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "merge_worktree", map[string]any{"worktree_id": worktree.ID})
+	if err == nil {
+		t.Fatalf("expected stage gate to block merge in plan stage")
+	}
+	if !strings.Contains(err.Error(), "stage_tool_not_allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStageToolGateAllowsCreateTaskDuringPlan(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "planning"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo: projectRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_task": {
+					Name: "create_task",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "create_task", map[string]any{
+		"project_id": project.ID,
+		"title":      "stage-plan-task",
+	})
+	if err != nil {
+		t.Fatalf("expected create_task to be allowed in plan stage: %v", err)
 	}
 }
 
