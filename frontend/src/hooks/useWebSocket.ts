@@ -14,6 +14,7 @@ export function useWebSocket(token: string) {
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected')
   const [messages, setMessages] = useState<ServerMessage[]>([])
   const [lastMessage, setLastMessage] = useState<ServerMessage | null>(null)
+  const isVisibleRef = useRef<boolean>(typeof document !== 'undefined' ? document.visibilityState === 'visible' : true)
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -48,6 +49,9 @@ export function useWebSocket(token: string) {
       if (!shouldReconnectRef.current) {
         return
       }
+      if (!isVisibleRef.current) {
+        return
+      }
 
       const attempts = reconnectAttemptsRef.current + 1
       reconnectAttemptsRef.current = attempts
@@ -78,8 +82,21 @@ export function useWebSocket(token: string) {
   useEffect(() => {
     shouldReconnectRef.current = true
     connect()
+    const onVisibilityChange = () => {
+      const visible = document.visibilityState === 'visible'
+      isVisibleRef.current = visible
+      if (!visible) {
+        clearReconnectTimer()
+        return
+      }
+      if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+        connect()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       shouldReconnectRef.current = false
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       clearReconnectTimer()
       wsRef.current?.close()
       wsRef.current = null

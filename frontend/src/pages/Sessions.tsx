@@ -22,6 +22,25 @@ export default function Sessions() {
   const [sendError, setSendError] = useState('')
   const rawHistory = app.activeWindow ? (rawBuffers[app.activeWindow] ?? '') : ''
   const activeWindowInfo = useMemo(() => app.windows.find((win) => win.id === app.activeWindow) ?? null, [app.activeWindow, app.windows])
+  const maxBufferChars = 120000
+
+  useEffect(() => {
+    const sessionID = activeWindowInfo?.session_id ?? ''
+    app.send({
+      type: 'subscribe',
+      session_id: sessionID,
+      window: '',
+      keys: '',
+    })
+    return () => {
+      app.send({
+        type: 'subscribe',
+        session_id: '',
+        window: '',
+        keys: '',
+      })
+    }
+  }, [activeWindowInfo?.session_id, app.send])
 
   useEffect(() => {
     if (!app.lastMessage) {
@@ -98,7 +117,7 @@ export default function Sessions() {
           const next = current + (message.text ?? '')
           return {
             ...prev,
-            [message.window]: next.length > 300000 ? next.slice(next.length - 300000) : next,
+            [message.window]: next.length > maxBufferChars ? next.slice(next.length - maxBufferChars) : next,
           }
         })
         return

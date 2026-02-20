@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,8 +47,11 @@ func (c *Client) readPump(ctx context.Context) {
 	for {
 		_, data, err := c.conn.Read(ctx)
 		if err != nil {
-			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
-				log.Printf("client %s read error: %v", c.id, err)
+			status := websocket.CloseStatus(err)
+			if status != websocket.StatusNormalClosure &&
+				status != websocket.StatusGoingAway &&
+				status != websocket.StatusNoStatusRcvd {
+				log.Printf("client %s read error: %s", c.id, sanitizeLogText(err.Error()))
 			}
 			return
 		}
@@ -84,6 +88,22 @@ func (c *Client) readPump(ctx context.Context) {
 			c.hub.SendError(c, "unknown message type: "+msg.Type)
 		}
 	}
+}
+
+func sanitizeLogText(v string) string {
+	if v == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(v))
+	for _, r := range v {
+		if (r >= 0x20 && r != 0x7f) || r == '\n' || r == '\t' || r == '\r' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('?')
+	}
+	return b.String()
 }
 
 func (c *Client) subscribe(sessionID string) {
