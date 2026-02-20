@@ -1624,9 +1624,33 @@ textarea {
   gap: 0.35rem;
 }
 
-.settings-message {
+.settings-notice {
   margin: 0;
-  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.settings-notice.success {
+  border-color: #5ca978;
+  background: #ebfff2;
+  color: #23643b;
+}
+
+.settings-notice.error {
+  border-color: #d06b6b;
+  background: #fff0f0;
+  color: #8a2f2f;
+}
+
+.settings-notice.info {
+  border-color: #7a8fb0;
+  background: #f2f7ff;
+  color: #2f4e7a;
 }
 
 .text-error {

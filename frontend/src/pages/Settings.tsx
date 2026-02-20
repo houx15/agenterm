@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CircleHelp, Hammer, Map, Plus, ShieldCheck, Trash2 } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleHelp, Hammer, Info, Map, Plus, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   createAgent,
   createPlaybook,
@@ -24,6 +24,7 @@ import Modal from '../components/Modal'
 type TabKey = 'agents' | 'playbooks' | 'asr'
 type WorkflowStageKey = keyof PlaybookWorkflow
 type RoleTemplateKey = 'planner' | 'worker' | 'reviewer' | 'tester'
+type NoticeKind = 'success' | 'error' | 'info'
 
 const TOOL_OPTIONS = [
   'get_project_status',
@@ -514,13 +515,21 @@ export default function Settings() {
   const [playbookDraft, setPlaybookDraft] = useState<Playbook>(DEFAULT_PLAYBOOK)
   const [loading, setLoading] = useState<boolean>(true)
   const [busy, setBusy] = useState<boolean>(false)
-  const [message, setMessage] = useState<string>('')
+  const [notice, setNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
   const [asrSettings, setAsrSettings] = useState(() => loadASRSettings())
   const [asrSaved, setAsrSaved] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'agent' | 'playbook'; id: string; name: string } | null>(null)
 
   const isNewAgent = selectedAgentID === ''
   const isNewPlaybook = selectedPlaybookID === ''
+
+  function pushNotice(kind: NoticeKind, text: string) {
+    setNotice({ kind, text })
+  }
+
+  function clearNotice() {
+    setNotice(null)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -543,7 +552,7 @@ export default function Settings() {
           setPlaybookDraft(normalizedPlaybooks[0])
         }
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : 'Failed to load settings')
+        pushNotice('error', error instanceof Error ? error.message : 'Failed to load settings')
       } finally {
         if (!cancelled) {
           setLoading(false)
@@ -563,7 +572,7 @@ export default function Settings() {
   function startNewAgent() {
     setSelectedAgentID('')
     setAgentDraft(DEFAULT_AGENT)
-    setMessage('')
+    clearNotice()
   }
 
   function cancelNewAgent() {
@@ -574,13 +583,13 @@ export default function Settings() {
       setSelectedAgentID('')
       setAgentDraft(DEFAULT_AGENT)
     }
-    setMessage('')
+    clearNotice()
   }
 
   function startNewPlaybook() {
     setSelectedPlaybookID('')
     setPlaybookDraft(DEFAULT_PLAYBOOK)
-    setMessage('')
+    clearNotice()
   }
 
   function selectAgent(id: string) {
@@ -590,7 +599,7 @@ export default function Settings() {
     }
     setSelectedAgentID(id)
     setAgentDraft(found)
-    setMessage('')
+    clearNotice()
   }
 
   function selectPlaybook(id: string) {
@@ -600,7 +609,7 @@ export default function Settings() {
     }
     setSelectedPlaybookID(id)
     setPlaybookDraft(found)
-    setMessage('')
+    clearNotice()
   }
 
   function updateWorkflow(stageKey: WorkflowStageKey, updater: (stage: PlaybookWorkflowStage) => PlaybookWorkflowStage) {
@@ -705,7 +714,7 @@ export default function Settings() {
 
   async function saveAgent() {
     setBusy(true)
-    setMessage('')
+    clearNotice()
     try {
       if (isNewAgent) {
         const created = await createAgent<AgentConfig>(agentDraft)
@@ -717,9 +726,9 @@ export default function Settings() {
         setAgents((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
         setAgentDraft(updated)
       }
-      setMessage('Agent saved.')
+      pushNotice('success', 'Agent saved.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to save agent')
+      pushNotice('error', error instanceof Error ? error.message : 'Failed to save agent')
     } finally {
       setBusy(false)
     }
@@ -731,7 +740,7 @@ export default function Settings() {
     }
 
     setBusy(true)
-    setMessage('')
+    clearNotice()
     try {
       await deleteAgent(selectedAgentID)
       const next = agents.filter((item) => item.id !== selectedAgentID)
@@ -742,9 +751,9 @@ export default function Settings() {
       } else {
         startNewAgent()
       }
-      setMessage('Agent deleted.')
+      pushNotice('success', 'Agent deleted.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to delete agent')
+      pushNotice('error', error instanceof Error ? error.message : 'Failed to delete agent')
     } finally {
       setBusy(false)
     }
@@ -753,11 +762,11 @@ export default function Settings() {
   async function savePlaybook() {
     const validationError = validatePlaybookDraft(playbookDraft, isNewPlaybook)
     if (validationError) {
-      setMessage(validationError)
+      pushNotice('error', validationError)
       return
     }
     setBusy(true)
-    setMessage('')
+    clearNotice()
     try {
       const payload: Playbook = {
         ...playbookDraft,
@@ -776,12 +785,12 @@ export default function Settings() {
       if (persisted) {
         setSelectedPlaybookID(persisted.id)
         setPlaybookDraft(persisted)
-        setMessage(`Playbook saved: ${persisted.name}`)
+        pushNotice('success', `Playbook saved: ${persisted.name}`)
       } else {
-        setMessage('Playbook save completed but refresh failed. Please reload playbooks.')
+        pushNotice('error', 'Playbook save completed but refresh failed. Please reload playbooks.')
       }
     } catch (error) {
-      setMessage(parseAPIErrorMessage(error))
+      pushNotice('error', parseAPIErrorMessage(error))
     } finally {
       setBusy(false)
     }
@@ -793,7 +802,7 @@ export default function Settings() {
     }
 
     setBusy(true)
-    setMessage('')
+    clearNotice()
     try {
       await deletePlaybook(selectedPlaybookID)
       const next = playbooks.filter((item) => item.id !== selectedPlaybookID)
@@ -804,9 +813,9 @@ export default function Settings() {
       } else {
         startNewPlaybook()
       }
-      setMessage('Playbook deleted.')
+      pushNotice('success', 'Playbook deleted.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to delete playbook')
+      pushNotice('error', error instanceof Error ? error.message : 'Failed to delete playbook')
     } finally {
       setBusy(false)
     }
@@ -819,6 +828,7 @@ export default function Settings() {
     })
     setAsrSaved(true)
     window.setTimeout(() => setAsrSaved(false), 1500)
+    pushNotice('success', 'ASR settings saved.')
   }
 
   function requestRemoveAgent() {
@@ -875,7 +885,12 @@ export default function Settings() {
         </button>
       </div>
 
-      {message ? <p className="settings-message">{message}</p> : null}
+      {notice ? (
+        <div className={`settings-notice ${notice.kind}`.trim()} role="status" aria-live="polite">
+          {notice.kind === 'success' ? <CircleCheck size={14} /> : notice.kind === 'error' ? <CircleAlert size={14} /> : <Info size={14} />}
+          <span>{notice.text}</span>
+        </div>
+      ) : null}
 
       {activeTab === 'agents' ? (
         <div className="settings-grid">
