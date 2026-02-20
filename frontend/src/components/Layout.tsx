@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
-import { Menu } from './Lucide'
+import { ChevronLeft, ChevronRight, Menu } from './Lucide'
 import { useAppContext } from '../App'
 
 export default function Layout() {
   const app = useAppContext()
-  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
   const location = useLocation()
 
   const titleByPath: Record<string, string> = {
@@ -30,8 +32,10 @@ export default function Layout() {
 
   useEffect(() => {
     const onResize = () => {
-      if (window.innerWidth >= 768) {
-        setSidebarOpen(true)
+      const nextIsMobile = window.innerWidth < 768
+      setIsMobile(nextIsMobile)
+      if (!nextIsMobile) {
+        setMobileSidebarOpen(false)
       }
     }
     window.addEventListener('resize', onResize)
@@ -39,37 +43,48 @@ export default function Layout() {
   }, [])
 
   const closeOnMobile = () => {
-    if (window.innerWidth < 768) {
-      setSidebarOpen(false)
+    if (isMobile) {
+      setMobileSidebarOpen(false)
     }
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${!isMobile && desktopSidebarCollapsed ? 'sidebar-collapsed' : ''}`.trim()}>
       <button
-        aria-expanded={sidebarOpen}
+        aria-expanded={mobileSidebarOpen}
         aria-label="Toggle navigation"
         className="mobile-sidebar-toggle"
-        onClick={() => setSidebarOpen((v) => !v)}
+        onClick={() => setMobileSidebarOpen((v) => !v)}
         type="button"
       >
         <Menu size={16} />
       </button>
 
-      <div className={`sidebar-container ${sidebarOpen ? 'open' : ''}`.trim()}>
+      <div className={`sidebar-container ${mobileSidebarOpen ? 'open' : ''} ${!isMobile && desktopSidebarCollapsed ? 'collapsed' : ''}`.trim()}>
         <Sidebar closeOnNavigate={closeOnMobile} />
       </div>
       <button
-        aria-hidden={!sidebarOpen}
+        aria-hidden={!mobileSidebarOpen}
         aria-label="Close navigation"
-        className={`mobile-sidebar-backdrop ${sidebarOpen ? 'open' : ''}`.trim()}
+        className={`mobile-sidebar-backdrop ${mobileSidebarOpen ? 'open' : ''}`.trim()}
         onClick={closeOnMobile}
-        tabIndex={sidebarOpen ? 0 : -1}
+        tabIndex={mobileSidebarOpen ? 0 : -1}
         type="button"
       />
 
       <main className="content-shell" onClick={closeOnMobile}>
         <header className="topbar">
+          {!isMobile && (
+            <button
+              aria-label={desktopSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="secondary-btn sidebar-collapse-toggle"
+              onClick={() => setDesktopSidebarCollapsed((prev) => !prev)}
+              type="button"
+            >
+              {desktopSidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+              <span className="sidebar-collapse-label">{desktopSidebarCollapsed ? 'Show' : 'Hide'}</span>
+            </button>
+          )}
           <div className={`connection-indicator ${app.connected ? '' : app.connectionStatus}`.trim()} />
           <strong>{topbarTitle}</strong>
           <span className="topbar-subtitle">{topbarSubtitle}</span>

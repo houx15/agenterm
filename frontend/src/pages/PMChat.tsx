@@ -275,75 +275,102 @@ export default function PMChat() {
   return (
     <section className="pm-chat-page">
       <div className="pm-chat-layout-v2 pm-chat-layout-shell">
-        <div className="pm-chat-header">
-          <div className="project-selector">
-            <span>Project</span>
-            <select
-              onChange={(event) => onSelectProject(event.target.value)}
-              value={projectID}
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+        {!isMobile && (
+          <aside className="pm-chat-project-list">
+            <div className="pm-panel-header">
+              <h3>Projects</h3>
+              <small>{projects.length}</small>
+            </div>
+            <div className="pm-project-items">
+              {projects.map((project) => {
+                const active = project.id === projectID
+                return (
+                  <button
+                    className={`pm-project-item ${active ? 'active' : ''}`.trim()}
+                    key={project.id}
+                    onClick={() => onSelectProject(project.id)}
+                    type="button"
+                  >
+                    <span className="pm-project-item-name">{project.name}</span>
+                    <span className="pm-project-item-meta">{project.status}</span>
+                  </button>
+                )
+              })}
+              {projects.length === 0 && <p className="empty-view">No projects</p>}
+            </div>
+          </aside>
+        )}
+
+        <div className="pm-chat-content-area">
+          <div className="pm-chat-header">
+            {isMobile && (
+              <div className="project-selector">
+                <span>Project</span>
+                <select onChange={(event) => onSelectProject(event.target.value)} value={projectID}>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {selectedProject && (
+              <div className="pm-pane-toggle">
+                <button
+                  className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
+                  onClick={() => setActivePane('execution')}
+                  type="button"
+                >
+                  Execution
+                </button>
+                <button
+                  className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
+                  onClick={() => setActivePane('demand')}
+                  type="button"
+                >
+                  Demand Pool
+                </button>
+              </div>
+            )}
+            {activePane === 'execution' && isMobile && selectedProject && (
+              <button className="secondary-btn" onClick={() => setShowMobileInfo(true)} type="button">
+                <span>Project Info</span>
+              </button>
+            )}
           </div>
-          {selectedProject && (
-            <div className="pm-pane-toggle">
-              <button
-                className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
-                onClick={() => setActivePane('execution')}
-                type="button"
-              >
-                Execution
-              </button>
-              <button
-                className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
-                onClick={() => setActivePane('demand')}
-                type="button"
-              >
-                Demand Pool
-              </button>
+
+          {loading && <p className="empty-view">Loading PM chat context...</p>}
+          {error && <p className="dashboard-error">{error}</p>}
+
+          {!loading && !error && selectedProject && activePane === 'execution' && (
+            <div className="pm-execution-layout">
+              {!isMobile && infoPanel}
+              <div className="pm-chat-only">
+                <ChatPanel
+                  messages={chatMessages}
+                  taskLinks={taskLinks}
+                  isStreaming={orchestrator.isStreaming}
+                  connectionStatus={orchestrator.connectionStatus}
+                  onSend={orchestrator.send}
+                  onTaskClick={openTaskSession}
+                  onReportProgress={requestProgressReport}
+                  isFetchingReport={reportLoading}
+                />
+              </div>
             </div>
           )}
-          {activePane === 'execution' && isMobile && selectedProject && (
-            <button className="secondary-btn" onClick={() => setShowMobileInfo(true)} type="button">
-              <span>Project Info</span>
-            </button>
+
+          {!loading && !error && selectedProject && activePane === 'demand' && (
+            <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
+          )}
+
+          {!loading && !error && !selectedProject && (
+            <div className="empty-view">
+              <MessageSquareText size={16} /> Select a project to open PM Chat
+            </div>
           )}
         </div>
-
-        {loading && <p className="empty-view">Loading PM chat context...</p>}
-        {error && <p className="dashboard-error">{error}</p>}
-
-        {!loading && !error && selectedProject && activePane === 'execution' && (
-          <div className="pm-execution-layout">
-            {!isMobile && infoPanel}
-            <div className="pm-chat-only">
-              <ChatPanel
-                messages={chatMessages}
-                taskLinks={taskLinks}
-                isStreaming={orchestrator.isStreaming}
-                connectionStatus={orchestrator.connectionStatus}
-                onSend={orchestrator.send}
-                onTaskClick={openTaskSession}
-                onReportProgress={requestProgressReport}
-                isFetchingReport={reportLoading}
-              />
-            </div>
-          </div>
-        )}
-
-        {!loading && !error && selectedProject && activePane === 'demand' && (
-          <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
-        )}
-
-        {!loading && !error && !selectedProject && (
-          <div className="empty-view">
-            <MessageSquareText size={16} /> Select a project to open PM Chat
-          </div>
-        )}
       </div>
 
       <Modal onClose={() => setShowMobileInfo(false)} open={showMobileInfo} title="Project Info">

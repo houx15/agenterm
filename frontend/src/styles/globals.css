@@ -50,10 +50,20 @@ textarea {
   height: 100%;
 }
 
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
 .sidebar-container {
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+}
+
+.sidebar-container.collapsed {
+  border-right: 0;
+  box-shadow: none;
 }
 
 .sidebar-shell {
@@ -194,6 +204,40 @@ textarea {
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(14px);
+}
+
+.sidebar-collapse-toggle {
+  min-width: 4.6rem;
+  height: 2rem;
+  padding: 0 0.5rem;
+  justify-content: center;
+}
+
+.sidebar-collapse-label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.sidebar-collapse-toggle:hover .sidebar-collapse-label {
+  color: var(--text-primary);
+}
+
+.app-shell.sidebar-collapsed .sidebar-collapse-toggle {
+  min-width: 4.9rem;
+}
+
+.app-shell.sidebar-collapsed .topbar strong {
+  margin-left: 0.1rem;
+}
+
+.app-shell.sidebar-collapsed .content-shell {
+  min-width: 0;
+}
+
+.sidebar-collapse-toggle svg {
+  flex: 0 0 auto;
+  height: 2rem;
+  width: 1rem;
 }
 
 .topbar strong {
@@ -799,16 +843,41 @@ textarea {
 .pm-chat-page {
   padding: 0.8rem;
   min-height: 0;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .pm-chat-layout-v2 {
   display: grid;
   gap: 0.8rem;
   min-height: calc(100vh - 150px);
+  grid-template-columns: 260px 1fr;
 }
 
 .pm-chat-layout-shell {
   align-content: start;
+  flex: 1;
+  min-height: 0;
+}
+
+.pm-chat-project-list {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  overflow: hidden;
+  min-height: calc(100vh - 230px);
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-chat-content-area {
+  min-width: 0;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+  min-height: 0;
 }
 
 .pm-project-list {
@@ -899,7 +968,8 @@ textarea {
   display: grid;
   grid-template-columns: 360px 1fr;
   gap: 0.8rem;
-  min-height: calc(100vh - 230px);
+  min-height: 0;
+  height: 100%;
 }
 
 .pm-info-panel {
@@ -911,6 +981,7 @@ textarea {
 .pm-chat-only {
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .pm-project-detail {
@@ -1121,6 +1192,8 @@ textarea {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: 100%;
+  min-height: 0;
 }
 
 .pm-chat-messages {
@@ -1190,6 +1263,11 @@ textarea {
   padding: 0.6rem;
   display: grid;
   gap: 0.45rem;
+  position: sticky;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+  z-index: 1;
 }
 
 .pm-chat-input-row textarea {
@@ -1899,6 +1977,10 @@ textarea {
     min-height: 0;
   }
 
+  .pm-chat-page {
+    height: calc(100dvh - 56px);
+  }
+
   .pm-dag-panel {
     max-height: 260px;
   }
@@ -1939,6 +2021,10 @@ textarea {
 
   .modal-body .pm-info-panel {
     display: grid;
+  }
+
+  .pm-chat-project-list {
+    display: none;
   }
 }
 
