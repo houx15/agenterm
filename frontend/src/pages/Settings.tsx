@@ -753,11 +753,11 @@ export default function Settings() {
               />
             </label>
             <label>
-              Model (configured in registry; used when selected for orchestrator)
+              Session Model (optional)
               <input
                 value={agentDraft.model ?? ''}
                 onChange={(event) => setAgentDraft((prev) => ({ ...prev, model: event.target.value }))}
-                placeholder="e.g. claude-sonnet-4-5 / gpt-5-codex"
+                placeholder="Used for normal session launches"
               />
             </label>
             <label>
@@ -791,6 +791,14 @@ export default function Settings() {
             </label>
             {agentDraft.supports_orchestrator && (
               <>
+                <label>
+                  Orchestrator Model
+                  <input
+                    value={agentDraft.model ?? ''}
+                    onChange={(event) => setAgentDraft((prev) => ({ ...prev, model: event.target.value }))}
+                    placeholder="e.g. claude-sonnet-4-5 / gpt-5-codex"
+                  />
+                </label>
                 <label>
                   Orchestrator Format
                   <select
