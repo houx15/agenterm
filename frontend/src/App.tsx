@@ -35,6 +35,7 @@ const router = createBrowserRouter([
       { path: 'demand-pool', element: <DemandPool readOnly /> },
       { path: 'projects/:projectId', element: <ProjectDetail /> },
       { path: 'sessions', element: <Sessions /> },
+      { path: 'sessions/:windowId', element: <Sessions /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

@@ -751,6 +751,40 @@ textarea {
   margin: 0 0.7rem 0.7rem;
 }
 
+.sessions-mobile-list-page,
+.sessions-mobile-viewer-page {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.8rem;
+}
+
+.sessions-mobile-filters {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 1fr 140px;
+}
+
+.sessions-mobile-filters input,
+.sessions-mobile-filters select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+  background: #f8fbff;
+  color: var(--text-primary);
+}
+
+.sessions-mobile-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sessions-mobile-viewer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .terminal {
   flex: 1;
   min-height: 300px;
@@ -1868,6 +1902,10 @@ textarea {
   }
 
   .input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sessions-mobile-filters {
     grid-template-columns: 1fr;
   }
 
