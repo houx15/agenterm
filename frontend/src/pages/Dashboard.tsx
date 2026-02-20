@@ -160,7 +160,6 @@ export default function Dashboard() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [creatingProject, setCreatingProject] = useState(false)
   const [playbooks, setPlaybooks] = useState<Playbook[]>([])
-  const [modelOptions, setModelOptions] = useState<string[]>([])
 
   const syncTimerRef = useRef<number | null>(null)
 
@@ -234,10 +233,6 @@ export default function Dashboard() {
         }
         setAgents(agentsData)
         setPlaybooks(playbooksData)
-        const models = Array.from(new Set(agentsData.map((agent) => (agent.model || '').trim()).filter(Boolean))).sort((a, b) =>
-          a.localeCompare(b),
-        )
-        setModelOptions(models)
       } catch {
         // non-blocking for dashboard rendering
       }
@@ -438,7 +433,6 @@ export default function Dashboard() {
     orchestratorAgentID: string
     orchestratorProvider: string
     playbook: string
-    orchestratorModel: string
     workers: number
   }) => {
     setCreatingProject(true)
@@ -451,11 +445,17 @@ export default function Dashboard() {
         status: 'active',
       })
 
-      if (values.orchestratorModel || values.workers > 0) {
+      const selectedOrchestrator = agents.find((agent) => agent.id === values.orchestratorAgentID)
+      const orchestratorModel = (selectedOrchestrator?.model || '').trim()
+      if (!orchestratorModel) {
+        setError('Project created, but selected orchestrator agent has no model configured in Settings > Agent Registry.')
+      }
+
+      if (orchestratorModel || values.workers > 0) {
         try {
           await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
             default_provider: values.orchestratorProvider || undefined,
-            default_model: values.orchestratorModel || undefined,
+            default_model: orchestratorModel || undefined,
             max_parallel: values.workers,
           })
         } catch (patchErr) {
@@ -634,7 +634,6 @@ export default function Dashboard() {
       <CreateProjectModal
         agents={agents}
         busy={creatingProject}
-        modelOptions={modelOptions}
         onClose={() => setCreateProjectOpen(false)}
         onSubmit={submitCreateProject}
         open={createProjectOpen}

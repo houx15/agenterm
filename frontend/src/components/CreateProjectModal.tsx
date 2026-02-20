@@ -9,7 +9,6 @@ interface CreateProjectValues {
   orchestratorAgentID: string
   orchestratorProvider: string
   playbook: string
-  orchestratorModel: string
   workers: number
 }
 
@@ -17,7 +16,6 @@ interface CreateProjectModalProps {
   open: boolean
   playbooks: Playbook[]
   agents: AgentConfig[]
-  modelOptions: string[]
   busy?: boolean
   onClose: () => void
   onSubmit: (values: CreateProjectValues) => Promise<void> | void
@@ -33,7 +31,6 @@ export default function CreateProjectModal({
   open,
   playbooks,
   agents,
-  modelOptions,
   busy = false,
   onClose,
   onSubmit,
@@ -41,7 +38,6 @@ export default function CreateProjectModal({
   const [name, setName] = useState('')
   const [repoPath, setRepoPath] = useState('')
   const [orchestratorAgentID, setOrchestratorAgentID] = useState('')
-  const [orchestratorModel, setOrchestratorModel] = useState('')
   const [playbook, setPlaybook] = useState('')
   const [workers, setWorkers] = useState(2)
   const [error, setError] = useState('')
@@ -53,7 +49,6 @@ export default function CreateProjectModal({
   const orchestratorAgents = useMemo(() => agents.filter((item) => item.supports_orchestrator), [agents])
 
   const defaultPlaybook = useMemo(() => playbooks[0]?.id ?? '', [playbooks])
-  const defaultModel = useMemo(() => modelOptions[0] ?? '', [modelOptions])
   const defaultOrchestratorAgentID = useMemo(() => {
     const preferred = orchestratorAgents.find((item) => item.id === 'orchestrator')
     return preferred?.id ?? orchestratorAgents[0]?.id ?? ''
@@ -68,15 +63,13 @@ export default function CreateProjectModal({
     setError('')
     setPlaybook(defaultPlaybook)
     setOrchestratorAgentID(defaultOrchestratorAgentID)
-    const selected = orchestratorAgents.find((item) => item.id === defaultOrchestratorAgentID)
-    setOrchestratorModel((selected?.model || '').trim() || defaultModel)
     setWorkers(2)
     setBrowseOpen(false)
     setBrowsePathInput('')
     setBrowseState(null)
     setBrowseBusy(false)
     setBrowseError('')
-  }, [defaultModel, defaultOrchestratorAgentID, defaultPlaybook, open, orchestratorAgents])
+  }, [defaultOrchestratorAgentID, defaultPlaybook, open, orchestratorAgents])
 
   const loadBrowsePath = async (path?: string) => {
     setBrowseBusy(true)
@@ -123,7 +116,6 @@ export default function CreateProjectModal({
       orchestratorAgentID,
       orchestratorProvider: orchestratorAgents.find((item) => item.id === orchestratorAgentID)?.orchestrator_provider || 'anthropic',
       playbook,
-      orchestratorModel: orchestratorModel.trim(),
       workers,
     })
   }
@@ -209,10 +201,6 @@ export default function CreateProjectModal({
             onChange={(event) => {
               const nextID = event.target.value
               setOrchestratorAgentID(nextID)
-              const selected = orchestratorAgents.find((item) => item.id === nextID)
-              if (selected?.model) {
-                setOrchestratorModel(selected.model)
-              }
             }}
             value={orchestratorAgentID}
           >
@@ -223,21 +211,6 @@ export default function CreateProjectModal({
               </option>
             ))}
           </select>
-        </label>
-
-        <label className="settings-field">
-          <span>Orchestrator Model</span>
-          <input
-            list="orchestrator-models"
-            onChange={(event) => setOrchestratorModel(event.target.value)}
-            placeholder="gpt-5-codex"
-            value={orchestratorModel}
-          />
-          <datalist id="orchestrator-models">
-            {modelOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
         </label>
 
         <label className="settings-field">

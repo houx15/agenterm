@@ -753,8 +753,12 @@ export default function Settings() {
               />
             </label>
             <label>
-              Model
-              <input value={agentDraft.model ?? ''} onChange={(event) => setAgentDraft((prev) => ({ ...prev, model: event.target.value }))} />
+              Model (configured in registry; used when selected for orchestrator)
+              <input
+                value={agentDraft.model ?? ''}
+                onChange={(event) => setAgentDraft((prev) => ({ ...prev, model: event.target.value }))}
+                placeholder="e.g. claude-sonnet-4-5 / gpt-5-codex"
+              />
             </label>
             <label>
               Max Parallel Agents
