@@ -50,7 +50,7 @@ export default function ChatMessage({ message, variant = 'terminal', onTaskClick
           {(!message.status || message.status === 'discussion') && <MessageSquare size={12} />}
           <span>{message.status ?? 'discussion'}</span>
         </div>
-        <div className="pm-chat-bubble">{renderTextWithTaskLinks(message.text, message.taskLinks, onTaskClick)}</div>
+        <div className="pm-chat-bubble">{renderPMBubbleContent(message, onTaskClick)}</div>
         {message.confirmationOptions && message.confirmationOptions.length > 0 && (
           <div className="pm-confirm-row">
             {message.confirmationOptions.map((option) => (
@@ -114,4 +114,96 @@ function renderTextWithTaskLinks(text: string, taskLinks?: MessageTaskLink[], on
       </button>
     )
   })
+}
+
+function tryParseJSON(text: string): unknown | null {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function parseToolCallText(text: string): { name: string; args: unknown | null } | null {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+    return null
+  }
+  const body = trimmed.slice(1, -1).trim()
+  if (!body || body.startsWith('✅')) {
+    return null
+  }
+  const firstSpace = body.indexOf(' ')
+  if (firstSpace < 0) {
+    return { name: body, args: null }
+  }
+  const name = body.slice(0, firstSpace).trim()
+  const argsText = body.slice(firstSpace + 1).trim()
+  return { name, args: tryParseJSON(argsText) ?? argsText }
+}
+
+function parseToolResultText(text: string): { ok: boolean; payload: unknown | null; rawPayload: string } | null {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('[✅') || !trimmed.endsWith(']')) {
+    return null
+  }
+  const payloadText = trimmed.slice(2, -1).replace(/^✅/, '').trim()
+  if (!payloadText) {
+    return { ok: true, payload: null, rawPayload: '' }
+  }
+  return {
+    ok: true,
+    payload: tryParseJSON(payloadText),
+    rawPayload: payloadText,
+  }
+}
+
+function renderDataBlock(value: unknown): ReactNode {
+  if (value == null) {
+    return null
+  }
+  if (typeof value === 'string') {
+    return <pre className="pm-tool-json">{value}</pre>
+  }
+  return <pre className="pm-tool-json">{JSON.stringify(value, null, 2)}</pre>
+}
+
+function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: string) => void): ReactNode {
+  if (message.kind === 'tool_call') {
+    const parsed = parseToolCallText(message.text)
+    if (parsed) {
+      return (
+        <div className="pm-tool-card">
+          <div className="pm-tool-title">Tool: {parsed.name}</div>
+          {parsed.args != null && (
+            <div className="pm-tool-section">
+              <small>Arguments</small>
+              {renderDataBlock(parsed.args)}
+            </div>
+          )}
+        </div>
+      )
+    }
+  }
+
+  if (message.kind === 'tool_result') {
+    const parsed = parseToolResultText(message.text)
+    if (parsed) {
+      const payloadObject = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload) ? (parsed.payload as Record<string, unknown>) : null
+      const error = payloadObject && typeof payloadObject.error === 'string' ? payloadObject.error : ''
+      return (
+        <div className="pm-tool-card">
+          <div className={`pm-tool-title ${error ? 'error' : 'ok'}`.trim()}>{error ? `Result: ${error}` : 'Result: success'}</div>
+          {(parsed.payload != null || parsed.rawPayload) && (
+            <div className="pm-tool-section">
+              <small>Output</small>
+              {renderDataBlock(parsed.payload ?? parsed.rawPayload)}
+            </div>
+          )}
+        </div>
+      )
+    }
+  }
+
+  return renderTextWithTaskLinks(message.text, message.taskLinks, onTaskClick)
 }
