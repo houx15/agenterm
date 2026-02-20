@@ -68,6 +68,9 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	if !contains(prompt, "Plan stage objectives") {
 		t.Fatalf("prompt missing stage contract")
 	}
+	if !contains(prompt, "Assistant text responses must use a JSON envelope for UI parsing") {
+		t.Fatalf("prompt missing response envelope contract")
+	}
 }
 
 func TestChatToolExecutionLoop(t *testing.T) {

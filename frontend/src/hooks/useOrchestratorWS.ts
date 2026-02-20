@@ -116,19 +116,102 @@ function buildConfirmationOptions(text: string): MessageActionOption[] | undefin
   return undefined
 }
 
+type AssistantEnvelope = {
+  discussion?: string
+  commands?: string[]
+  confirmation?: {
+    needed?: boolean
+    prompt?: string
+  }
+}
+
+function parseAssistantEnvelope(text: string): AssistantEnvelope | null {
+  const raw = text.trim()
+  if (!raw.startsWith('{')) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+    return parsed as AssistantEnvelope
+  } catch {
+    return null
+  }
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+}
+
+function normalizeAssistantMessage(
+  rawText: string,
+): { text: string; status: 'discussion' | 'confirmation'; confirmationOptions?: MessageActionOption[] } {
+  const envelope = parseAssistantEnvelope(rawText)
+  if (!envelope) {
+    const fallbackOptions = buildConfirmationOptions(rawText)
+    return {
+      text: rawText,
+      status: fallbackOptions ? 'confirmation' : 'discussion',
+      confirmationOptions: fallbackOptions,
+    }
+  }
+
+  const discussion = typeof envelope.discussion === 'string' ? envelope.discussion.trim() : ''
+  const commands = asStringArray(envelope.commands)
+  const confirmationNeeded = Boolean(envelope.confirmation?.needed)
+  const confirmationPrompt = typeof envelope.confirmation?.prompt === 'string' ? envelope.confirmation.prompt.trim() : ''
+
+  const lines: string[] = []
+  if (discussion) {
+    lines.push(discussion)
+  }
+  if (commands.length > 0) {
+    lines.push('Planned commands:')
+    for (const command of commands) {
+      lines.push(`- ${command}`)
+    }
+  }
+  if (confirmationNeeded && confirmationPrompt) {
+    lines.push(confirmationPrompt)
+  }
+
+  const text = lines.join('\n').trim() || rawText
+  if (!confirmationNeeded) {
+    return {
+      text,
+      status: 'discussion',
+    }
+  }
+  return {
+    text,
+    status: 'confirmation',
+    confirmationOptions: [
+      { label: 'Confirm', value: 'Confirm' },
+      { label: 'Modify', value: 'Modify plan' },
+      { label: 'Cancel', value: 'Cancel' },
+    ],
+  }
+}
+
 function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessage {
   const role = item.role === 'user' ? 'user' : 'assistant'
   const text = item.content ?? ''
+  const normalized = role === 'assistant' ? normalizeAssistantMessage(text) : null
   return createMessage({
     id: item.id,
-    text,
+    text: normalized?.text ?? text,
     className: role === 'user' ? 'input' : 'output',
     role,
     kind: 'text',
-    status: 'discussion',
+    status: normalized?.status ?? 'discussion',
     isUser: role === 'user',
     timestamp: Date.parse(item.created_at) || Date.now(),
-    confirmationOptions: role === 'assistant' ? buildConfirmationOptions(text) : undefined,
+    confirmationOptions: normalized?.confirmationOptions,
   })
 }
 
@@ -242,10 +325,12 @@ export function useOrchestratorWS(projectId: string) {
         if (item.id !== activeID) {
           return item
         }
+        const normalized = normalizeAssistantMessage(item.text)
         return {
           ...item,
-          confirmationOptions: buildConfirmationOptions(item.text),
-          status: buildConfirmationOptions(item.text) ? 'confirmation' : 'discussion',
+          text: normalized.text,
+          confirmationOptions: normalized.confirmationOptions,
+          status: normalized.status,
         }
       }),
     )

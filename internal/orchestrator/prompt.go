@@ -126,6 +126,9 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("10) For interactive TUI command submission via send_command, end text with a trailing newline so input is actually submitted.\n")
 	b.WriteString("11) After create_session, call wait_for_session_ready before sending task prompts to avoid sending into shell before agent UI is ready.\n\n")
 	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")
+	b.WriteString("13) Assistant text responses must use a JSON envelope for UI parsing:\n")
+	b.WriteString(`{"discussion":"...","commands":["..."],"confirmation":{"needed":true|false,"prompt":"..."}}` + "\n")
+	b.WriteString("14) If confirmation is needed, set confirmation.needed=true and provide a concise confirmation.prompt.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\n\n")
 	}
