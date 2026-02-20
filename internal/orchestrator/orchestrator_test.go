@@ -59,6 +59,9 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	if !contains(prompt, "Never send commands to sessions in status human_takeover") {
 		t.Fatalf("prompt missing safety rule")
 	}
+	if !contains(prompt, "You are a coordinator, not a coding worker") {
+		t.Fatalf("prompt missing coordinator-only rule")
+	}
 }
 
 func TestChatToolExecutionLoop(t *testing.T) {
@@ -237,6 +240,15 @@ func TestNormalizeOpenAIEndpoint(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("normalizeOpenAIEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestRequiresExecutionToolUsage(t *testing.T) {
+	if !requiresExecutionToolUsage("Please proceed with build and implement the fix") {
+		t.Fatalf("expected execution intent to require tool usage")
+	}
+	if requiresExecutionToolUsage("Summarize current project status only") {
+		t.Fatalf("analysis-only request should not require execution tool usage")
 	}
 }
 

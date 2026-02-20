@@ -424,6 +424,13 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 			}
 
 			if !toolUsed {
+				if o.lane == executionLane && approval.Confirmed && requiresExecutionToolUsage(userMessage) {
+					ch <- StreamEvent{
+						Type:  "error",
+						Error: "execution_requires_tool_calls: orchestrator must create/use sessions and tools instead of claiming direct execution",
+					}
+					return
+				}
 				if o.historyRepo != nil {
 					_ = o.historyRepo.TrimProjectAndRoles(ctx, projectID, o.maxHistory, o.storageRoles())
 				}
@@ -490,6 +497,25 @@ func evaluateApprovalGate(message string) approvalGate {
 		}
 	}
 	return approvalGate{Confirmed: false}
+}
+
+func requiresExecutionToolUsage(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+	keywords := []string{
+		"implement", "fix", "write code", "code this", "build this", "start building",
+		"run tests", "test this", "review code", "open session", "start session",
+		"create worktree", "dispatch", "execute", "go ahead", "proceed with build",
+		"send command", "apply changes", "commit", "merge",
+	}
+	for _, k := range keywords {
+		if strings.Contains(text, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMutatingTool(name string) bool {

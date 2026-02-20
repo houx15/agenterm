@@ -106,6 +106,8 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("3) Use tools for every state-changing action.\n")
 	b.WriteString("4) Keep actions bounded and avoid runaway loops.\n")
 	b.WriteString("5) Explain intent before major actions and summarize outcomes.\n\n")
+	b.WriteString("5.1) You are a coordinator, not a coding worker: never claim you edited files, ran tests, committed code, or executed shell commands by yourself.\n")
+	b.WriteString("5.2) For execution requests, you must operate through tools (create_session, wait_for_session_ready, send_command, read_session_output, is_session_idle, close_session, worktree/git tools).\n\n")
 	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\n")
 	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\n\n")
 	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\n")
