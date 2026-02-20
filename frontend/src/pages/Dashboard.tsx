@@ -168,7 +168,7 @@ export default function Dashboard() {
     setError('')
 
     try {
-      const [projectsData, sessionsData] = await Promise.all([listProjects<Project[]>(), listSessions<Session[]>()])
+      const [projectsData, sessionsData] = await Promise.all([listProjects<Project[]>({ status: 'active' }), listSessions<Session[]>()])
 
       const taskPairs = await Promise.all(
         projectsData.map(async (project) => ({

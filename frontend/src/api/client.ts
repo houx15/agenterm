@@ -59,8 +59,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   return (await response.json()) as T
 }
 
-export function listProjects<T>() {
-  return apiFetch<T>('/api/projects')
+export function listProjects<T>(params: { status?: string } = {}) {
+  const search = new URLSearchParams()
+  if (params.status) {
+    search.set('status', params.status)
+  }
+  const query = search.toString()
+  return apiFetch<T>(query ? `/api/projects?${query}` : '/api/projects')
 }
 
 interface ListSessionsParams {

@@ -63,7 +63,7 @@ export default function PMChat() {
   const refreshAll = useCallback(async () => {
     setError('')
     try {
-      const projectList = await listProjects<Project[]>()
+      const projectList = await listProjects<Project[]>({ status: 'active' })
       setProjects(projectList)
       if (projectList.length === 0) {
         setProjectID('')
