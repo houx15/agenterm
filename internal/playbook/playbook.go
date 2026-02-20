@@ -151,6 +151,9 @@ func (r *Registry) MatchProject(repoPath string) *Playbook {
 	}
 	r.mu.RUnlock()
 
+	if fallback, ok := snapshot["compound-engineering"]; ok {
+		return clone(fallback)
+	}
 	if fallback, ok := snapshot["pairing-coding"]; ok {
 		return clone(fallback)
 	}

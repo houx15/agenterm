@@ -209,6 +209,17 @@ export function getDemandOrchestratorReport<T>(projectID: string) {
   return apiFetch<T>(`/api/demand-orchestrator/report?${params.toString()}`)
 }
 
+export interface SessionOutputLine {
+  text: string
+  timestamp: string
+}
+
+export function getSessionOutput<T = SessionOutputLine[]>(sessionID: string, lines = 400) {
+  const params = new URLSearchParams()
+  params.set('lines', String(lines))
+  return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/output?${params.toString()}`)
+}
+
 interface ListDemandPoolParams {
   status?: string
   tag?: string

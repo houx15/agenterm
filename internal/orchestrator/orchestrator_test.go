@@ -848,6 +848,32 @@ func TestStageToolGateBlocksCreateWorktreeDuringPlan(t *testing.T) {
 	}
 }
 
+func TestStageToolGateBlocksCreateProjectInExecutionLane(t *testing.T) {
+	o := New(Options{
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_project": {
+					Name: "create_project",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "create_project", map[string]any{
+		"name":      "unexpected-project",
+		"repo_path": "/tmp/demo",
+	})
+	if err == nil {
+		t.Fatalf("expected create_project to be blocked in project-scoped orchestration lane")
+	}
+	if !strings.Contains(err.Error(), "disabled in project-scoped orchestration chat") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func contains(haystack string, needle string) bool {
 	return strings.Contains(haystack, needle)
 }

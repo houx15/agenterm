@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { listProjects, listProjectTasks, listSessions } from '../api/client'
+import { getSessionOutput, listProjects, listProjectTasks, listSessions } from '../api/client'
 import type { Project, ServerMessage, Session, Task } from '../api/types'
 import { ChevronLeft, Plus, Square } from '../components/Lucide'
 import Terminal from '../components/Terminal'
@@ -78,6 +78,40 @@ export default function Sessions() {
 
     handleServerMessage(app.lastMessage)
   }, [app.lastMessage])
+
+  useEffect(() => {
+    let cancelled = false
+    const sessionID = activeWindowInfo?.session_id?.trim()
+    const windowID = selectedWindowID?.trim()
+    if (!sessionID || !windowID) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void (async () => {
+      try {
+        const lines = await getSessionOutput<Array<{ text: string }>>(sessionID, 500)
+        if (cancelled) {
+          return
+        }
+        const snapshot = lines.map((line) => line.text ?? '').join('\n')
+        setRawBuffers((prev) => {
+          const existing = prev[windowID] ?? ''
+          if (existing.length >= snapshot.length && existing.startsWith(snapshot)) {
+            return prev
+          }
+          return { ...prev, [windowID]: snapshot }
+        })
+      } catch {
+        // keep terminal usable even if snapshot bootstrap fails
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeWindowInfo?.session_id, selectedWindowID])
 
   useEffect(() => {
     let cancelled = false

@@ -301,6 +301,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		defer close(ch)
 		actionRounds := 0
 		idlePollRounds := 0
+		executionToolRetryUsed := false
 		sessionActionRounds := make(map[string]int)
 
 		for {
@@ -452,6 +453,17 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 
 			if !toolUsed {
 				if o.lane == executionLane && approval.Confirmed && requiresExecutionToolUsage(userMessage) {
+					if !executionToolRetryUsed {
+						executionToolRetryUsed = true
+						messages = append(messages, anthropicMessage{
+							Role: "user",
+							Content: []anthropicContentBlock{{
+								Type: "text",
+								Text: "SYSTEM REMINDER: The user has already confirmed execution. You must use tools now (create_session, wait_for_session_ready, send_command, read_session_output, is_session_idle, close_session, worktree/git tools). Do not provide discussion-only output in this turn.",
+							}},
+						})
+						continue
+					}
 					ch <- StreamEvent{
 						Type:  "error",
 						Error: "execution_requires_tool_calls: orchestrator must create/use sessions and tools instead of claiming direct execution",
@@ -1529,6 +1541,9 @@ func stageToolAllowed(stage string, toolName string) bool {
 func (o *Orchestrator) enforceStageToolGate(ctx context.Context, toolName string, args map[string]any) error {
 	if o == nil || o.lane != executionLane {
 		return nil
+	}
+	if strings.TrimSpace(toolName) == "create_project" {
+		return fmt.Errorf("tool %q is disabled in project-scoped orchestration chat", strings.TrimSpace(toolName))
 	}
 	projectID, err := o.projectIDForTool(ctx, toolName, args)
 	if err != nil || strings.TrimSpace(projectID) == "" {

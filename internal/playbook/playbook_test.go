@@ -30,7 +30,7 @@ func TestNewRegistryCreatesDefaults(t *testing.T) {
 	}
 }
 
-func TestMatchProjectDefaultsToPairingCoding(t *testing.T) {
+func TestMatchProjectDefaultsToCompoundEngineering(t *testing.T) {
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/demo\n\ngo 1.24\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
@@ -50,8 +50,8 @@ func TestMatchProjectDefaultsToPairingCoding(t *testing.T) {
 	if matched == nil {
 		t.Fatalf("expected matched playbook")
 	}
-	if matched.ID != "pairing-coding" {
-		t.Fatalf("matched id=%q want pairing-coding", matched.ID)
+	if matched.ID != "compound-engineering" {
+		t.Fatalf("matched id=%q want compound-engineering", matched.ID)
 	}
 }
 

@@ -499,6 +499,20 @@ func defaultTools(client *RESTToolClient) []Tool {
 				if err != nil {
 					return nil, err
 				}
+				waitingReview, _ := out["waiting_review"].(bool)
+				humanTakeover, _ := out["human_takeover"].(bool)
+				if waitingReview || humanTakeover {
+					out["needs_response"] = true
+					if humanTakeover {
+						out["response_mode"] = "human_takeover"
+						out["next_step_hint"] = "human intervention is required; ask user or hand over session"
+					} else {
+						out["response_mode"] = "waiting_review"
+						out["next_step_hint"] = "read_session_output, then respond via send_command or request user confirmation"
+					}
+				} else {
+					out["needs_response"] = false
+				}
 				return out, nil
 			},
 		},
