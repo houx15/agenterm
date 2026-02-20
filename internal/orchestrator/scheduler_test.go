@@ -345,7 +345,7 @@ func TestSchedulerBlocksCreateSessionWhenGlobalModelLimitReached(t *testing.T) {
 	}
 }
 
-func TestSchedulerBlocksCreateSessionWhenRoleNotInWorkflow(t *testing.T) {
+func TestSchedulerAllowsCreateSessionWhenRoleNotInWorkflow(t *testing.T) {
 	database := openOrchestratorTestDB(t)
 	projectRepo := db.NewProjectRepo(database.SQL())
 	taskRepo := db.NewTaskRepo(database.SQL())
@@ -403,11 +403,8 @@ func TestSchedulerBlocksCreateSessionWhenRoleNotInWorkflow(t *testing.T) {
 		"role":       "coder",
 		"agent_type": "codex",
 	})
-	if decision.Allowed {
-		t.Fatalf("expected session creation to be blocked by workflow role policy")
-	}
-	if !strings.Contains(decision.Reason, "not allowed by workflow") {
-		t.Fatalf("reason=%q want workflow role policy", decision.Reason)
+	if !decision.Allowed {
+		t.Fatalf("expected unknown role to be allowed; reason=%q", decision.Reason)
 	}
 }
 

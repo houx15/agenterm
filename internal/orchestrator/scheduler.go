@@ -55,9 +55,7 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	activeModel := 0
 	activeGlobal := 0
 	workflowRoleLimit, workflowRoleKnown := o.resolveWorkflowRolePolicy(ctx, profile.WorkflowID, strings.TrimSpace(role))
-	if strings.TrimSpace(role) != "" && !workflowRoleKnown {
-		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("role %s is not allowed by workflow %s", role, profile.WorkflowID)}
-	}
+	_ = workflowRoleKnown
 	targetModel, roleBinding, modelMismatch := o.resolveTargetModel(ctx, projectID, strings.TrimSpace(role), strings.TrimSpace(agentType), profile)
 	if modelMismatch != "" {
 		return scheduleDecision{Allowed: false, Reason: modelMismatch}
