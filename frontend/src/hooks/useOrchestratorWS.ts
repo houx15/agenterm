@@ -69,6 +69,32 @@ function parseApprovalRequiredResult(
   }
 }
 
+function parseStageToolBlockedResult(
+  result: unknown,
+): { text: string; confirmationOptions: MessageActionOption[] } | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null
+  }
+  const payload = result as Record<string, unknown>
+  if (String(payload.error ?? '').trim() !== 'stage_tool_not_allowed') {
+    return null
+  }
+  const stage = String(payload.stage ?? '').trim() || 'current'
+  const tool = String(payload.tool ?? '').trim() || 'requested tool'
+  const reason = String(payload.reason ?? '').trim()
+  const text = reason
+    ? `Execution policy blocked this action.\n${reason}\nPlease confirm whether to continue with a ${stage}-compatible operation.`
+    : `Execution policy blocked ${tool} for ${stage} stage. Please adjust the plan.`
+  return {
+    text,
+    confirmationOptions: [
+      { label: 'Adjust Plan', value: `Adjust plan for ${stage} stage and retry.` },
+      { label: 'Move Stage', value: `Propose transition to next stage before using ${tool}.` },
+      { label: 'Cancel', value: 'Cancel this operation.' },
+    ],
+  }
+}
+
 function buildConfirmationOptions(text: string): MessageActionOption[] | undefined {
   const trimmed = text.trim()
   if (!trimmed.endsWith('?')) {
@@ -325,6 +351,22 @@ export function useOrchestratorWS(projectId: string) {
               kind: 'text',
               status: 'confirmation',
               confirmationOptions: approvalPrompt.confirmationOptions,
+              timestamp: Date.now(),
+            }),
+          )
+          return
+        }
+        const stageBlockedPrompt = parseStageToolBlockedResult(parsed.result)
+        if (stageBlockedPrompt) {
+          addMessage(
+            createMessage({
+              id: `stage-tool-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              text: stageBlockedPrompt.text,
+              className: 'prompt',
+              role: 'assistant',
+              kind: 'text',
+              status: 'confirmation',
+              confirmationOptions: stageBlockedPrompt.confirmationOptions,
               timestamp: Date.now(),
             }),
           )

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -132,6 +133,15 @@ type llmConfig struct {
 	Model    string
 	APIKey   string
 	BaseURL  string
+}
+
+type stageToolGateError struct {
+	Stage string
+	Tool  string
+}
+
+func (e stageToolGateError) Error() string {
+	return fmt.Sprintf("stage_tool_not_allowed: tool %q is not allowed during %s stage", strings.TrimSpace(e.Tool), strings.TrimSpace(e.Stage))
 }
 
 func New(opts Options) *Orchestrator {
@@ -405,7 +415,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 					}
 					result, err := o.executeTool(ctx, block.Name, block.Input)
 					if err != nil {
-						result = map[string]any{"error": err.Error()}
+						result = toolExecutionErrorResult(err)
 					}
 					ch <- StreamEvent{Type: "tool_result", Name: block.Name, Result: result}
 					resultJSON := toJSON(result)
@@ -1008,6 +1018,26 @@ func toJSON(v any) string {
 	return string(buf)
 }
 
+func toolExecutionErrorResult(err error) map[string]any {
+	if err == nil {
+		return map[string]any{"error": "unknown_tool_error"}
+	}
+	var stageErr stageToolGateError
+	if errors.As(err, &stageErr) {
+		return map[string]any{
+			"error": "stage_tool_not_allowed",
+			"tool":  strings.TrimSpace(stageErr.Tool),
+			"stage": strings.TrimSpace(stageErr.Stage),
+			"reason": fmt.Sprintf(
+				"tool %q is not allowed during %s stage",
+				strings.TrimSpace(stageErr.Tool),
+				strings.TrimSpace(stageErr.Stage),
+			),
+		}
+	}
+	return map[string]any{"error": err.Error()}
+}
+
 func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[string]any) (any, error) {
 	if o == nil || o.toolset == nil {
 		return nil, fmt.Errorf("orchestrator tools unavailable")
@@ -1502,7 +1532,7 @@ func (o *Orchestrator) enforceStageToolGate(ctx context.Context, toolName string
 	if stageToolAllowed(stage, toolName) {
 		return nil
 	}
-	return fmt.Errorf("stage_tool_not_allowed: tool %q is not allowed during %s stage", strings.TrimSpace(toolName), stage)
+	return stageToolGateError{Stage: stage, Tool: strings.TrimSpace(toolName)}
 }
 
 func (o *Orchestrator) projectIDForTool(ctx context.Context, toolName string, args map[string]any) (string, error) {

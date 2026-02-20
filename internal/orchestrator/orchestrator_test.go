@@ -786,6 +786,19 @@ func TestStageToolGateAllowsCreateTaskDuringPlan(t *testing.T) {
 	}
 }
 
+func TestToolExecutionErrorResultForStageGate(t *testing.T) {
+	result := toolExecutionErrorResult(stageToolGateError{Stage: "plan", Tool: "merge_worktree"})
+	if result["error"] != "stage_tool_not_allowed" {
+		t.Fatalf("error=%v want stage_tool_not_allowed", result["error"])
+	}
+	if result["stage"] != "plan" {
+		t.Fatalf("stage=%v want plan", result["stage"])
+	}
+	if result["tool"] != "merge_worktree" {
+		t.Fatalf("tool=%v want merge_worktree", result["tool"])
+	}
+}
+
 func contains(haystack string, needle string) bool {
 	return strings.Contains(haystack, needle)
 }
