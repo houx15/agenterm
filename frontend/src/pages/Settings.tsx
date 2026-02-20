@@ -25,6 +25,23 @@ type TabKey = 'agents' | 'playbooks' | 'asr'
 type WorkflowStageKey = keyof PlaybookWorkflow
 type RoleTemplateKey = 'planner' | 'worker' | 'reviewer' | 'tester'
 
+const TOOL_OPTIONS = [
+  'get_project_status',
+  'create_task',
+  'create_worktree',
+  'write_task_spec',
+  'create_session',
+  'wait_for_session_ready',
+  'send_command',
+  'read_session_output',
+  'is_session_idle',
+  'can_close_session',
+  'close_session',
+  'merge_worktree',
+  'resolve_merge_conflict',
+  'generate_progress_report',
+]
+
 const DEFAULT_AGENT: AgentConfig = {
   id: '',
   name: '',
@@ -543,6 +560,17 @@ export default function Settings() {
     updateRole(stageKey, roleIndex, { allowed_agents: allowed })
   }
 
+  function toggleRoleAction(stageKey: WorkflowStageKey, roleIndex: number, action: string, checked: boolean) {
+    const current = playbookDraft.workflow[stageKey].roles[roleIndex]
+    if (!current) {
+      return
+    }
+    const next = checked
+      ? [...(current.actions_allowed ?? []).filter((item) => item !== action), action]
+      : (current.actions_allowed ?? []).filter((item) => item !== action)
+    updateRole(stageKey, roleIndex, { actions_allowed: next })
+  }
+
   async function saveAgent() {
     setBusy(true)
     setMessage('')
@@ -1012,13 +1040,21 @@ export default function Settings() {
                               />
                             </label>
 
-                            <label>
-                              Actions Allowed (comma-separated tool names)
-                              <input
-                                value={(role.actions_allowed ?? []).join(', ')}
-                                onChange={(event) => updateRole(stageKey, roleIndex, { actions_allowed: parseCSV(event.target.value) })}
-                              />
-                            </label>
+                            <div className="settings-role-agents">
+                              <span>Actions Allowed</span>
+                              <div className="settings-role-agents-grid">
+                                {TOOL_OPTIONS.map((action) => (
+                                  <label key={`${stageKey}-${roleIndex}-action-${action}`} className="settings-role-agent-item">
+                                    <input
+                                      checked={(role.actions_allowed ?? []).includes(action)}
+                                      onChange={(event) => toggleRoleAction(stageKey, roleIndex, action, event.target.checked)}
+                                      type="checkbox"
+                                    />
+                                    <span>{action}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
 
                             <label>
                               Handoff To (comma-separated role names)

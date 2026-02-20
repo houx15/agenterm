@@ -45,6 +45,30 @@ function buildToolResultText(result: unknown): string {
   return `[\u2705 ${text}]`
 }
 
+function parseApprovalRequiredResult(
+  result: unknown,
+): { text: string; confirmationOptions: MessageActionOption[] } | null {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return null
+  }
+  const payload = result as Record<string, unknown>
+  if (String(payload.error ?? '').trim() !== 'approval_required') {
+    return null
+  }
+  const reason = String(payload.reason ?? '').trim()
+  const text = reason
+    ? `Approval needed before execution.\n${reason}\nProceed with the proposed operations?`
+    : 'Approval needed before execution. Proceed with the proposed operations?'
+  return {
+    text,
+    confirmationOptions: [
+      { label: 'Confirm', value: 'Approved. Execute now.' },
+      { label: 'Modify Plan', value: 'Modify plan before execution.' },
+      { label: 'Cancel', value: 'Cancel execution for now.' },
+    ],
+  }
+}
+
 function buildConfirmationOptions(text: string): MessageActionOption[] | undefined {
   const trimmed = text.trim()
   if (!trimmed.endsWith('?')) {
@@ -286,6 +310,21 @@ export function useOrchestratorWS(projectId: string) {
 
       if (parsed.type === 'tool_result') {
         flushBufferedTokens()
+        const approvalPrompt = parseApprovalRequiredResult(parsed.result)
+        if (approvalPrompt) {
+          addMessage(
+            createMessage({
+              id: `approval-required-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              text: approvalPrompt.text,
+              className: 'prompt',
+              role: 'assistant',
+              kind: 'text',
+              confirmationOptions: approvalPrompt.confirmationOptions,
+              timestamp: Date.now(),
+            }),
+          )
+          return
+        }
         addMessage(
           createMessage({
             id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
