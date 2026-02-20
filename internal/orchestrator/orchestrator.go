@@ -144,6 +144,16 @@ func (e stageToolGateError) Error() string {
 	return fmt.Sprintf("stage_tool_not_allowed: tool %q is not allowed during %s stage", strings.TrimSpace(e.Tool), strings.TrimSpace(e.Stage))
 }
 
+type roleToolApprovalRequiredError struct {
+	Tool string
+	Role string
+	Mode string
+}
+
+func (e roleToolApprovalRequiredError) Error() string {
+	return fmt.Sprintf("approval_required: tool %q requires explicit user approval for role %q (mode=%s)", strings.TrimSpace(e.Tool), strings.TrimSpace(e.Role), strings.TrimSpace(e.Mode))
+}
+
 func New(opts Options) *Orchestrator {
 	model := strings.TrimSpace(opts.Model)
 	if model == "" {
@@ -413,7 +423,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 							}
 						}
 					}
-					result, err := o.executeTool(ctx, block.Name, block.Input)
+					result, err := o.executeToolWithApproval(ctx, block.Name, block.Input, approval.Confirmed)
 					if err != nil {
 						result = toolExecutionErrorResult(err)
 					}
@@ -1035,17 +1045,29 @@ func toolExecutionErrorResult(err error) map[string]any {
 			),
 		}
 	}
+	var roleApprovalErr roleToolApprovalRequiredError
+	if errors.As(err, &roleApprovalErr) {
+		return map[string]any{
+			"error":  "approval_required",
+			"reason": fmt.Sprintf("tool %q is not pre-approved for role %q (mode=%s)", strings.TrimSpace(roleApprovalErr.Tool), strings.TrimSpace(roleApprovalErr.Role), strings.TrimSpace(roleApprovalErr.Mode)),
+			"hint":   "ask user to confirm execution for this role/tool, then retry",
+		}
+	}
 	return map[string]any{"error": err.Error()}
 }
 
 func (o *Orchestrator) executeTool(ctx context.Context, name string, args map[string]any) (any, error) {
+	return o.executeToolWithApproval(ctx, name, args, false)
+}
+
+func (o *Orchestrator) executeToolWithApproval(ctx context.Context, name string, args map[string]any, approved bool) (any, error) {
 	if o == nil || o.toolset == nil {
 		return nil, fmt.Errorf("orchestrator tools unavailable")
 	}
 	if err := o.enforceStageToolGate(ctx, name, args); err != nil {
 		return nil, err
 	}
-	if err := o.enforceRoleContractForTool(ctx, name, args); err != nil {
+	if err := o.enforceRoleContractForTool(ctx, name, args, approved); err != nil {
 		return nil, err
 	}
 	if requiresExplicitSessionID(name) {
@@ -1077,7 +1099,7 @@ func requiresExplicitSessionID(name string) bool {
 	}
 }
 
-func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName string, args map[string]any) error {
+func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName string, args map[string]any, approved bool) error {
 	if o == nil || o.playbookRegistry == nil || o.projectRepo == nil || o.taskRepo == nil || o.sessionRepo == nil {
 		return nil
 	}
@@ -1112,8 +1134,8 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		if strings.TrimSpace(agentType) != "" && len(role.AllowedAgents) > 0 && !containsFold(role.AllowedAgents, agentType) {
 			return fmt.Errorf("agent %q is not allowed for role %q in stage %s", agentType, roleName, stage)
 		}
-		if !toolAllowedByRole(toolName, *role) {
-			return fmt.Errorf("tool %q is not allowed for role %q (mode=%s)", toolName, roleName, role.Mode)
+		if !toolAllowedByRole(toolName, *role) && !approved {
+			return roleToolApprovalRequiredError{Tool: toolName, Role: roleName, Mode: role.Mode}
 		}
 		if blocked, reason := o.checkRoleHandoffAndRetries(ctx, taskID, *pb, roleName); blocked {
 			return fmt.Errorf("role loop blocked for %q: %s", roleName, reason)
@@ -1143,8 +1165,8 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		if role == nil {
 			return nil
 		}
-		if !toolAllowedByRole(toolName, *role) {
-			return fmt.Errorf("tool %q is not allowed for role %q (mode=%s)", toolName, sess.Role, role.Mode)
+		if !toolAllowedByRole(toolName, *role) && !approved {
+			return roleToolApprovalRequiredError{Tool: toolName, Role: sess.Role, Mode: role.Mode}
 		}
 		if missing := missingRoleInputs(*role, task, sess, args); len(missing) > 0 {
 			return fmt.Errorf("missing required role inputs for %q: %s", sess.Role, strings.Join(missing, ", "))

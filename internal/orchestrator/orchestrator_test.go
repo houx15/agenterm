@@ -467,10 +467,21 @@ func TestExecuteToolBlocksWhenRoleActionNotAllowed(t *testing.T) {
 		"text":       "ls\n",
 	})
 	if err == nil {
-		t.Fatalf("expected role contract action error")
+		t.Fatalf("expected role tool approval-required error")
 	}
-	if !strings.Contains(err.Error(), "not allowed for role") {
+	if !strings.Contains(err.Error(), "approval_required") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, err := o.executeToolWithApproval(context.Background(), "send_command", map[string]any{
+		"session_id": sess.ID,
+		"text":       "ls\n",
+	}, true)
+	if err != nil {
+		t.Fatalf("expected approved non-listed tool to run: %v", err)
+	}
+	if resultMap, ok := result.(map[string]any); !ok || resultMap["status"] != "sent" {
+		t.Fatalf("unexpected result: %#v", result)
 	}
 }
 

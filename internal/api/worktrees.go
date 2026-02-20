@@ -53,7 +53,7 @@ func (h *handler) createWorktree(w http.ResponseWriter, r *http.Request) {
 
 	repoRoot, err := gitops.GetRepoRoot(project.RepoPath)
 	if err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid project repo_path")
+		jsonError(w, http.StatusBadRequest, fmt.Sprintf("project repo_path is not a valid git repository: %v", err))
 		return
 	}
 

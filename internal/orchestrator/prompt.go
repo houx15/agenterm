@@ -121,7 +121,7 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("5.2) For execution requests, you must operate through tools (create_session, wait_for_session_ready, send_command, read_session_output, is_session_idle, close_session, worktree/git tools).\n\n")
 	b.WriteString("6) Transitions are approval-driven: ask explicit user confirmation before running stage-changing actions.\n")
 	b.WriteString("7) Before create_session/send_command/merge/close, provide a brief execution proposal (agents, count, outputs) and wait for confirmation.\n\n")
-	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required and actions_allowed.\n")
+	b.WriteString("8) Role contracts are authoritative: respect each role's inputs_required; treat actions_allowed as pre-approved actions, and request user approval before using non-listed tools for that role.\n")
 	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\n\n")
 	b.WriteString("10) For interactive TUI command submission via send_command, end text with a trailing newline so input is actually submitted.\n")
 	b.WriteString("11) After create_session, call wait_for_session_ready before sending task prompts to avoid sending into shell before agent UI is ready.\n\n")
