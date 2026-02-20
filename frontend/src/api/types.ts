@@ -200,6 +200,39 @@ export interface AgentConfig {
   notes?: string
 }
 
+export interface AgentRuntimeAssignment {
+  session_id: string
+  project_id?: string
+  project_name?: string
+  task_id?: string
+  task_title?: string
+  role: string
+  status: string
+  last_activity_at?: string
+}
+
+export interface AgentRuntimeStatusItem {
+  agent_id: string
+  agent_name: string
+  capacity: number
+  assigned: number
+  orchestrator: number
+  busy: number
+  idle: number
+  overflow: number
+  assignments: AgentRuntimeAssignment[]
+}
+
+export interface AgentStatusResponse {
+  total_configured: number
+  total_capacity: number
+  total_busy: number
+  total_assigned: number
+  total_orchestrator: number
+  total_idle: number
+  items: AgentRuntimeStatusItem[]
+}
+
 export interface PlaybookPhase {
   name: string
   agent: string

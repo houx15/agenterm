@@ -132,6 +132,10 @@ export function listAgents<T>() {
   return apiFetch<T>('/api/agents')
 }
 
+export function listAgentStatuses<T>() {
+  return apiFetch<T>('/api/agents/status')
+}
+
 export function createAgent<T>(input: unknown) {
   return apiFetch<T>('/api/agents', {
     method: 'POST',

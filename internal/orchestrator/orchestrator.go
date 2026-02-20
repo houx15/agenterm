@@ -1205,6 +1205,7 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		if blocked, reason := o.checkRoleHandoffAndRetries(ctx, taskID, *pb, roleName); blocked {
 			return fmt.Errorf("role loop blocked for %q: %s", roleName, reason)
 		}
+		hydrateCreateSessionInputs(args, task)
 		if missing := missingRoleInputs(*role, task, nil, args); len(missing) > 0 {
 			return fmt.Errorf("missing required role inputs for %q: %s", roleName, strings.Join(missing, ", "))
 		}
@@ -1238,6 +1239,61 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		}
 	}
 	return nil
+}
+
+func hydrateCreateSessionInputs(args map[string]any, task *db.Task) {
+	if args == nil || task == nil {
+		return
+	}
+	inputs := parseInputsMap(args["inputs"])
+	setIfMissing := func(key string, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if existing, ok := inputs[key]; ok {
+			if s, ok := existing.(string); ok && strings.TrimSpace(s) != "" {
+				return
+			}
+		}
+		inputs[key] = value
+	}
+
+	goal := strings.TrimSpace(task.Description)
+	if goal == "" {
+		goal = strings.TrimSpace(task.Title)
+	}
+	setIfMissing("goal", goal)
+	setIfMissing("task_title", task.Title)
+	setIfMissing("task_description", task.Description)
+	setIfMissing("spec_path", task.SpecPath)
+	setIfMissing("worktree_id", task.WorktreeID)
+	setIfMissing("project_id", task.ProjectID)
+	setIfMissing("task_id", task.ID)
+
+	args["inputs"] = inputs
+}
+
+func parseInputsMap(raw any) map[string]any {
+	out := map[string]any{}
+	switch typed := raw.(type) {
+	case map[string]any:
+		for k, v := range typed {
+			out[k] = v
+		}
+	case map[string]string:
+		for k, v := range typed {
+			out[k] = v
+		}
+	case string:
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(typed)), &decoded); err == nil {
+			for k, v := range decoded {
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 func (o *Orchestrator) checkRoleHandoffAndRetries(ctx context.Context, taskID string, pb playbook.Playbook, roleName string) (bool, string) {
@@ -1714,21 +1770,20 @@ func missingRoleInputs(role playbook.StageRole, task *db.Task, session *db.Sessi
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(key), "inputs") {
-			if nested, ok := value.(map[string]any); ok {
-				for nestedKey, nestedValue := range nested {
-					if nestedValue == nil {
+			nested := parseInputsMap(value)
+			for nestedKey, nestedValue := range nested {
+				if nestedValue == nil {
+					continue
+				}
+				switch typed := nestedValue.(type) {
+				case string:
+					if strings.TrimSpace(typed) == "" {
 						continue
 					}
-					switch typed := nestedValue.(type) {
-					case string:
-						if strings.TrimSpace(typed) == "" {
-							continue
-						}
-					}
-					available[strings.ToLower(strings.TrimSpace(nestedKey))] = struct{}{}
 				}
-				continue
+				available[strings.ToLower(strings.TrimSpace(nestedKey))] = struct{}{}
 			}
+			continue
 		}
 		switch v := value.(type) {
 		case string:
@@ -1751,6 +1806,9 @@ func missingRoleInputs(role playbook.StageRole, task *db.Task, session *db.Sessi
 		}
 		if strings.TrimSpace(task.SpecPath) != "" {
 			available["spec_path"] = struct{}{}
+		}
+		if strings.TrimSpace(task.Description) != "" || strings.TrimSpace(task.Title) != "" {
+			available["goal"] = struct{}{}
 		}
 	}
 	if session != nil {

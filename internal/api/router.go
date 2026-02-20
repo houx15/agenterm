@@ -125,6 +125,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("DELETE /api/sessions/{id}", handler.deleteSession)
 
 	mux.HandleFunc("GET /api/agents", handler.listAgents)
+	mux.HandleFunc("GET /api/agents/status", handler.listAgentStatuses)
 	mux.HandleFunc("GET /api/agents/{id}", handler.getAgent)
 	mux.HandleFunc("POST /api/agents", handler.createAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   createProject,
+  listAgentStatuses,
   listAgents,
   listPlaybooks,
   listProjects,
@@ -11,6 +12,7 @@ import {
 } from '../api/client'
 import type {
   AgentConfig,
+  AgentStatusResponse,
   OutputMessage,
   Playbook,
   Project,
@@ -153,6 +155,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [agents, setAgents] = useState<AgentConfig[]>([])
+  const [agentStatus, setAgentStatus] = useState<AgentStatusResponse | null>(null)
   const [tasksByProject, setTasksByProject] = useState<Record<string, Task[]>>({})
   const [activity, setActivity] = useState<DashboardActivity[]>([])
   const [loading, setLoading] = useState(true)
@@ -167,7 +170,11 @@ export default function Dashboard() {
     setError('')
 
     try {
-      const [projectsData, sessionsData] = await Promise.all([listProjects<Project[]>({ status: 'active' }), listSessions<Session[]>()])
+      const [projectsData, sessionsData, agentStatusData] = await Promise.all([
+        listProjects<Project[]>({ status: 'active' }),
+        listSessions<Session[]>(),
+        listAgentStatuses<AgentStatusResponse>(),
+      ])
 
       const taskPairs = await Promise.all(
         projectsData.map(async (project) => ({
@@ -183,6 +190,7 @@ export default function Dashboard() {
 
       setProjects(projectsData)
       setSessions(sessionsData)
+      setAgentStatus(agentStatusData)
       setTasksByProject(nextTasksByProject)
       setActivity(buildActivityFromData(projectsData, nextTasksByProject, sessionsData))
     } catch (err) {
@@ -385,6 +393,28 @@ export default function Dashboard() {
   }, [allWindows])
 
   const agentTeamSummary = useMemo(() => {
+    if (agentStatus) {
+      return {
+        configuredAgents: agentStatus.total_configured,
+        totalCapacity: agentStatus.total_capacity,
+        totalBusy: agentStatus.total_busy,
+        totalAssigned: agentStatus.total_assigned,
+        totalOrchestrator: agentStatus.total_orchestrator,
+        totalIdle: agentStatus.total_idle,
+        workingRatio: agentStatus.total_capacity > 0 ? Math.round((agentStatus.total_busy / agentStatus.total_capacity) * 100) : 0,
+        byType: agentStatus.items.map((item) => [
+          item.agent_id,
+          {
+            capacity: item.capacity,
+            assigned: item.assigned,
+            orchestrator: item.orchestrator,
+            idle: item.idle,
+            overflow: item.overflow,
+          },
+        ]) as Array<[string, { capacity: number; assigned: number; orchestrator: number; idle: number; overflow: number }]>,
+      }
+    }
+
     const byType: Array<[string, { capacity: number; assigned: number; orchestrator: number; idle: number; overflow: number }]> = []
 
     let totalCapacity = 0
@@ -421,7 +451,26 @@ export default function Dashboard() {
       workingRatio,
       byType: byType.sort(([a], [b]) => a.localeCompare(b)),
     }
-  }, [agents, sessions])
+  }, [agentStatus, agents, sessions])
+
+  const liveAssignmentsByAgent = useMemo(() => {
+    const map = new Map<string, Array<{ projectName: string; taskTitle: string; role: string; status: string }>>()
+    if (!agentStatus) {
+      return map
+    }
+    for (const item of agentStatus.items) {
+      map.set(
+        item.agent_id,
+        item.assignments.map((assignment) => ({
+          projectName: assignment.project_name || 'Unassigned',
+          taskTitle: assignment.task_title || assignment.task_id || assignment.session_id,
+          role: assignment.role || 'worker',
+          status: assignment.status || 'unknown',
+        })),
+      )
+    }
+    return map
+  }, [agentStatus])
 
   const handleCreateProject = () => {
     setCreateProjectOpen(true)
@@ -591,6 +640,11 @@ export default function Dashboard() {
                     <small>{stat.assigned} assigned</small>
                     <small>{stat.orchestrator} orchestrator</small>
                     <small>{stat.idle} idle</small>
+                    {(liveAssignmentsByAgent.get(agentType) ?? []).slice(0, 2).map((assignment, index) => (
+                      <small key={`${agentType}-assignment-${index}`}>
+                        {assignment.projectName}: {assignment.role} ({assignment.status})
+                      </small>
+                    ))}
                     {stat.overflow > 0 && <small>+{stat.overflow} overflow</small>}
                   </article>
                 ))}
