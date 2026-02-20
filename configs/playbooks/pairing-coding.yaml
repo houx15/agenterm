@@ -1,29 +1,151 @@
 id: pairing-coding
 name: Pairing Coding
-description: Two-person style flow with one planner and one codebase reader, then builder and reviewer pairing.
+description: Two-agent pairing flow. Planner writes the spec, codebase-reader surfaces constraints, then builder and reviewer iterate to delivery.
+
 workflow:
   plan:
     enabled: true
+    stage_policy:
+      enter_gate: user_approval
+      exit_gate: spec_written
+      max_parallel_worktrees: 1
     roles:
       - name: planner
-        responsibilities: Clarify scope, split milestones, and define acceptance criteria.
-        allowed_agents: [claude-code, codex]
-        suggested_prompt: Turn the user goal into an actionable engineering plan with milestones.
+        mode: planner
+        responsibilities: Clarify scope, split milestones, and write a task spec to .orchestra/spec.md.
+        allowed_agents: [claude-code]
+        inputs_required: [task_id, project_id]
+        handoff_to: [codebase-reader]
+        suggested_prompt: |
+          You are the planning agent for this task.
+
+          Task: {task_title}
+          Description: {task_description}
+
+          Your job:
+          1. Understand the task goal and identify any unknowns or risks.
+          2. Write a concise task spec to the file .orchestra/spec.md with these sections:
+             ## Goal
+             ## Acceptance Criteria
+             ## Out of Scope
+             ## Milestones
+          3. Keep each section brief and actionable.
+          4. When the spec file is written, output "DONE" and stop.
+        completion_criteria:
+          - .orchestra/spec.md written with Goal, Acceptance Criteria, Milestones sections
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: file
+          required: [.orchestra/spec.md]
+        gates:
+          requires_user_approval: false
+          pass_condition: spec file written
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [spec_missing, agent_error]
+
       - name: codebase-reader
-        responsibilities: Read the current repository and surface relevant architecture constraints.
-        allowed_agents: [claude-code, codex]
-        suggested_prompt: Explore the repository and summarize key files, risks, and constraints.
+        mode: planner
+        responsibilities: Explore the repository and append architecture constraints to the task spec.
+        allowed_agents: [claude-code, gemini-cli]
+        inputs_required: [task_id, project_id, spec_path]
+        handoff_to: [builder]
+        suggested_prompt: |
+          You are the codebase analysis agent for this task.
+
+          Task: {task_title}
+          Spec: {spec_path}
+
+          Your job:
+          1. Read the task spec at {spec_path}.
+          2. Explore the repository structure relevant to the task scope.
+          3. Identify: key files to change, existing patterns to follow, integration points, and risks.
+          4. Append a "## Codebase Context" section to {spec_path} with your findings.
+          5. When done, output "DONE" and stop.
+        completion_criteria:
+          - Codebase Context section appended to the spec file
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: file
+          required: [.orchestra/spec.md]
+        gates:
+          requires_user_approval: false
+          pass_condition: codebase context written
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [agent_error]
+
   build:
     enabled: true
+    stage_policy:
+      enter_gate: plan_complete
+      exit_gate: review_passed
+      max_parallel_worktrees: 2
     roles:
       - name: builder
-        responsibilities: Implement the agreed plan in small reviewable commits.
-        allowed_agents: [codex]
-        suggested_prompt: Implement phase tasks and keep each change verifiable.
+        mode: worker
+        responsibilities: Implement the plan in small focused commits inside the assigned worktree.
+        allowed_agents: [codex, opencode]
+        inputs_required: [task_id, project_id, spec_path, worktree_id]
+        handoff_to: [reviewer]
+        suggested_prompt: |
+          You are the implementation agent for this task.
+
+          Task: {task_title}
+          Spec: {spec_path}
+
+          Your job:
+          1. Read the full task spec at {spec_path} including the Codebase Context section.
+          2. Implement the required changes in small focused commits.
+          3. Run existing tests after each logical change to verify nothing breaks.
+          4. Do not change code unrelated to the task scope.
+          5. When implementation is complete and tests pass, make a final commit with the message containing [READY_FOR_REVIEW].
+          6. Output "DONE" and stop.
+        completion_criteria:
+          - All required changes committed
+          - Tests passing
+          - Final commit message contains [READY_FOR_REVIEW]
+        outputs_contract:
+          type: commit
+          required: [READY_FOR_REVIEW commit]
+        gates:
+          requires_user_approval: false
+          pass_condition: ready_for_review_commit
+        retry_policy:
+          max_iterations: 3
+          escalate_on: [test_failure, build_error, agent_error]
+
       - name: reviewer
-        responsibilities: Review each build increment and request fixes before merge.
-        allowed_agents: [claude-code, codex]
-        suggested_prompt: Review the code diffs and list concrete issues with severity.
+        mode: reviewer
+        responsibilities: Review the implementation against the spec and clearly list any issues before merge.
+        allowed_agents: [claude-code, gemini-cli]
+        inputs_required: [task_id, project_id, spec_path, session_id]
+        suggested_prompt: |
+          You are the code reviewer for this task.
+
+          Task: {task_title}
+          Spec: {spec_path}
+
+          Your job:
+          1. Read the task spec at {spec_path}.
+          2. Review all changes vs the base branch using: git diff main...HEAD
+          3. Check: correctness vs acceptance criteria, code quality, test coverage, edge cases, and regressions.
+          4. If issues found: list each with file path, line reference, severity (critical/minor), and suggested fix.
+          5. If no issues: output "LGTM".
+          6. Output "DONE" when your review is complete.
+        completion_criteria:
+          - Explicit LGTM or issue list produced
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: report
+          required: [review verdict]
+        gates:
+          requires_user_approval: false
+          pass_condition: lgtm_or_issues_listed
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [agent_error]
+
   test:
     enabled: false
     roles: []

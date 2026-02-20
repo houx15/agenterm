@@ -1,33 +1,201 @@
 id: tdd
 name: TDD Coding
-description: Test-driven workflow where tests/specs are written first, then implementation and refactoring.
+description: Test-driven workflow. Tests and specs are written first, then implementation makes them pass, then refactoring cleans up, then QA validates.
+
 workflow:
   plan:
     enabled: true
+    stage_policy:
+      enter_gate: user_approval
+      exit_gate: test_plan_written
+      max_parallel_worktrees: 1
     roles:
       - name: test-planner
-        responsibilities: Define expected behaviors, edge cases, and test strategy before coding.
-        allowed_agents: [claude-code, codex]
-        suggested_prompt: Convert requirements into testable scenarios and concrete test cases.
+        mode: planner
+        responsibilities: Convert requirements into testable scenarios and write a test plan spec before any code is written.
+        allowed_agents: [claude-code]
+        inputs_required: [task_id, project_id]
+        handoff_to: [test-writer]
+        suggested_prompt: |
+          You are the test planning agent for this task.
+
+          Task: {task_title}
+          Description: {task_description}
+
+          Your job:
+          1. Analyze the task requirements and identify all behaviors to be verified.
+          2. Write a test plan to .orchestra/spec.md with these sections:
+             ## Goal
+             ## Behaviors to Test
+             (for each behavior: input, expected output, edge cases)
+             ## Test Strategy
+             (unit, integration, or e2e? which test files/directories?)
+             ## Out of Scope
+          3. Be specific: name the functions, modules, or API endpoints to test.
+          4. When done, output "DONE" and stop.
+        completion_criteria:
+          - .orchestra/spec.md written with Behaviors to Test and Test Strategy sections
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: file
+          required: [.orchestra/spec.md]
+        gates:
+          requires_user_approval: false
+          pass_condition: test plan written
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [spec_missing, agent_error]
+
   build:
     enabled: true
+    stage_policy:
+      enter_gate: plan_complete
+      exit_gate: all_tests_passing
+      max_parallel_worktrees: 1
     roles:
       - name: test-writer
-        responsibilities: Write or update failing tests/specs for each behavior slice.
+        mode: worker
+        responsibilities: Write failing tests for each behavior defined in the test plan before any implementation.
         allowed_agents: [claude-code, codex]
-        suggested_prompt: Create minimal failing tests that capture required behavior.
+        inputs_required: [task_id, project_id, spec_path, worktree_id]
+        handoff_to: [implementer]
+        suggested_prompt: |
+          You are the test authoring agent for this task.
+
+          Task: {task_title}
+          Test Plan: {spec_path}
+
+          Your job:
+          1. Read the test plan at {spec_path}.
+          2. Write failing tests for every behavior listed in the plan.
+          3. Do NOT write any implementation code — tests must fail because the feature does not exist yet.
+          4. Use the existing test framework and conventions in this repository.
+          5. Run the tests to confirm they fail (not error) before committing.
+          6. Commit the failing tests with a clear message describing what they cover.
+          7. Output "DONE" and stop.
+        completion_criteria:
+          - All planned test cases written
+          - Tests fail (not error) when run
+          - Failing tests committed
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: commit
+          required: [failing tests commit]
+        gates:
+          requires_user_approval: false
+          pass_condition: failing_tests_committed
+        retry_policy:
+          max_iterations: 3
+          escalate_on: [test_error, agent_error]
+
       - name: implementer
-        responsibilities: Implement code to make tests pass with minimal scope changes.
-        allowed_agents: [codex]
-        suggested_prompt: Implement only what is needed to satisfy the failing tests.
+        mode: worker
+        responsibilities: Implement only the code needed to make the failing tests pass with no extra scope.
+        allowed_agents: [codex, opencode]
+        inputs_required: [task_id, project_id, spec_path, worktree_id]
+        handoff_to: [refactorer]
+        suggested_prompt: |
+          You are the implementation agent for this task.
+
+          Task: {task_title}
+          Test Plan: {spec_path}
+
+          Your job:
+          1. Read the test plan at {spec_path} to understand expected behaviors.
+          2. Run the existing test suite to see which tests are failing.
+          3. Write the minimum production code needed to make ALL failing tests pass.
+          4. Do not add features, abstractions, or code not required by the tests.
+          5. Run the full test suite — all tests must be green before finishing.
+          6. Commit the implementation with a message that summarizes what was done.
+          7. Output "DONE" and stop.
+        completion_criteria:
+          - All tests passing
+          - No test modified or deleted
+          - Implementation committed
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: commit
+          required: [implementation commit, all tests green]
+        gates:
+          requires_user_approval: false
+          pass_condition: all_tests_green
+        retry_policy:
+          max_iterations: 3
+          escalate_on: [test_failure, build_error, agent_error]
+
       - name: refactorer
-        responsibilities: Refactor while preserving passing tests and improving maintainability.
+        mode: worker
+        responsibilities: Clean up the implementation for clarity and maintainability while keeping all tests green.
         allowed_agents: [codex, claude-code]
-        suggested_prompt: Refactor safely and keep test suite green.
+        inputs_required: [task_id, project_id, spec_path, worktree_id]
+        handoff_to: [qa-reviewer]
+        suggested_prompt: |
+          You are the refactoring agent for this task.
+
+          Task: {task_title}
+          Test Plan: {spec_path}
+
+          Your job:
+          1. Run the full test suite — confirm all tests are currently green.
+          2. Review the implementation code for: duplication, unclear naming, missing error handling, overly complex logic.
+          3. Refactor for clarity and maintainability. Do NOT add new features.
+          4. Run tests after each change to verify they remain green.
+          5. If tests break, revert that change before continuing.
+          6. When done, make a final commit with message containing [READY_FOR_REVIEW].
+          7. Output "DONE" and stop.
+        completion_criteria:
+          - All tests still passing after refactor
+          - Final commit message contains [READY_FOR_REVIEW]
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: commit
+          required: [READY_FOR_REVIEW commit, all tests green]
+        gates:
+          requires_user_approval: false
+          pass_condition: tests_green_and_ready_for_review
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [test_failure, agent_error]
+
   test:
     enabled: true
+    stage_policy:
+      enter_gate: build_complete
+      exit_gate: qa_passed
+      max_parallel_worktrees: 1
     roles:
       - name: qa-reviewer
-        responsibilities: Run full regression checks and validate no hidden behavior regressions.
-        allowed_agents: [claude-code]
-        suggested_prompt: Run full checks and produce a final quality report with risks.
+        mode: tester
+        responsibilities: Run full regression checks and produce a quality report before merge sign-off.
+        allowed_agents: [claude-code, gemini-cli]
+        inputs_required: [task_id, project_id, spec_path, worktree_id]
+        suggested_prompt: |
+          You are the QA reviewer for this task.
+
+          Task: {task_title}
+          Test Plan: {spec_path}
+
+          Your job:
+          1. Read the test plan at {spec_path} to understand what should be verified.
+          2. Run the full test suite and record results.
+          3. Check for: uncovered edge cases from the test plan, regressions in unrelated tests, any test skips or ignores.
+          4. Review the final implementation diff for quality issues the tests may not catch.
+          5. Write a QA report to .orchestra/qa-report.md with:
+             ## Test Results (pass/fail counts)
+             ## Coverage Gaps
+             ## Code Quality Observations
+             ## Verdict: PASS or FAIL with reasons
+          6. Output "DONE" and stop.
+        completion_criteria:
+          - Full test suite run with results recorded
+          - .orchestra/qa-report.md written with a clear PASS or FAIL verdict
+          - Agent outputs DONE or exits cleanly
+        outputs_contract:
+          type: file
+          required: [.orchestra/qa-report.md]
+        gates:
+          requires_user_approval: true
+          pass_condition: qa_verdict_pass
+        retry_policy:
+          max_iterations: 2
+          escalate_on: [test_failure, agent_error]
