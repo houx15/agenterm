@@ -20,8 +20,6 @@ var skillNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 var defaultSkillRoots = []string{
 	"skills",
-	".agents/skills",
-	".claude/skills",
 }
 
 var skillDownloadClient = &http.Client{Timeout: 20 * time.Second}
@@ -87,24 +85,9 @@ func discoverSkillRootDirs(start string) []string {
 	if start == "" {
 		return nil
 	}
-	out := []string{}
-	seen := map[string]struct{}{}
-	current := start
-	for {
-		for _, relRoot := range defaultSkillRoots {
-			candidate := filepath.Join(current, relRoot)
-			clean := filepath.Clean(candidate)
-			if _, ok := seen[clean]; ok {
-				continue
-			}
-			seen[clean] = struct{}{}
-			out = append(out, clean)
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
+	out := make([]string, 0, len(defaultSkillRoots))
+	for _, relRoot := range defaultSkillRoots {
+		out = append(out, filepath.Clean(filepath.Join(start, relRoot)))
 	}
 	return out
 }

@@ -93,6 +93,16 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 }
 
 func TestProgressiveDisclosureSkillTools(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir repo root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
 	ts := NewToolset(nil)
 
 	listRaw, err := ts.Execute(context.Background(), "list_skills", map[string]any{})
