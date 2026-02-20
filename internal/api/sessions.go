@@ -26,6 +26,10 @@ type sendCommandRequest struct {
 	Text string `json:"text"`
 }
 
+type sendKeyRequest struct {
+	Key string `json:"key"`
+}
+
 type patchTakeoverRequest struct {
 	HumanTakeover bool `json:"human_takeover"`
 }
@@ -271,6 +275,55 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	session.Status = "working"
+	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *handler) sendSessionKey(w http.ResponseWriter, r *http.Request) {
+	var req sendKeyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Key) == "" {
+		jsonError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	if h.lifecycle != nil {
+		if err := h.lifecycle.SendKey(r.Context(), r.PathValue("id"), req.Key); err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+		return
+	}
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
+		return
+	}
+	gw, err := h.gatewayForSession(session.TmuxSessionName)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
+		return
+	}
+	if session.TmuxWindowID == "" {
+		jsonError(w, http.StatusBadRequest, "session has no tmux window")
+		return
+	}
+	key := sessionpkg.ValidateControlKey(req.Key)
+	if key == "" {
+		jsonError(w, http.StatusBadRequest, "unsupported key")
+		return
+	}
+	if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}

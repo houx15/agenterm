@@ -117,6 +117,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("GET /api/sessions", handler.listSessions)
 	mux.HandleFunc("GET /api/sessions/{id}", handler.getSession)
 	mux.HandleFunc("POST /api/sessions/{id}/send", handler.sendSessionCommand)
+	mux.HandleFunc("POST /api/sessions/{id}/send-key", handler.sendSessionKey)
 	mux.HandleFunc("GET /api/sessions/{id}/output", handler.getSessionOutput)
 	mux.HandleFunc("GET /api/sessions/{id}/idle", handler.getSessionIdle)
 	mux.HandleFunc("GET /api/sessions/{id}/ready", handler.getSessionReady)

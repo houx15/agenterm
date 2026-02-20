@@ -1842,9 +1842,11 @@ func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[st
 		return nil, err
 	}
 	commandText, _ := optionalString(args, "text")
-	if normalized, ok := o.normalizeSendCommandText(ctx, sessionID, commandText); ok {
+	submit := false
+	if normalized, shouldSubmit, ok := o.normalizeSendCommandText(ctx, sessionID, commandText); ok {
 		commandText = normalized
 		args["text"] = normalized
+		submit = shouldSubmit
 	}
 
 	entryID := o.appendCommandLedgerEntry(CommandLedgerEntry{
@@ -1864,7 +1866,25 @@ func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[st
 		entry.StartedAt = time.Now().UTC()
 	})
 
-	result, execErr := o.toolset.Execute(ctx, "send_command", args)
+	var result any
+	var execErr error
+	if strings.TrimSpace(commandText) != "" {
+		result, execErr = o.toolset.Execute(ctx, "send_command", args)
+	} else if submit {
+		result = map[string]any{"status": "skipped_text"}
+	}
+	if execErr == nil && submit {
+		_, execErr = o.toolset.Execute(ctx, "send_key", map[string]any{
+			"session_id": sessionID,
+			"key":        "C-m",
+		})
+		if execErr != nil && strings.Contains(execErr.Error(), "unknown tool: send_key") {
+			_, execErr = o.toolset.Execute(ctx, "send_command", map[string]any{
+				"session_id": sessionID,
+				"text":       "\n",
+			})
+		}
+	}
 	completedAt := time.Now().UTC()
 	if execErr != nil {
 		o.updateCommandLedgerEntry(entryID, func(entry *CommandLedgerEntry) {
@@ -1883,31 +1903,33 @@ func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[st
 	return result, nil
 }
 
-func (o *Orchestrator) normalizeSendCommandText(ctx context.Context, sessionID string, text string) (string, bool) {
+func (o *Orchestrator) normalizeSendCommandText(ctx context.Context, sessionID string, text string) (string, bool, bool) {
 	if o == nil || o.sessionRepo == nil {
-		return "", false
+		return "", false, false
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return "", false
+		return "", false, false
 	}
 	sess, err := o.sessionRepo.Get(ctx, sessionID)
 	if err != nil || sess == nil {
-		return "", false
+		return "", false, false
 	}
 	agentType := strings.ToLower(strings.TrimSpace(sess.AgentType))
+	submit := strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
+	if strings.Contains(agentType, "claude") && strings.TrimSpace(text) != "" {
+		submit = true
+	}
 	normalized := strings.TrimLeft(text, "\r\n")
 	if strings.Contains(agentType, "claude") {
 		normalized = strings.TrimLeft(normalized, "\r\n\t ")
 		normalized = strings.Join(strings.Fields(normalized), " ")
 	}
-	if normalized != "" && !strings.HasSuffix(normalized, "\n") {
-		normalized += "\n"
-	}
+	normalized = strings.TrimRight(normalized, "\r\n")
 	if normalized == text {
-		return normalized, false
+		return normalized, submit, false
 	}
-	return normalized, true
+	return normalized, submit, true
 }
 
 func (o *Orchestrator) getSessionCommandLock(sessionID string) *sync.Mutex {

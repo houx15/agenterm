@@ -92,3 +92,24 @@ func TestIsClaudeLandingState(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateControlKey(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "enter", want: "C-m"},
+		{in: "C-m", want: "C-m"},
+		{in: "ctrl+m", want: "C-m"},
+		{in: "c-c", want: "C-c"},
+		{in: "escape", want: "Escape"},
+		{in: "tab", want: "Tab"},
+		{in: "unknown", want: ""},
+	}
+	for _, tc := range cases {
+		got := ValidateControlKey(tc.in)
+		if got != tc.want {
+			t.Fatalf("ValidateControlKey(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}

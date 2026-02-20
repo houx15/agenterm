@@ -459,6 +459,30 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "send_key",
+			Description: "Send a control key to session (e.g. C-m/C-c/Escape/Tab)",
+			Parameters: map[string]Param{
+				"session_id": {Type: "string", Description: "Session id", Required: true},
+				"key":        {Type: "string", Description: "Control key name", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := requiredString(args, "session_id")
+				if err != nil {
+					return nil, err
+				}
+				key, err := requiredString(args, "key")
+				if err != nil {
+					return nil, err
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/sessions/"+sessionID+"/send-key", nil, map[string]any{"key": key}, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "read_session_output",
 			Description: "Read latest output lines from session",
 			Parameters: map[string]Param{

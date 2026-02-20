@@ -282,6 +282,38 @@ func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text strin
 	return nil
 }
 
+func (sm *Manager) SendKey(ctx context.Context, sessionID string, key string) error {
+	key = ValidateControlKey(key)
+	if key == "" {
+		return fmt.Errorf("key is required")
+	}
+	session, err := sm.sessionRepo.Get(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return errNotFound("session")
+	}
+	if session.TmuxWindowID == "" {
+		return fmt.Errorf("session has no tmux window")
+	}
+	gw, err := sm.gatewayForSession(session.TmuxSessionName)
+	if err != nil {
+		return err
+	}
+	if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
+		return err
+	}
+	session.Status = "working"
+	if err := sm.sessionRepo.Update(ctx, session); err != nil {
+		return err
+	}
+	if sm.hub != nil {
+		sm.hub.BroadcastSessionStatus(sessionID, session.Status)
+	}
+	return nil
+}
+
 func normalizeSessionCommandText(text string) string {
 	if text == "" {
 		return text
@@ -295,6 +327,22 @@ func normalizeSessionCommandText(text string) string {
 		return trimmed + "\r"
 	}
 	return normalized
+}
+
+func ValidateControlKey(key string) string {
+	k := strings.ToLower(strings.TrimSpace(key))
+	switch k {
+	case "enter", "return", "\n", "c-m", "ctrl+m":
+		return "C-m"
+	case "c-c", "ctrl+c":
+		return "C-c"
+	case "escape", "esc":
+		return "Escape"
+	case "tab", "\t":
+		return "Tab"
+	default:
+		return ""
+	}
 }
 
 func (sm *Manager) GetOutput(ctx context.Context, sessionID string, since time.Time) ([]OutputEntry, error) {
