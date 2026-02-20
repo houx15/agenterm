@@ -408,6 +408,7 @@ func defaultTools(client *RESTToolClient) []Tool {
 				"task_id":    {Type: "string", Description: "Task id", Required: true},
 				"agent_type": {Type: "string", Description: "Agent type", Required: true},
 				"role":       {Type: "string", Description: "Session role", Required: true},
+				"inputs":     {Type: "object", Description: "Optional role input payload; include required role inputs (e.g. goal/spec_path/worktree_id) for contract checks"},
 			},
 			Execute: func(ctx context.Context, args map[string]any) (any, error) {
 				taskID, err := requiredString(args, "task_id")

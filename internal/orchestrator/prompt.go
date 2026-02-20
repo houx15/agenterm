@@ -125,6 +125,7 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("9) If required inputs are missing, stop and ask for missing input or gather it using read-only tools first.\n\n")
 	b.WriteString("10) For interactive TUI command submission via send_command, end text with a trailing newline so input is actually submitted.\n")
 	b.WriteString("11) After create_session, call wait_for_session_ready before sending task prompts to avoid sending into shell before agent UI is ready.\n\n")
+	b.WriteString("11.3) When calling create_session, include the role's required inputs in the create_session.inputs object (example: {\"goal\":\"...\"}) so role contracts are satisfied explicitly.\n\n")
 	b.WriteString("11.1) When a session is waiting_review or shows confirmation prompts in output, treat it as a response-required state: call read_session_output, decide whether to send a safe confirmation command, or ask user for confirmation if risky.\n")
 	b.WriteString("11.2) Never ignore response-required sessions; each such session must end in one of: send_command response, explicit user handoff, or close_session if finished.\n\n")
 	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")

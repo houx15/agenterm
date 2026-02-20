@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -48,4 +49,31 @@ func GetRepoRoot(path string) (string, error) {
 		return "", fmt.Errorf("resolve repo root: %w", err)
 	}
 	return filepath.Clean(absRoot), nil
+}
+
+func EnsureRepoInitialized(path string) (repoRoot string, initialized bool, err error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false, fmt.Errorf("path is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve path: %w", err)
+	}
+	absPath = filepath.Clean(absPath)
+	if err := os.MkdirAll(absPath, 0o755); err != nil {
+		return "", false, fmt.Errorf("create repo directory: %w", err)
+	}
+	if IsGitRepo(absPath) {
+		root, err := GetRepoRoot(absPath)
+		return root, false, err
+	}
+	if _, err := runGit(absPath, "init"); err != nil {
+		return "", false, err
+	}
+	root, err := GetRepoRoot(absPath)
+	if err != nil {
+		return "", false, err
+	}
+	return root, true, nil
 }

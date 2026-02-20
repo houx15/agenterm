@@ -18,6 +18,7 @@ type updateTaskRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Status      *string `json:"status"`
+	SpecPath    *string `json:"spec_path"`
 }
 
 type taskDetailResponse struct {
@@ -143,6 +144,9 @@ func (h *handler) updateTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		task.Status = *req.Status
+	}
+	if req.SpecPath != nil {
+		task.SpecPath = strings.TrimSpace(*req.SpecPath)
 	}
 	if task.Title == "" {
 		jsonError(w, http.StatusBadRequest, "title cannot be empty")

@@ -9,12 +9,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/user/agenterm/internal/db"
+	gitutil "github.com/user/agenterm/internal/git"
 	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 )
@@ -1082,6 +1084,17 @@ func (o *Orchestrator) executeToolWithApproval(ctx context.Context, name string,
 	if err := o.enforceRoleContractForTool(ctx, name, args, approved); err != nil {
 		return nil, err
 	}
+	if shouldPreflightProjectRepo(name) {
+		projectID, err := o.projectIDForTool(ctx, name, args)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(projectID) != "" {
+			if err := o.ensureProjectRepoReady(ctx, projectID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if requiresExplicitSessionID(name) {
 		if _, err := requiredString(args, "session_id"); err != nil {
 			return nil, fmt.Errorf("%s requires explicit session_id: %w", name, err)
@@ -1100,6 +1113,46 @@ func (o *Orchestrator) executeToolWithApproval(ctx context.Context, name string,
 		o.incrementRoleAttempt(ctx, taskID, roleName)
 	}
 	return result, nil
+}
+
+func shouldPreflightProjectRepo(toolName string) bool {
+	switch strings.TrimSpace(toolName) {
+	case "create_task", "create_worktree", "write_task_spec", "create_session",
+		"send_command", "merge_worktree", "resolve_merge_conflict":
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *Orchestrator) ensureProjectRepoReady(ctx context.Context, projectID string) error {
+	if o == nil || o.projectRepo == nil {
+		return nil
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil
+	}
+	project, err := o.projectRepo.Get(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("load project %s for repo preflight: %w", projectID, err)
+	}
+	if project == nil {
+		return fmt.Errorf("project %s not found for repo preflight", projectID)
+	}
+	repoRoot, _, err := gitutil.EnsureRepoInitialized(project.RepoPath)
+	if err != nil {
+		return fmt.Errorf("repo preflight failed for %s: %w", projectID, err)
+	}
+	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
+	current := filepath.Clean(strings.TrimSpace(project.RepoPath))
+	if repoRoot != "" && repoRoot != current {
+		project.RepoPath = repoRoot
+		if err := o.projectRepo.Update(ctx, project); err != nil {
+			return fmt.Errorf("persist normalized repo path for %s: %w", projectID, err)
+		}
+	}
+	return nil
 }
 
 func requiresExplicitSessionID(name string) bool {
@@ -1659,6 +1712,23 @@ func missingRoleInputs(role playbook.StageRole, task *db.Task, session *db.Sessi
 	for key, value := range args {
 		if value == nil {
 			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), "inputs") {
+			if nested, ok := value.(map[string]any); ok {
+				for nestedKey, nestedValue := range nested {
+					if nestedValue == nil {
+						continue
+					}
+					switch typed := nestedValue.(type) {
+					case string:
+						if strings.TrimSpace(typed) == "" {
+							continue
+						}
+					}
+					available[strings.ToLower(strings.TrimSpace(nestedKey))] = struct{}{}
+				}
+				continue
+			}
 		}
 		switch v := value.(type) {
 		case string:

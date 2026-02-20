@@ -192,29 +192,69 @@ func (s *runtimeState) broadcastWindows() {
 
 func (s *runtimeState) sendKeys(ctx context.Context, sessionID string, windowID string, keys string) error {
 	targetSession := s.resolveSessionID(sessionID, windowID)
-	rt, err := s.ensureSession(ctx, targetSession)
-	if err != nil {
-		return err
-	}
-	return rt.gateway.SendKeys(windowID, keys)
+	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
+		return rt.gateway.SendKeys(windowID, keys)
+	})
 }
 
 func (s *runtimeState) sendRaw(ctx context.Context, sessionID string, windowID string, keys string) error {
 	targetSession := s.resolveSessionID(sessionID, windowID)
-	rt, err := s.ensureSession(ctx, targetSession)
-	if err != nil {
-		return err
-	}
-	return rt.gateway.SendRaw(windowID, keys)
+	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
+		return rt.gateway.SendRaw(windowID, keys)
+	})
 }
 
 func (s *runtimeState) resizeWindow(ctx context.Context, sessionID string, windowID string, cols int, rows int) error {
 	targetSession := s.resolveSessionID(sessionID, windowID)
-	rt, err := s.ensureSession(ctx, targetSession)
+	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
+		return rt.gateway.ResizeWindow(windowID, cols, rows)
+	})
+}
+
+func (s *runtimeState) withGatewayRetry(ctx context.Context, sessionID string, windowID string, op func(rt *sessionRuntime) error) error {
+	rt, err := s.ensureSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	return rt.gateway.ResizeWindow(windowID, cols, rows)
+	if err := op(rt); err == nil {
+		return nil
+	} else if !isRecoverableGatewayError(err) {
+		return err
+	}
+
+	// Drop stale gateway/parser runtime and re-attach once, then retry the operation.
+	s.invalidateSessionRuntime(sessionID, windowID)
+	rt, err = s.ensureSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return op(rt)
+}
+
+func isRecoverableGatewayError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "closed pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "not started")
+}
+
+func (s *runtimeState) invalidateSessionRuntime(sessionID string, windowID string) {
+	s.mu.Lock()
+	rt, ok := s.sessions[sessionID]
+	if ok {
+		delete(s.sessions, sessionID)
+	}
+	if strings.TrimSpace(windowID) != "" {
+		delete(s.windowToSessID, windowID)
+	}
+	s.mu.Unlock()
+	if rt != nil && rt.parser != nil {
+		rt.parser.Close()
+	}
 }
 
 func (s *runtimeState) newWindow(ctx context.Context, sessionID string, name string) error {
