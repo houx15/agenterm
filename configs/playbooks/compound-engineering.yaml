@@ -1,241 +1,270 @@
+---
 id: compound-engineering
 name: Compound Engineering
-description: Full multi-agent workflow. Requirements and architecture are planned in parallel, parallel coders build with continuous review and test coverage, then integration is verified before merge.
-
+description: Structured multi-agent workflow with planning, parallel build execution,
+  and integration hardening.
+phases:
+- name: Implement
+  agent: codex
+  role: implementer
+  description: ''
 workflow:
   plan:
     enabled: true
+    roles:
+    - name: requirements-analyst
+      responsibilities: Refine goals, constraints, and acceptance criteria from user
+        intent.
+      allowed_agents:
+      - claude-code
+      - claude-code-opus
+      suggested_prompt: |-
+        You are the planning agent for compound engineering.
+
+        Task: {task_title}
+
+        Required output:
+        1. Analyze repository baseline and constraints.
+        2. Split the feature into parallel worktrees first.
+        3. For each worktree, define:
+           - worktree/branch name
+           - scope and boundaries
+           - dependency order
+           - acceptance criteria
+        4. Create one spec doc per worktree under docs/.
+        5. Define execution loop inside each worktree: coder -> reviewer -> bug-fix iteration -> merge-ready.
+        6. Summarize phase plan and recommended max parallelism.
+
+        Keep the plan executable by orchestrator tools; do not implement code.
+      mode: planner
+      inputs_required:
+      - goal
+      actions_allowed:
+      - get_project_status
+      - create_task
+      - write_task_spec
+      - create_session
+      completion_criteria:
+      - Per-worktree specs written under docs/
+      - Parallel worktree plan proposed and user-confirmed
+      outputs_contract:
+        type: plan_result
+        required:
+        - strategy
+        - task_graph
+        - worktree_specs
+      gates:
+        pass_condition: user_plan_approved
+        requires_user_approval: true
+      retry_policy:
+        escalate_on:
+        - unclear_scope
+        - spec_missing
+        - agent_error
+        max_iterations: 2
     stage_policy:
       enter_gate: user_approval
-      exit_gate: architecture_and_tasks_written
-      max_parallel_worktrees: 1
-    roles:
-      - name: requirements-analyst
-        mode: planner
-        responsibilities: Refine goals, constraints, and acceptance criteria from user intent into a clear requirements doc.
-        allowed_agents: [claude-code]
-        inputs_required: [task_id, project_id]
-        handoff_to: [architecture-planner]
-        suggested_prompt: |
-          You are the requirements analysis agent for this task.
-
-          Task: {task_title}
-          Description: {task_description}
-
-          Your job:
-          1. Analyze the task and identify: functional requirements, non-functional requirements (performance, security, compatibility), and constraints.
-          2. Clarify any ambiguities by stating your assumptions explicitly.
-          3. Write a requirements document to .orchestra/requirements.md with:
-             ## Functional Requirements (numbered list)
-             ## Non-Functional Requirements
-             ## Constraints and Dependencies
-             ## Assumptions
-             ## Definition of Done
-          4. When done, output "DONE" and stop.
-        completion_criteria:
-          - .orchestra/requirements.md written with all required sections
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: file
-          required: [.orchestra/requirements.md]
-        gates:
-          requires_user_approval: false
-          pass_condition: requirements_doc_written
-        retry_policy:
-          max_iterations: 2
-          escalate_on: [spec_missing, agent_error]
-
-      - name: architecture-planner
-        mode: planner
-        responsibilities: Produce an execution architecture, task decomposition graph, and worktree strategy based on the requirements doc.
-        allowed_agents: [claude-code, gemini-cli]
-        inputs_required: [task_id, project_id, spec_path]
-        handoff_to: [coder, test-builder]
-        suggested_prompt: |
-          You are the architecture planning agent for this task.
-
-          Task: {task_title}
-          Requirements: {spec_path}
-
-          Your job:
-          1. Read the requirements document at {spec_path}.
-          2. Explore the repository to understand current structure, patterns, and integration points.
-          3. Design the implementation architecture:
-             - Which files/modules need to be created or changed?
-             - What are the logical sub-tasks and their dependencies?
-             - Which sub-tasks can be worked on in parallel?
-          4. Write an architecture plan to .orchestra/spec.md with:
-             ## Architecture Overview
-             ## Component Changes (file-by-file)
-             ## Task Breakdown (ordered, with dependencies noted)
-             ## Parallelism Strategy
-             ## Risk Controls
-          5. When done, output "DONE" and stop.
-        completion_criteria:
-          - .orchestra/spec.md written with Task Breakdown and Parallelism Strategy
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: file
-          required: [.orchestra/spec.md]
-        gates:
-          requires_user_approval: true
-          pass_condition: architecture_plan_approved
-        retry_policy:
-          max_iterations: 2
-          escalate_on: [spec_missing, agent_error]
-
+      exit_gate: user_plan_approved
+      max_parallel_worktrees: 0
   build:
     enabled: true
+    roles:
+    - name: coder
+      responsibilities: Deliver implementation tasks in dedicated worktrees.
+      allowed_agents:
+      - codex
+      - opencode-ark
+      - opencode-glm
+      - gemini-cli
+      - kimi-cli
+      - opencode-minimax
+      - opencode-qwen
+      suggested_prompt: |-
+        You are the coder for one assigned worktree.
+
+        Context:
+        - Spec: {spec_path}
+        - Worktree: {worktree_path}
+        - Branch: {branch_name}
+
+        Rules:
+        1. Implement exactly the assigned scope from {spec_path}.
+        2. Keep commits focused, testable, and easy to review.
+        3. Run relevant tests/checks before committing.
+        4. Report what changed, what remains, and any known risk.
+        5. If reviewer raises issues, fix only listed issues and recommit.
+
+        End response with DONE when complete.
+      mode: worker
+      inputs_required:
+      - spec_path
+      - worktree_id
+      actions_allowed:
+      - send_command
+      - read_session_output
+      - is_session_idle
+      - close_session
+      completion_criteria:
+      - Spec implemented and committed
+      outputs_contract:
+        type: work_result
+        required:
+        - commit_sha
+        - summary
+      gates:
+        pass_condition: implementation_commit_ready
+      retry_policy:
+        escalate_on:
+        - no_progress
+    - name: reviewer
+      responsibilities: Review code quality, correctness, and contract compliance
+        continuously.
+      allowed_agents:
+      - codex
+      - opencode-ark
+      - opencode-glm
+      - gemini-cli
+      - kimi-cli
+      - opencode-minimax
+      - opencode-qwen
+      suggested_prompt: |-
+        You are the reviewer for one assigned worktree.
+
+        Context:
+        - Spec: {spec_path}
+        - Worktree: {worktree_path}
+        - Branch: {branch_name}
+
+        Review procedure:
+        1. Review code against {spec_path} and correctness expectations.
+        2. Classify issues by severity and make them actionable.
+        3. Write/update docs/bug-{feature-name}.md using this structure:
+           - OPEN ISSUES
+           - FIXED ISSUES
+           - BLOCKERS
+        4. If no open issues remain, leave OPEN ISSUES empty and state PASS clearly.
+
+        End response with DONE when complete.
+      mode: reviewer
+      inputs_required:
+      - spec_path
+      - commit_sha
+      - worktree_id
+      actions_allowed:
+      - send_command
+      - read_session_output
+      - is_session_idle
+      completion_criteria:
+      - Review verdict is pass
+      outputs_contract:
+        type: review_result
+        required:
+        - verdict
+        - issues
+      gates:
+        pass_condition: verdict_pass_or_issues_logged
+      retry_policy:
+        escalate_on:
+        - same_issue_repeated
+    - name: merger
+      responsibilities: Expand automated tests and quality checks for each delivered
+        slice.
+      allowed_agents:
+      - codex
+      - opencode-ark
+      - kimi-cli
+      - gemini-cli
+      - opencode-glm
+      - opencode-minimax
+      - opencode-qwen
+      suggested_prompt: |-
+        You are the merge operator for completed worktrees.
+
+        Context: list of candidate worktrees/branches will be provided.
+
+        Rules:
+        1. Merge only worktrees that passed review and have no OPEN ISSUES.
+        2. Merge one branch at a time; verify build/tests after each merge.
+        3. If conflicts occur, resolve safely and document resolution.
+        4. After successful merge, clean up merged worktree and branch.
+        5. Report final merged order and any residual risks.
+
+        End response with DONE when complete.
+      mode: reviewer
+      inputs_required:
+      - worktree_id
+      - branch_name
+      actions_allowed:
+      - send_command
+      - read_session_output
+      - is_session_idle
+      - close_session
+      - merge_worktree
+      - resolve_merge_conflict
+      completion_criteria:
+      - All required checks pass
+      outputs_contract:
+        type: test_result
+        required:
+        - summary
+        - failed_cases
+      gates:
+        pass_condition: merged_and_cleaned
+      retry_policy:
+        escalate_on:
+        - flaky_tests
     stage_policy:
       enter_gate: plan_complete
-      exit_gate: review_passed_and_tests_green
+      exit_gate: build_complete
       max_parallel_worktrees: 4
-    roles:
-      - name: coder
-        mode: worker
-        responsibilities: Deliver an assigned implementation slice in a dedicated worktree with focused commits.
-        allowed_agents: [codex, opencode]
-        inputs_required: [task_id, project_id, spec_path, worktree_id]
-        handoff_to: [reviewer]
-        suggested_prompt: |
-          You are the implementation agent for this task slice.
-
-          Task: {task_title}
-          Architecture Plan: {spec_path}
-
-          Your job:
-          1. Read the architecture plan at {spec_path} to understand your specific slice.
-          2. Implement ONLY the components assigned to this task — do not touch unrelated code.
-          3. Follow existing code style, naming conventions, and patterns in the repository.
-          4. Write or update unit tests for any new logic you introduce.
-          5. Run the test suite after each logical chunk of work.
-          6. Keep commits small and focused with clear messages.
-          7. When implementation is complete and tests pass, make a final commit with [READY_FOR_REVIEW] in the message.
-          8. Output "DONE" and stop.
-        completion_criteria:
-          - Assigned scope implemented
-          - Tests passing for changed code
-          - Final commit contains [READY_FOR_REVIEW]
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: commit
-          required: [READY_FOR_REVIEW commit]
-        gates:
-          requires_user_approval: false
-          pass_condition: ready_for_review_commit
-        retry_policy:
-          max_iterations: 3
-          escalate_on: [test_failure, build_error, agent_error]
-
-      - name: reviewer
-        mode: reviewer
-        responsibilities: Review each implementation slice for correctness, quality, and contract compliance. Flag defects with precise references.
-        allowed_agents: [claude-code, gemini-cli]
-        inputs_required: [task_id, project_id, spec_path, session_id]
-        suggested_prompt: |
-          You are the code reviewer for this implementation slice.
-
-          Task: {task_title}
-          Architecture Plan: {spec_path}
-
-          Your job:
-          1. Read the architecture plan at {spec_path} to understand the expected scope and approach.
-          2. Review all changes in this worktree: git diff main...HEAD
-          3. Evaluate: correctness against the plan, code quality, adequate test coverage, edge case handling, regressions.
-          4. For each issue found, provide: file path, line number, severity (critical/minor/nit), description, and suggested fix.
-          5. Critical issues must be fixed before merge. Minor/nit issues are advisory.
-          6. If no critical issues: output "LGTM".
-          7. Output "DONE" when your review is complete.
-        completion_criteria:
-          - All changed files reviewed against plan
-          - LGTM or explicit issue list produced
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: report
-          required: [review verdict]
-        gates:
-          requires_user_approval: false
-          pass_condition: lgtm_or_issues_listed
-        retry_policy:
-          max_iterations: 2
-          escalate_on: [agent_error]
-
-      - name: test-builder
-        mode: worker
-        responsibilities: Add targeted automated tests and quality checks for each delivered implementation slice.
-        allowed_agents: [claude-code, codex]
-        inputs_required: [task_id, project_id, spec_path, worktree_id]
-        handoff_to: [integration-verifier]
-        suggested_prompt: |
-          You are the test coverage agent for this task slice.
-
-          Task: {task_title}
-          Architecture Plan: {spec_path}
-
-          Your job:
-          1. Read the architecture plan at {spec_path} to understand what was implemented.
-          2. Review the implementation changes: git diff main...HEAD
-          3. Identify gaps in test coverage: untested logic paths, edge cases, error conditions.
-          4. Write additional tests to cover those gaps. Prioritize: correctness over coverage percentage.
-          5. Run the full test suite and confirm all tests pass.
-          6. Commit the new tests with a clear message.
-          7. Output "DONE" and stop.
-        completion_criteria:
-          - Coverage gaps addressed with new tests
-          - Full test suite passing
-          - New tests committed
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: commit
-          required: [test coverage commit, all tests green]
-        gates:
-          requires_user_approval: false
-          pass_condition: tests_green_and_coverage_improved
-        retry_policy:
-          max_iterations: 2
-          escalate_on: [test_failure, agent_error]
-
   test:
     enabled: true
+    roles:
+    - name: integration-verifier
+      responsibilities: Validate integration, merge readiness, and operational stability.
+      allowed_agents:
+      - opencode-ark
+      - opencode-glm
+      - gemini-cli
+      - kimi-cli
+      - opencode-minimax
+      - codex
+      - opencode-qwen
+      suggested_prompt: |-
+        You are the final integration verifier.
+
+        Context:
+        - Task: {task_title}
+        - Spec: {spec_path}
+
+        Deliverables:
+        1. Produce integration validation checklist from specs.
+        2. Run automatable checks and summarize results.
+        3. Identify required manual checks and expected outcomes.
+        4. Output release-readiness verdict: PASS / FAIL with reasons.
+
+        End response with DONE when complete.
+      mode: tester
+      inputs_required:
+      - spec_path
+      actions_allowed:
+      - send_command
+      - read_session_output
+      - is_session_idle
+      - close_session
+      completion_criteria:
+      - All required checks pass
+      outputs_contract:
+        type: test_result
+        required:
+        - summary
+        - failed_cases
+      gates:
+        pass_condition: failed_cases == 0
+      retry_policy:
+        escalate_on:
+        - flaky_tests
     stage_policy:
       enter_gate: build_complete
-      exit_gate: integration_verified
+      exit_gate: integration_verification_complete
       max_parallel_worktrees: 1
-    roles:
-      - name: integration-verifier
-        mode: tester
-        responsibilities: Validate integration across all implemented slices, verify merge readiness, and produce a final operational stability report.
-        allowed_agents: [claude-code]
-        inputs_required: [task_id, project_id, spec_path, worktree_id]
-        suggested_prompt: |
-          You are the integration verification agent for this project.
-
-          Task: {task_title}
-          Architecture Plan: {spec_path}
-
-          Your job:
-          1. Read the architecture plan at {spec_path} to understand all the components that were built.
-          2. Run the full test suite across all merged changes.
-          3. Verify integration points: do all components work together as designed?
-          4. Check for: cross-component regressions, API contract violations, configuration consistency, performance degradation.
-          5. Attempt a clean build from scratch to verify no implicit dependencies are missing.
-          6. Write an integration report to .orchestra/integration-report.md with:
-             ## Test Suite Results
-             ## Integration Check Results
-             ## Identified Issues (if any)
-             ## Merge Readiness Verdict: READY or BLOCKED (with reasons)
-          7. Output "DONE" and stop.
-        completion_criteria:
-          - Full test suite run across all changes
-          - Integration checks performed
-          - .orchestra/integration-report.md written with clear READY or BLOCKED verdict
-          - Agent outputs DONE or exits cleanly
-        outputs_contract:
-          type: file
-          required: [.orchestra/integration-report.md]
-        gates:
-          requires_user_approval: true
-          pass_condition: integration_verdict_ready
-        retry_policy:
-          max_iterations: 2
-          escalate_on: [integration_failure, test_failure, agent_error]
