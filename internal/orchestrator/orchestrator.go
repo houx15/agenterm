@@ -27,7 +27,7 @@ const (
 	defaultAnthropicURL      = "https://api.anthropic.com/v1/messages"
 	defaultOpenAIURL         = "https://api.openai.com/v1/chat/completions"
 	defaultMaxTokens         = 4096
-	defaultMaxToolRounds     = 10
+	defaultMaxToolRounds     = 40
 	defaultMaxIdlePollRounds = 240
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
@@ -1842,6 +1842,10 @@ func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[st
 		return nil, err
 	}
 	commandText, _ := optionalString(args, "text")
+	if normalized, ok := o.normalizeSendCommandText(ctx, sessionID, commandText); ok {
+		commandText = normalized
+		args["text"] = normalized
+	}
 
 	entryID := o.appendCommandLedgerEntry(CommandLedgerEntry{
 		ToolName:  "send_command",
@@ -1877,6 +1881,33 @@ func (o *Orchestrator) executeQueuedSendCommand(ctx context.Context, args map[st
 		entry.ResultSnippet = truncate(strings.TrimSpace(toJSON(result)), 220)
 	})
 	return result, nil
+}
+
+func (o *Orchestrator) normalizeSendCommandText(ctx context.Context, sessionID string, text string) (string, bool) {
+	if o == nil || o.sessionRepo == nil {
+		return "", false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", false
+	}
+	sess, err := o.sessionRepo.Get(ctx, sessionID)
+	if err != nil || sess == nil {
+		return "", false
+	}
+	agentType := strings.ToLower(strings.TrimSpace(sess.AgentType))
+	normalized := strings.TrimLeft(text, "\r\n")
+	if strings.Contains(agentType, "claude") {
+		normalized = strings.TrimLeft(normalized, "\r\n\t ")
+		normalized = strings.Join(strings.Fields(normalized), " ")
+	}
+	if normalized != "" && !strings.HasSuffix(normalized, "\n") {
+		normalized += "\n"
+	}
+	if normalized == text {
+		return normalized, false
+	}
+	return normalized, true
 }
 
 func (o *Orchestrator) getSessionCommandLock(sessionID string) *sync.Mutex {

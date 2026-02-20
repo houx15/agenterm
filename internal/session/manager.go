@@ -256,7 +256,8 @@ func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text strin
 	if err != nil {
 		return err
 	}
-	if err := gw.SendRaw(session.TmuxWindowID, text); err != nil {
+	normalized := normalizeSessionCommandText(text)
+	if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
 		return err
 	}
 
@@ -268,6 +269,21 @@ func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text strin
 		sm.hub.BroadcastSessionStatus(sessionID, session.Status)
 	}
 	return nil
+}
+
+func normalizeSessionCommandText(text string) string {
+	if text == "" {
+		return text
+	}
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	if strings.HasSuffix(normalized, "\n") {
+		trimmed := strings.TrimRight(normalized, "\n")
+		if trimmed == "" {
+			return "\r"
+		}
+		return trimmed + "\r"
+	}
+	return normalized
 }
 
 func (sm *Manager) GetOutput(ctx context.Context, sessionID string, since time.Time) ([]OutputEntry, error) {
@@ -335,6 +351,21 @@ func (sm *Manager) GetSessionReadyState(ctx context.Context, sessionID string) (
 		LastClass:      monitorState.LastClass,
 		LastText:       monitorState.LastText,
 	}
+	if isComposeInputState(monitorState.LastText) {
+		state.Ready = false
+		state.Reason = "compose_mode_detected"
+		return state, nil
+	}
+	if sm.requiresPromptReady(session.AgentType) {
+		if monitorState.PromptDetected {
+			state.Ready = true
+			state.Reason = "prompt_detected"
+			return state, nil
+		}
+		state.Ready = false
+		state.Reason = "waiting_for_prompt"
+		return state, nil
+	}
 	if monitorState.PromptDetected {
 		state.Ready = true
 		state.Reason = "prompt_detected"
@@ -354,6 +385,26 @@ func (sm *Manager) GetSessionReadyState(ctx context.Context, sessionID string) (
 		state.Reason = "booting"
 	}
 	return state, nil
+}
+
+func (sm *Manager) requiresPromptReady(agentType string) bool {
+	if sm == nil || sm.registry == nil {
+		return false
+	}
+	cfg := sm.registry.Get(strings.TrimSpace(agentType))
+	if cfg == nil {
+		return false
+	}
+	command := strings.ToLower(strings.TrimSpace(cfg.Command))
+	return strings.Contains(command, "claude")
+}
+
+func isComposeInputState(lastText string) bool {
+	text := strings.ToLower(strings.TrimSpace(lastText))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "ctrl+gtoeditinvim") || strings.Contains(text, "ctrl+g to edit in vim")
 }
 
 func (sm *Manager) SetTakeover(ctx context.Context, sessionID string, takeover bool) error {

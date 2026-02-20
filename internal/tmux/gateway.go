@@ -331,29 +331,50 @@ func (g *Gateway) SendRaw(windowID string, keys string) error {
 		return fmt.Errorf("invalid window ID format: %s", windowID)
 	}
 
-	// Terminal apps expect CR for Enter; dialog input sends LF.
-	keys = strings.ReplaceAll(keys, "\n", "\r")
 	data := []byte(keys)
 	if len(data) == 0 {
 		return nil
 	}
 
 	const chunkSize = 64
-	for start := 0; start < len(data); start += chunkSize {
-		end := start + chunkSize
-		if end > len(data) {
-			end = len(data)
+	pending := make([]byte, 0, chunkSize)
+	flushPending := func() error {
+		if len(pending) == 0 {
+			return nil
 		}
 		var b strings.Builder
 		b.WriteString("send-keys -t ")
 		b.WriteString(windowID)
-		for _, ch := range data[start:end] {
+		for _, ch := range pending {
 			b.WriteString(fmt.Sprintf(" -H %02x", ch))
 		}
 		b.WriteByte('\n')
 		if _, err := g.stdin.Write([]byte(b.String())); err != nil {
 			return err
 		}
+		pending = pending[:0]
+		return nil
+	}
+
+	for _, ch := range data {
+		if ch == '\n' || ch == '\r' {
+			if err := flushPending(); err != nil {
+				return err
+			}
+			if _, err := g.stdin.Write([]byte(fmt.Sprintf("send-keys -t %s Enter\n", windowID))); err != nil {
+				return err
+			}
+			continue
+		}
+		pending = append(pending, ch)
+		if len(pending) >= chunkSize {
+			if err := flushPending(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := flushPending(); err != nil {
+		return err
 	}
 
 	return nil

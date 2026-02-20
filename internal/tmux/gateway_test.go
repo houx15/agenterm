@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"sync"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +182,24 @@ func TestGatewaySendRawNotStarted(t *testing.T) {
 	}
 }
 
+func TestGatewaySendRawUsesEnterForNewlines(t *testing.T) {
+	g := New("test")
+	capture := &captureWriteCloser{}
+	g.stdin = capture
+
+	if err := g.SendRaw("@1", "hello\nworld\r"); err != nil {
+		t.Fatalf("SendRaw returned error: %v", err)
+	}
+
+	got := capture.String()
+	if !strings.Contains(got, "send-keys -t @1 Enter\n") {
+		t.Fatalf("expected Enter key command in output, got: %q", got)
+	}
+	if strings.Contains(got, " -H 0a") || strings.Contains(got, " -H 0d") {
+		t.Fatalf("expected newline bytes to map to Enter key, got: %q", got)
+	}
+}
+
 func TestGatewayResizeWindowNotStarted(t *testing.T) {
 	g := New("test")
 	err := g.ResizeWindow("@0", 120, 40)
@@ -202,6 +221,25 @@ type nopWriteCloser struct{}
 
 func (nopWriteCloser) Write(p []byte) (n int, err error) { return len(p), nil }
 func (nopWriteCloser) Close() error                      { return nil }
+
+type captureWriteCloser struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (c *captureWriteCloser) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Write(p)
+}
+
+func (c *captureWriteCloser) Close() error { return nil }
+
+func (c *captureWriteCloser) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
 
 func TestGatewayReaderHandlesWindowEventsInsideCommandBlock(t *testing.T) {
 	g := New("test")
