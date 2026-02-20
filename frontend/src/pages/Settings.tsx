@@ -107,7 +107,7 @@ const ROLE_TEMPLATES: Record<RoleTemplateKey, Partial<PlaybookWorkflowRole>> = {
   planner: {
     mode: 'planner',
     inputs_required: ['goal'],
-    actions_allowed: ['get_project_status', 'create_task', 'create_worktree', 'write_task_spec', 'create_session', 'generate_progress_report'],
+    actions_allowed: ['get_project_status', 'create_task', 'create_worktree', 'write_task_spec', 'create_session'],
     outputs_contract: { type: 'plan_result', required: ['strategy', 'task_graph'] },
     gates: { requires_user_approval: true, pass_condition: 'user_plan_approved' },
     retry_policy: { max_iterations: 2, escalate_on: ['unclear_scope'] },
@@ -125,7 +125,7 @@ const ROLE_TEMPLATES: Record<RoleTemplateKey, Partial<PlaybookWorkflowRole>> = {
   reviewer: {
     mode: 'reviewer',
     inputs_required: ['spec_path', 'commit_sha'],
-    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'generate_progress_report'],
+    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle'],
     outputs_contract: { type: 'review_result', required: ['verdict', 'issues'] },
     gates: { requires_user_approval: false, pass_condition: "verdict == 'pass'" },
     retry_policy: { max_iterations: 5, escalate_on: ['same_issue_repeated'] },
@@ -134,7 +134,7 @@ const ROLE_TEMPLATES: Record<RoleTemplateKey, Partial<PlaybookWorkflowRole>> = {
   tester: {
     mode: 'tester',
     inputs_required: ['spec_path'],
-    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'generate_progress_report', 'close_session'],
+    actions_allowed: ['send_command', 'read_session_output', 'is_session_idle', 'close_session'],
     outputs_contract: { type: 'test_result', required: ['summary', 'failed_cases'] },
     gates: { requires_user_approval: false, pass_condition: 'failed_cases == 0' },
     retry_policy: { max_iterations: 3, escalate_on: ['flaky_tests'] },

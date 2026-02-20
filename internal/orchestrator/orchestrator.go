@@ -1332,17 +1332,17 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 	case "planner":
 		return containsFold([]string{
 			"create_task", "create_worktree", "write_task_spec", "create_session",
-			"read_session_output", "is_session_idle", "get_project_status", "generate_progress_report",
+			"read_session_output", "is_session_idle", "get_project_status",
 		}, toolName)
 	case "reviewer":
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"generate_progress_report", "can_close_session",
+			"can_close_session",
 		}, toolName)
 	case "tester":
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"generate_progress_report", "can_close_session", "close_session",
+			"can_close_session", "close_session",
 		}, toolName)
 	default:
 		return containsFold([]string{

@@ -31,13 +31,13 @@ type EventTrigger struct {
 
 func NewEventTrigger(o *Orchestrator, sessionRepo *db.SessionRepo, taskRepo *db.TaskRepo, projectRepo *db.ProjectRepo, worktreeRepo *db.WorktreeRepo) *EventTrigger {
 	return &EventTrigger{
-		orchestrator: o,
-		sessionRepo:  sessionRepo,
-		taskRepo:     taskRepo,
-		projectRepo:  projectRepo,
-		worktreeRepo: worktreeRepo,
-		lastStatus:   make(map[string]string),
-		idleInFlight: make(map[string]bool),
+		orchestrator:    o,
+		sessionRepo:     sessionRepo,
+		taskRepo:        taskRepo,
+		projectRepo:     projectRepo,
+		worktreeRepo:    worktreeRepo,
+		lastStatus:      make(map[string]string),
+		idleInFlight:    make(map[string]bool),
 		idleLastTrigger: make(map[string]time.Time),
 	}
 }
@@ -61,31 +61,8 @@ func (et *EventTrigger) OnSessionIdle(sessionID string) {
 }
 
 func (et *EventTrigger) OnTimer(projectID string) {
-	if et == nil || et.orchestrator == nil || strings.TrimSpace(projectID) == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	ch, err := et.orchestrator.Chat(ctx, projectID, "Periodic project check: summarize progress, detect blockers, and suggest next actions.")
-	if err != nil {
-		slog.Debug("orchestrator timer trigger failed", "project_id", projectID, "error", err)
-		return
-	}
-	et.emitEvent(projectID, "project_phase_changed", map[string]any{"phase": "status_check", "source": "timer"})
-	summary := collectStreamSummary(ch)
-	et.emitEvent(projectID, "orchestrator_timer_summary", map[string]any{
-		"text":       summary.Text,
-		"tool_calls": summary.ToolCalls,
-		"errors":     summary.Errors,
-	})
-	report, reportErr := et.orchestrator.GenerateProgressReport(ctx, projectID)
-	if reportErr == nil {
-		if blockers, ok := report["blockers"].([]any); ok && len(blockers) > 0 {
-			if et.shouldNotifyOnBlocked(ctx, projectID) {
-				et.emitEvent(projectID, "project_blocked", map[string]any{"source": "timer", "blockers": blockers})
-			}
-		}
-	}
+	// Progress reports are user-driven only. Disable timer-based auto reporting.
+	_ = projectID
 }
 
 func (et *EventTrigger) OnReviewReady(sessionID string, commitHash string) {
