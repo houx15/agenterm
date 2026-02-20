@@ -318,6 +318,54 @@ function phaseToWorkflowRole(phase: PlaybookPhase): PlaybookWorkflowRole {
   }
 }
 
+function parseAPIErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'Failed to save playbook'
+  }
+  const raw = error.message.trim()
+  if (!raw) {
+    return 'Failed to save playbook'
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const payload = parsed as Record<string, unknown>
+      if (typeof payload.error === 'string' && payload.error.trim()) {
+        return payload.error.trim()
+      }
+    }
+  } catch {
+    // not JSON, fallback to raw
+  }
+  return raw
+}
+
+function validatePlaybookDraft(pb: Playbook, isNew: boolean): string | null {
+  if (isNew && !pb.id.trim()) {
+    return 'Playbook ID is required.'
+  }
+  if (!pb.name.trim()) {
+    return 'Playbook name is required.'
+  }
+  const stages: WorkflowStageKey[] = ['plan', 'build', 'test']
+  for (const stageKey of stages) {
+    const stage = pb.workflow[stageKey]
+    if (!stage.enabled) {
+      continue
+    }
+    if (!stage.roles || stage.roles.length === 0) {
+      return `${stageKey} stage is enabled but has no roles.`
+    }
+    for (let idx = 0; idx < stage.roles.length; idx += 1) {
+      const role = stage.roles[idx]
+      if (!role.name.trim()) {
+        return `${stageKey} stage role ${idx + 1} is missing a role name.`
+      }
+    }
+  }
+  return null
+}
+
 function fallbackWorkflowFromPhases(phases: PlaybookPhase[]): PlaybookWorkflow {
   const workflow: PlaybookWorkflow = {
     plan: { enabled: true, roles: [], stage_policy: {} },
@@ -703,25 +751,37 @@ export default function Settings() {
   }
 
   async function savePlaybook() {
+    const validationError = validatePlaybookDraft(playbookDraft, isNewPlaybook)
+    if (validationError) {
+      setMessage(validationError)
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
       const payload: Playbook = {
         ...playbookDraft,
       }
+      let savedID = selectedPlaybookID
       if (isNewPlaybook) {
         const created = normalizePlaybook(await createPlaybook<Playbook>(payload))
-        setPlaybooks((prev) => [...prev.filter((item) => item.id !== created.id), created].sort((a, b) => a.name.localeCompare(b.name)))
-        setSelectedPlaybookID(created.id)
-        setPlaybookDraft(created)
+        savedID = created.id
       } else {
         const updated = normalizePlaybook(await updatePlaybook<Playbook>(selectedPlaybookID, payload))
-        setPlaybooks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-        setPlaybookDraft(updated)
+        savedID = updated.id
       }
-      setMessage('Playbook saved.')
+      const latest = (await listPlaybooks<Playbook[]>()).map(normalizePlaybook)
+      setPlaybooks(latest)
+      const persisted = latest.find((item) => item.id === savedID)
+      if (persisted) {
+        setSelectedPlaybookID(persisted.id)
+        setPlaybookDraft(persisted)
+        setMessage(`Playbook saved: ${persisted.name}`)
+      } else {
+        setMessage('Playbook save completed but refresh failed. Please reload playbooks.')
+      }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Failed to save playbook')
+      setMessage(parseAPIErrorMessage(error))
     } finally {
       setBusy(false)
     }
