@@ -1415,6 +1415,7 @@ textarea {
 .settings-template-create {
   display: grid;
   gap: 0.45rem;
+  min-width: 220px;
 }
 
 .settings-editor {
@@ -1424,6 +1425,13 @@ textarea {
   background: rgba(255, 255, 255, 0.86);
   display: grid;
   gap: 0.6rem;
+}
+
+.settings-editor-head {
+  display: flex;
+  align-items: end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
 }
 
 .settings-editor label {

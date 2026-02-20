@@ -1093,23 +1093,6 @@ export default function Settings() {
             <button type="button" className="primary-btn" onClick={startNewPlaybook}>
               + New Playbook
             </button>
-            <div className="settings-template-create">
-              <select value={newPlaybookTemplateID} onChange={(event) => setNewPlaybookTemplateID(event.target.value)}>
-                {templatePlaybooks.map((item) => (
-                  <option key={`template-${item.id}`} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={() => startNewPlaybookFromTemplate(newPlaybookTemplateID)}
-                disabled={templatePlaybooks.length === 0}
-              >
-                New from Template
-              </button>
-            </div>
             {isNewPlaybook && (
               <button type="button" className="session-row active">
                 <strong>{playbookDraft.name.trim() || 'New Playbook (Draft)'}</strong>
@@ -1130,6 +1113,26 @@ export default function Settings() {
           </aside>
 
           <div className="settings-editor">
+            <div className="settings-editor-head">
+              <label className="settings-template-create">
+                <span>Template</span>
+                <select value={newPlaybookTemplateID} onChange={(event) => setNewPlaybookTemplateID(event.target.value)}>
+                  {templatePlaybooks.map((item) => (
+                    <option key={`template-${item.id}`} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => startNewPlaybookFromTemplate(newPlaybookTemplateID)}
+                disabled={templatePlaybooks.length === 0}
+              >
+                Use Template
+              </button>
+            </div>
             <label>
               ID
               <input
