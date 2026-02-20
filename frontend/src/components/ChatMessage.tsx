@@ -34,7 +34,7 @@ interface ChatMessageProps {
   message: SessionMessage
   variant?: 'terminal' | 'pm'
   onTaskClick?: (taskID: string) => void
-  onActionClick?: (value: string) => void
+  onActionClick?: (value: string, label: string, messageID?: string) => void
 }
 
 export default function ChatMessage({ message, variant = 'terminal', onTaskClick, onActionClick }: ChatMessageProps) {
@@ -57,7 +57,7 @@ export default function ChatMessage({ message, variant = 'terminal', onTaskClick
               <button
                 key={`${option.label}-${option.value}`}
                 className="action-btn"
-                onClick={() => onActionClick?.(option.value)}
+                onClick={() => onActionClick?.(option.value, option.label, message.id)}
                 type="button"
               >
                 {option.label}

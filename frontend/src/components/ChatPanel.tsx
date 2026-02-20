@@ -25,6 +25,7 @@ export default function ChatPanel({
   isFetchingReport = false,
 }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
+  const [actionDecisions, setActionDecisions] = useState<Record<string, string>>({})
   const listRef = useRef<HTMLDivElement | null>(null)
   const speech = useSpeechToText({
     onTranscript: (text) => {
@@ -45,12 +46,40 @@ export default function ChatPanel({
 
   const resolvedMessages = useMemo(
     () =>
-      messages.map((message) => ({
-        ...message,
-        taskLinks: message.taskLinks ?? taskLinks,
-      })),
-    [messages, taskLinks],
+      messages.map((message) => {
+        const decision = message.id ? actionDecisions[message.id] : ''
+        if (!decision) {
+          return {
+            ...message,
+            taskLinks: message.taskLinks ?? taskLinks,
+          }
+        }
+        return {
+          ...message,
+          text: `${message.text}\n\n${decision}`,
+          confirmationOptions: [],
+          taskLinks: message.taskLinks ?? taskLinks,
+        }
+      }),
+    [actionDecisions, messages, taskLinks],
   )
+
+  const handleActionClick = (value: string, label: string, messageID?: string) => {
+    const sent = onSend(value)
+    if (!sent || !messageID) {
+      return
+    }
+    const lower = label.trim().toLowerCase()
+    let note = 'You responded to this confirmation.'
+    if (lower.includes('confirm')) {
+      note = 'You confirmed this operation.'
+    } else if (lower.includes('cancel')) {
+      note = 'You rejected this operation.'
+    } else if (lower.includes('modify')) {
+      note = 'You requested plan modification.'
+    }
+    setActionDecisions((prev) => ({ ...prev, [messageID]: note }))
+  }
 
   useEffect(() => {
     const node = listRef.current
@@ -79,7 +108,7 @@ export default function ChatPanel({
             key={`${message.id ?? 'message'}-${message.timestamp}-${idx}`}
             message={message}
             variant="pm"
-            onActionClick={onSend}
+            onActionClick={handleActionClick}
             onTaskClick={onTaskClick}
           />
         ))}
