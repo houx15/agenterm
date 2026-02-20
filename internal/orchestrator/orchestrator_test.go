@@ -802,6 +802,41 @@ func TestToolExecutionErrorResultForStageGate(t *testing.T) {
 	}
 }
 
+func TestStageToolGateBlocksCreateWorktreeDuringPlan(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "planning"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo: projectRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_worktree": {
+					Name: "create_worktree",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "create_worktree", map[string]any{
+		"project_id": project.ID,
+		"path":       "plan-demo",
+	})
+	if err == nil {
+		t.Fatalf("expected create_worktree to be blocked in plan stage")
+	}
+	if !strings.Contains(err.Error(), "stage_tool_not_allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func contains(haystack string, needle string) bool {
 	return strings.Contains(haystack, needle)
 }

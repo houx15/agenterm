@@ -1455,7 +1455,6 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"get_skill_details":      {},
 			"get_project_status":     {},
 			"create_task":            {},
-			"create_worktree":        {},
 			"write_task_spec":        {},
 			"create_session":         {},
 			"wait_for_session_ready": {},

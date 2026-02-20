@@ -125,20 +125,78 @@ type AssistantEnvelope = {
   }
 }
 
-function parseAssistantEnvelope(text: string): AssistantEnvelope | null {
+function extractJSONObjectChunks(text: string): string[] {
+  const chunks: string[] = []
   const raw = text.trim()
-  if (!raw.startsWith('{')) {
-    return null
+  if (!raw) {
+    return chunks
   }
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let start = -1
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
     }
-    return parsed as AssistantEnvelope
-  } catch {
-    return null
+
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{') {
+      if (depth === 0) {
+        start = i
+      }
+      depth += 1
+      continue
+    }
+    if (ch === '}') {
+      if (depth === 0) {
+        continue
+      }
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        chunks.push(raw.slice(start, i + 1))
+        start = -1
+      }
+    }
   }
+  return chunks
+}
+
+function parseAssistantEnvelopes(text: string): AssistantEnvelope[] {
+  const raw = text.trim()
+  if (!raw) {
+    return []
+  }
+  const chunks = extractJSONObjectChunks(raw)
+  if (chunks.length === 0) {
+    return []
+  }
+  const envelopes: AssistantEnvelope[] = []
+  for (const chunk of chunks) {
+    try {
+      const parsed = JSON.parse(chunk) as unknown
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        continue
+      }
+      envelopes.push(parsed as AssistantEnvelope)
+    } catch {
+      // Skip malformed chunk and keep parsing others.
+    }
+  }
+  return envelopes
 }
 
 function asStringArray(value: unknown): string[] {
@@ -151,8 +209,8 @@ function asStringArray(value: unknown): string[] {
 function normalizeAssistantMessage(
   rawText: string,
 ): { text: string; status: 'discussion' | 'confirmation'; confirmationOptions?: MessageActionOption[] } {
-  const envelope = parseAssistantEnvelope(rawText)
-  if (!envelope) {
+  const envelopes = parseAssistantEnvelopes(rawText)
+  if (envelopes.length === 0) {
     const fallbackOptions = buildConfirmationOptions(rawText)
     return {
       text: rawText,
@@ -161,18 +219,36 @@ function normalizeAssistantMessage(
     }
   }
 
-  const discussion = typeof envelope.discussion === 'string' ? envelope.discussion.trim() : ''
-  const commands = asStringArray(envelope.commands)
-  const confirmationNeeded = Boolean(envelope.confirmation?.needed)
-  const confirmationPrompt = typeof envelope.confirmation?.prompt === 'string' ? envelope.confirmation.prompt.trim() : ''
+  const discussionParts: string[] = []
+  const commandLines: string[] = []
+  let confirmationNeeded = false
+  let confirmationPrompt = ''
+
+  for (const envelope of envelopes) {
+    const discussion = typeof envelope.discussion === 'string' ? envelope.discussion.trim() : ''
+    if (discussion) {
+      discussionParts.push(discussion)
+    }
+    for (const command of asStringArray(envelope.commands)) {
+      commandLines.push(command)
+    }
+    const needed = Boolean(envelope.confirmation?.needed)
+    const prompt = typeof envelope.confirmation?.prompt === 'string' ? envelope.confirmation.prompt.trim() : ''
+    if (needed) {
+      confirmationNeeded = true
+      if (prompt) {
+        confirmationPrompt = prompt
+      }
+    }
+  }
 
   const lines: string[] = []
-  if (discussion) {
-    lines.push(discussion)
+  if (discussionParts.length > 0) {
+    lines.push(...discussionParts)
   }
-  if (commands.length > 0) {
+  if (commandLines.length > 0) {
     lines.push('Planned commands:')
-    for (const command of commands) {
+    for (const command of commandLines) {
       lines.push(`- ${command}`)
     }
   }
