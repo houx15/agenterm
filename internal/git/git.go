@@ -77,3 +77,28 @@ func EnsureRepoInitialized(path string) (repoRoot string, initialized bool, err 
 	}
 	return root, true, nil
 }
+
+func HasCommit(path string) bool {
+	out, err := runGit(path, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+func EnsureInitialCommit(path string) (created bool, err error) {
+	if HasCommit(path) {
+		return false, nil
+	}
+	// Keep config local to repo so we don't mutate global user settings.
+	if _, err := runGit(path, "config", "user.name", "agenterm"); err != nil {
+		return false, err
+	}
+	if _, err := runGit(path, "config", "user.email", "agenterm@local"); err != nil {
+		return false, err
+	}
+	if _, err := runGit(path, "commit", "--allow-empty", "-m", "chore: initial commit"); err != nil {
+		return false, err
+	}
+	return true, nil
+}

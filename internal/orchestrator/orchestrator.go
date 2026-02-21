@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -29,6 +30,8 @@ const (
 	defaultMaxTokens         = 4096
 	defaultMaxToolRounds     = 40
 	defaultMaxIdlePollRounds = 240
+	defaultTurnTimeBudget    = 120 * time.Second
+	defaultLLMCallTimeout    = 60 * time.Second
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
 	maxCommandLedgerEntries  = 500
@@ -305,8 +308,17 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		idlePollRounds := 0
 		executionToolRetryUsed := false
 		sessionActionRounds := make(map[string]int)
+		turnStarted := time.Now()
 
 		for {
+			if time.Since(turnStarted) >= defaultTurnTimeBudget {
+				ch <- StreamEvent{
+					Type: "token",
+					Text: `{"discussion":"Execution time budget reached for this turn. Progress is saved. Reply with explicit approval to continue build execution.","commands":[],"confirmation":{"needed":true,"prompt":"Continue execution in next turn?"}}`,
+				}
+				ch <- StreamEvent{Type: "done"}
+				return
+			}
 			if actionRounds >= o.maxToolRounds {
 				ch <- StreamEvent{Type: "error", Error: "max action rounds reached"}
 				return
@@ -334,6 +346,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 			}
 
 			toolUsed := false
+			executionToolUsed := false
 			actionUsed := false
 			idleOnlyRound := true
 			for _, block := range resp.Content {
@@ -345,6 +358,9 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 					}
 				case "tool_use":
 					toolUsed = true
+					if isExecutionOperationalTool(block.Name) {
+						executionToolUsed = true
+					}
 					if strings.TrimSpace(block.Name) != "is_session_idle" {
 						actionUsed = true
 						idleOnlyRound = false
@@ -452,6 +468,24 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 					}
 				}
 			}
+			if o.lane == executionLane && approval.Confirmed && requiresExecutionToolUsage(userMessage) && !executionToolUsed {
+				if !executionToolRetryUsed {
+					executionToolRetryUsed = true
+					messages = append(messages, anthropicMessage{
+						Role: "user",
+						Content: []anthropicContentBlock{{
+							Type: "text",
+							Text: "SYSTEM REMINDER: You must execute project actions via execution tools in this turn. Use tools like create_task/create_session/wait_for_session_ready/send_command/read_session_output/create_worktree/merge_worktree. list_skills/get_skill_details alone is not sufficient.",
+						}},
+					})
+					continue
+				}
+				ch <- StreamEvent{
+					Type:  "error",
+					Error: "execution_requires_operational_tools: orchestrator must call execution tools (not only skill metadata tools) in this turn",
+				}
+				return
+			}
 
 			if !toolUsed {
 				if o.lane == executionLane && approval.Confirmed && requiresExecutionToolUsage(userMessage) {
@@ -531,6 +565,14 @@ func evaluateApprovalGate(message string) approvalGate {
 		"run it",
 		"execute",
 		"continue",
+		"确认",
+		"同意",
+		"批准",
+		"继续执行",
+		"开始执行",
+		"马上执行",
+		"立即执行",
+		"进入构建阶段",
 	}
 	for _, token := range tokens {
 		if strings.Contains(text, token) {
@@ -550,6 +592,9 @@ func requiresExecutionToolUsage(message string) bool {
 		"run tests", "test this", "review code", "open session", "start session",
 		"create worktree", "dispatch", "execute", "go ahead", "proceed with build",
 		"send command", "apply changes", "commit", "merge",
+		"开始执行", "立即执行", "进入构建阶段", "构建阶段", "开始构建", "继续执行",
+		"创建工作树", "分配", "启动会话", "开始编码", "编码", "评审", "审查",
+		"发送命令", "提交", "合并",
 	}
 	for _, k := range keywords {
 		if strings.Contains(text, k) {
@@ -557,6 +602,19 @@ func requiresExecutionToolUsage(message string) bool {
 		}
 	}
 	return false
+}
+
+func isExecutionOperationalTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "create_task", "create_worktree", "write_task_spec",
+		"create_session", "wait_for_session_ready", "send_command", "send_key",
+		"read_session_output", "is_session_idle", "close_session", "can_close_session",
+		"merge_worktree", "resolve_merge_conflict", "create_review_cycle",
+		"create_review_issue", "update_review_issue", "update_task":
+		return true
+	default:
+		return false
+	}
 }
 
 func isMutatingTool(name string) bool {
@@ -1144,6 +1202,9 @@ func (o *Orchestrator) ensureProjectRepoReady(ctx context.Context, projectID str
 	if err != nil {
 		return fmt.Errorf("repo preflight failed for %s: %w", projectID, err)
 	}
+	if _, err := gitutil.EnsureInitialCommit(repoRoot); err != nil {
+		return fmt.Errorf("repo initial commit preflight failed for %s: %w", projectID, err)
+	}
 	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
 	current := filepath.Clean(strings.TrimSpace(project.RepoPath))
 	if repoRoot != "" && repoRoot != current {
@@ -1206,6 +1267,7 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 			return fmt.Errorf("role loop blocked for %q: %s", roleName, reason)
 		}
 		hydrateCreateSessionInputs(args, task)
+		o.hydrateSpecPathForTask(ctx, args, task)
 		if missing := missingRoleInputs(*role, task, nil, args); len(missing) > 0 {
 			return fmt.Errorf("missing required role inputs for %q: %s", roleName, strings.Join(missing, ", "))
 		}
@@ -1233,6 +1295,13 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		}
 		if !toolAllowedByRole(toolName, *role) && !approved {
 			return roleToolApprovalRequiredError{Tool: toolName, Role: sess.Role, Mode: role.Mode}
+		}
+		if toolName == "send_command" {
+			hydrateCreateSessionInputs(args, task)
+			o.hydrateSpecPathForTask(ctx, args, task)
+		}
+		if toolName == "close_session" || toolName == "can_close_session" {
+			return nil
 		}
 		if missing := missingRoleInputs(*role, task, sess, args); len(missing) > 0 {
 			return fmt.Errorf("missing required role inputs for %q: %s", sess.Role, strings.Join(missing, ", "))
@@ -1272,6 +1341,89 @@ func hydrateCreateSessionInputs(args map[string]any, task *db.Task) {
 	setIfMissing("task_id", task.ID)
 
 	args["inputs"] = inputs
+}
+
+func (o *Orchestrator) hydrateSpecPathForTask(ctx context.Context, args map[string]any, task *db.Task) {
+	if o == nil || args == nil || task == nil {
+		return
+	}
+	inputs := parseInputsMap(args["inputs"])
+	if existing, ok := inputs["spec_path"]; ok {
+		if s, ok := existing.(string); ok && strings.TrimSpace(s) != "" {
+			return
+		}
+	}
+	specPath := strings.TrimSpace(task.SpecPath)
+	if specPath == "" {
+		specPath = o.inferSpecPath(ctx, task)
+	}
+	if specPath == "" {
+		return
+	}
+	inputs["spec_path"] = specPath
+	args["inputs"] = inputs
+	if strings.TrimSpace(task.SpecPath) == "" && o.taskRepo != nil {
+		task.SpecPath = specPath
+		_ = o.taskRepo.Update(ctx, task)
+	}
+}
+
+func (o *Orchestrator) inferSpecPath(ctx context.Context, task *db.Task) string {
+	if o == nil || task == nil || o.projectRepo == nil {
+		return ""
+	}
+	project, err := o.projectRepo.Get(ctx, strings.TrimSpace(task.ProjectID))
+	if err != nil || project == nil {
+		return ""
+	}
+	repoPath := strings.TrimSpace(project.RepoPath)
+	if repoPath == "" {
+		return ""
+	}
+	text := strings.ToLower(strings.TrimSpace(task.Title + " " + task.Description))
+	candidates := []string{"docs/project-plan.md", "docs/spec-game-engine.md", "docs/spec-ui.md", "docs/spec-controls.md", "docs/spec-scoring.md"}
+	score := func(path string) int {
+		p := strings.ToLower(path)
+		s := 0
+		switch {
+		case strings.Contains(text, "engine") || strings.Contains(text, "引擎") || strings.Contains(text, "核心"):
+			if strings.Contains(p, "engine") {
+				s += 3
+			}
+		case strings.Contains(text, "ui") || strings.Contains(text, "界面") || strings.Contains(text, "渲染"):
+			if strings.Contains(p, "ui") {
+				s += 3
+			}
+		case strings.Contains(text, "control") || strings.Contains(text, "控制") || strings.Contains(text, "交互"):
+			if strings.Contains(p, "control") {
+				s += 3
+			}
+		case strings.Contains(text, "score") || strings.Contains(text, "分数") || strings.Contains(text, "最高分"):
+			if strings.Contains(p, "scoring") {
+				s += 3
+			}
+		}
+		if strings.Contains(text, "规划") || strings.Contains(text, "plan") {
+			if strings.Contains(p, "project-plan") {
+				s += 3
+			}
+		}
+		return s
+	}
+	bestPath := ""
+	bestScore := -1
+	for _, rel := range candidates {
+		abs := filepath.Join(repoPath, rel)
+		if _, err := os.Stat(abs); err != nil {
+			continue
+		}
+		s := score(rel)
+		if s > bestScore {
+			bestScore = s
+			bestPath = rel
+		}
+	}
+	return bestPath
 }
 
 func parseInputsMap(raw any) map[string]any {
@@ -1920,6 +2072,10 @@ func (o *Orchestrator) normalizeSendCommandText(ctx context.Context, sessionID s
 	if strings.Contains(agentType, "claude") && strings.TrimSpace(text) != "" {
 		submit = true
 	}
+	// Default interactive behavior: non-empty command/prompt should be submitted.
+	if strings.TrimSpace(text) != "" {
+		submit = true
+	}
 	normalized := strings.TrimLeft(text, "\r\n")
 	if strings.Contains(agentType, "claude") {
 		normalized = strings.TrimLeft(normalized, "\r\n\t ")
@@ -2052,11 +2208,13 @@ type openAIResponse struct {
 }
 
 func (o *Orchestrator) createMessage(ctx context.Context, req anthropicRequest, cfg llmConfig) (*anthropicResponse, error) {
+	llmCtx, cancel := context.WithTimeout(ctx, defaultLLMCallTimeout)
+	defer cancel()
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if provider == "openai" {
-		return o.createOpenAIMessage(ctx, req, cfg)
+		return o.createOpenAIMessage(llmCtx, req, cfg)
 	}
-	return o.createAnthropicMessage(ctx, req, cfg)
+	return o.createAnthropicMessage(llmCtx, req, cfg)
 }
 
 func (o *Orchestrator) createAnthropicMessage(ctx context.Context, req anthropicRequest, cfg llmConfig) (*anthropicResponse, error) {
