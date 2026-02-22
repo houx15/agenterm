@@ -30,8 +30,8 @@ const (
 	defaultMaxTokens         = 4096
 	defaultMaxToolRounds     = 40
 	defaultMaxIdlePollRounds = 240
-	defaultTurnTimeBudget    = 120 * time.Second
-	defaultLLMCallTimeout    = 60 * time.Second
+	defaultTurnTimeBudget    = 180 * time.Second
+	defaultLLMCallTimeout    = 90 * time.Second
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
 	maxCommandLedgerEntries  = 500
@@ -1266,6 +1266,7 @@ func (o *Orchestrator) enforceRoleContractForTool(ctx context.Context, toolName 
 		if blocked, reason := o.checkRoleHandoffAndRetries(ctx, taskID, *pb, roleName); blocked {
 			return fmt.Errorf("role loop blocked for %q: %s", roleName, reason)
 		}
+		_ = o.ensureTaskWorktreeBinding(ctx, taskID, args)
 		hydrateCreateSessionInputs(args, task)
 		o.hydrateSpecPathForTask(ctx, args, task)
 		if missing := missingRoleInputs(*role, task, nil, args); len(missing) > 0 {
@@ -1446,6 +1447,69 @@ func parseInputsMap(raw any) map[string]any {
 		}
 	}
 	return out
+}
+
+func (o *Orchestrator) ensureTaskWorktreeBinding(ctx context.Context, taskID string, args map[string]any) error {
+	if o == nil || o.taskRepo == nil || o.worktreeRepo == nil {
+		return nil
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	task, err := o.taskRepo.Get(ctx, taskID)
+	if err != nil || task == nil {
+		return nil
+	}
+	if strings.TrimSpace(task.WorktreeID) != "" {
+		return nil
+	}
+
+	choose := func() string {
+		if direct, err := optionalString(args, "worktree_id"); err == nil && strings.TrimSpace(direct) != "" {
+			return strings.TrimSpace(direct)
+		}
+		inputs := parseInputsMap(args["inputs"])
+		if raw, ok := inputs["worktree_id"]; ok {
+			if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+		return ""
+	}
+	candidate := choose()
+	if candidate == "" {
+		worktrees, err := o.worktreeRepo.ListByProject(ctx, strings.TrimSpace(task.ProjectID))
+		if err == nil {
+			active := make([]*db.Worktree, 0, len(worktrees))
+			for _, wt := range worktrees {
+				if wt == nil {
+					continue
+				}
+				if strings.EqualFold(strings.TrimSpace(wt.Status), "active") {
+					active = append(active, wt)
+				}
+			}
+			if len(active) == 1 {
+				candidate = strings.TrimSpace(active[0].ID)
+			}
+		}
+	}
+	if candidate == "" {
+		return nil
+	}
+	wt, err := o.worktreeRepo.Get(ctx, candidate)
+	if err != nil || wt == nil {
+		return nil
+	}
+	if strings.TrimSpace(wt.ProjectID) != strings.TrimSpace(task.ProjectID) {
+		return nil
+	}
+	task.WorktreeID = strings.TrimSpace(candidate)
+	if err := o.taskRepo.Update(ctx, task); err != nil {
+		return nil
+	}
+	return nil
 }
 
 func (o *Orchestrator) checkRoleHandoffAndRetries(ctx context.Context, taskID string, pb playbook.Playbook, roleName string) (bool, string) {
