@@ -284,6 +284,29 @@ CREATE TABLE IF NOT EXISTS role_loop_attempts (
 CREATE INDEX IF NOT EXISTS idx_role_loop_attempts_task_id ON role_loop_attempts(task_id);
 `,
 	},
+	{
+		version: 7,
+		name:    "create session command queue table",
+		sql: `
+CREATE TABLE IF NOT EXISTS session_commands (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	op TEXT NOT NULL,
+	payload_json TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL,
+	result_json TEXT NOT NULL DEFAULT '',
+	error TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	sent_at TEXT NOT NULL DEFAULT '',
+	acked_at TEXT NOT NULL DEFAULT '',
+	completed_at TEXT NOT NULL DEFAULT '',
+	FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_commands_session_id_created ON session_commands(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_session_commands_status ON session_commands(status);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

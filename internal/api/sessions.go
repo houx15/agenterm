@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -28,6 +29,14 @@ type sendCommandRequest struct {
 
 type sendKeyRequest struct {
 	Key string `json:"key"`
+}
+
+type enqueueSessionCommandRequest struct {
+	Op   string `json:"op"`
+	Text string `json:"text,omitempty"`
+	Key  string `json:"key,omitempty"`
+	Cols int    `json:"cols,omitempty"`
+	Rows int    `json:"rows,omitempty"`
 }
 
 type patchTakeoverRequest struct {
@@ -241,49 +250,10 @@ func (h *handler) sendSessionCommand(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "text is required")
 		return
 	}
-
-	if h.lifecycle != nil {
-		if err := h.lifecycle.SendCommand(r.Context(), r.PathValue("id"), req.Text); err != nil {
-			status, msg := mapSessionError(err)
-			jsonError(w, status, msg)
-			return
-		}
-		jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
-		return
-	}
-
-	session, ok := h.mustGetSession(w, r)
-	if !ok {
-		return
-	}
-	workDir := h.resolveSessionWorkDir(r.Context(), session)
-	if err := sessionpkg.ValidateCommandPolicy(req.Text, workDir); err != nil {
-		if policyErr, ok := err.(*sessionpkg.CommandPolicyError); ok {
-			sessionpkg.AuditCommandPolicyViolation(workDir, session.ID, req.Text, policyErr)
-		}
-		jsonError(w, http.StatusForbidden, err.Error())
-		return
-	}
-	gw, err := h.gatewayForSession(session.TmuxSessionName)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
-		return
-	}
-	if session.TmuxWindowID == "" {
-		jsonError(w, http.StatusBadRequest, "session has no tmux window")
-		return
-	}
-
-	if err := gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	session.Status = "working"
-	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+	h.enqueueAndRespond(w, r, sessionpkg.CommandRequest{
+		Op:   sessionpkg.CommandOpSendText,
+		Text: req.Text,
+	}, false)
 }
 
 func (h *handler) sendSessionKey(w http.ResponseWriter, r *http.Request) {
@@ -296,43 +266,97 @@ func (h *handler) sendSessionKey(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "key is required")
 		return
 	}
+	h.enqueueAndRespond(w, r, sessionpkg.CommandRequest{
+		Op:  sessionpkg.CommandOpSendKey,
+		Key: req.Key,
+	}, false)
+}
+
+func (h *handler) enqueueSessionCommand(w http.ResponseWriter, r *http.Request) {
+	var req enqueueSessionCommandRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	op := sessionpkg.CommandOp(strings.TrimSpace(strings.ToLower(req.Op)))
+	if op == "" {
+		jsonError(w, http.StatusBadRequest, "op is required")
+		return
+	}
+	h.enqueueAndRespond(w, r, sessionpkg.CommandRequest{
+		Op:   op,
+		Text: req.Text,
+		Key:  req.Key,
+		Cols: req.Cols,
+		Rows: req.Rows,
+	}, true)
+}
+
+func (h *handler) getSessionCommand(w http.ResponseWriter, r *http.Request) {
+	commandID := strings.TrimSpace(r.PathValue("command_id"))
+	if commandID == "" {
+		jsonError(w, http.StatusBadRequest, "command_id is required")
+		return
+	}
 	if h.lifecycle != nil {
-		if err := h.lifecycle.SendKey(r.Context(), r.PathValue("id"), req.Key); err != nil {
+		cmd, err := h.lifecycle.GetCommand(r.Context(), commandID)
+		if err != nil {
 			status, msg := mapSessionError(err)
 			jsonError(w, status, msg)
 			return
 		}
-		jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+		if cmd == nil || cmd.SessionID != r.PathValue("id") {
+			jsonError(w, http.StatusNotFound, "session command not found")
+			return
+		}
+		jsonResponse(w, http.StatusOK, cmd)
 		return
+	}
+	cmd, err := h.sessionCommandRepo.Get(r.Context(), commandID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if cmd == nil || cmd.SessionID != r.PathValue("id") {
+		jsonError(w, http.StatusNotFound, "session command not found")
+		return
+	}
+	jsonResponse(w, http.StatusOK, cmd)
+}
+
+func (h *handler) listSessionCommands(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			jsonError(w, http.StatusBadRequest, "invalid limit query parameter")
+			return
+		}
+		if n > 500 {
+			n = 500
+		}
+		limit = n
 	}
 	session, ok := h.mustGetSession(w, r)
 	if !ok {
 		return
 	}
-	gw, err := h.gatewayForSession(session.TmuxSessionName)
+	if h.lifecycle != nil {
+		items, err := h.lifecycle.ListCommands(r.Context(), session.ID, limit)
+		if err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		jsonResponse(w, http.StatusOK, items)
+		return
+	}
+	items, err := h.sessionCommandRepo.ListBySession(r.Context(), session.ID, limit)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "tmux gateway unavailable")
-		return
-	}
-	if session.TmuxWindowID == "" {
-		jsonError(w, http.StatusBadRequest, "session has no tmux window")
-		return
-	}
-	key := sessionpkg.ValidateControlKey(req.Key)
-	if key == "" {
-		jsonError(w, http.StatusBadRequest, "unsupported key")
-		return
-	}
-	if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	session.Status = "working"
-	if err := h.sessionRepo.Update(r.Context(), session); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+	jsonResponse(w, http.StatusOK, items)
 }
 
 func (h *handler) resolveSessionWorkDir(ctx context.Context, sess *db.Session) string {
@@ -354,6 +378,131 @@ func (h *handler) resolveSessionWorkDir(ctx context.Context, sess *db.Session) s
 		}
 	}
 	return project.RepoPath
+}
+
+func (h *handler) enqueueAndRespond(w http.ResponseWriter, r *http.Request, req sessionpkg.CommandRequest, richResponse bool) {
+	sessionID := r.PathValue("id")
+	if h.lifecycle != nil {
+		cmd, err := h.lifecycle.EnqueueCommand(r.Context(), sessionID, req)
+		if err != nil {
+			status, msg := mapSessionError(err)
+			jsonError(w, status, msg)
+			return
+		}
+		if richResponse {
+			jsonResponse(w, http.StatusOK, cmd)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+		return
+	}
+
+	session, ok := h.mustGetSession(w, r)
+	if !ok {
+		return
+	}
+
+	payload := map[string]any{
+		"op":   req.Op,
+		"text": req.Text,
+		"key":  req.Key,
+		"cols": req.Cols,
+		"rows": req.Rows,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	cmd := &db.SessionCommand{
+		SessionID:   session.ID,
+		Op:          string(req.Op),
+		PayloadJSON: string(payloadJSON),
+		Status:      "queued",
+	}
+	if err := h.sessionCommandRepo.Create(r.Context(), cmd); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	cmd.Status = "sent"
+	cmd.SentAt = time.Now().UTC()
+	_ = h.sessionCommandRepo.Update(r.Context(), cmd)
+	if err := h.runFallbackCommand(r.Context(), session, req); err != nil {
+		cmd.Status = "failed"
+		cmd.Error = err.Error()
+		cmd.CompletedAt = time.Now().UTC()
+		_ = h.sessionCommandRepo.Update(context.Background(), cmd)
+		status, msg := mapSessionError(err)
+		jsonError(w, status, msg)
+		return
+	}
+	cmd.Status = "acked"
+	cmd.AckedAt = time.Now().UTC()
+	_ = h.sessionCommandRepo.Update(r.Context(), cmd)
+	cmd.Status = "completed"
+	cmd.ResultJSON = `{"status":"ok"}`
+	cmd.CompletedAt = time.Now().UTC()
+	_ = h.sessionCommandRepo.Update(r.Context(), cmd)
+
+	if richResponse {
+		jsonResponse(w, http.StatusOK, cmd)
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (h *handler) runFallbackCommand(ctx context.Context, session *db.Session, req sessionpkg.CommandRequest) error {
+	gw, err := h.gatewayForSession(session.TmuxSessionName)
+	if err != nil {
+		return fmt.Errorf("tmux gateway unavailable")
+	}
+	if session.TmuxWindowID == "" {
+		return fmt.Errorf("session has no tmux window")
+	}
+	switch req.Op {
+	case sessionpkg.CommandOpSendText:
+		if req.Text == "" {
+			return fmt.Errorf("text is required")
+		}
+		workDir := h.resolveSessionWorkDir(ctx, session)
+		if err := sessionpkg.ValidateCommandPolicy(req.Text, workDir); err != nil {
+			if policyErr, ok := err.(*sessionpkg.CommandPolicyError); ok {
+				sessionpkg.AuditCommandPolicyViolation(workDir, session.ID, req.Text, policyErr)
+			}
+			return err
+		}
+		if err := gw.SendRaw(session.TmuxWindowID, req.Text); err != nil {
+			return err
+		}
+	case sessionpkg.CommandOpSendKey:
+		key := sessionpkg.ValidateControlKey(req.Key)
+		if key == "" {
+			return fmt.Errorf("unsupported key")
+		}
+		if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
+			return err
+		}
+	case sessionpkg.CommandOpInterrupt:
+		if err := gw.SendKeys(session.TmuxWindowID, "C-c"); err != nil {
+			return err
+		}
+	case sessionpkg.CommandOpResize:
+		if req.Cols <= 0 || req.Rows <= 0 {
+			return fmt.Errorf("cols and rows must be > 0")
+		}
+		resizer, ok := gw.(interface {
+			ResizeWindow(windowID string, cols int, rows int) error
+		})
+		if !ok {
+			return fmt.Errorf("session gateway does not support resize")
+		}
+		if err := resizer.ResizeWindow(session.TmuxWindowID, req.Cols, req.Rows); err != nil {
+			return err
+		}
+	case sessionpkg.CommandOpClose:
+		return fmt.Errorf("close operation requires session lifecycle manager")
+	default:
+		return fmt.Errorf("unsupported op %q", req.Op)
+	}
+	session.Status = "working"
+	return h.sessionRepo.Update(ctx, session)
 }
 
 func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
@@ -421,9 +570,9 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 	status := strings.ToLower(strings.TrimSpace(session.Status))
 	idle := status == "idle"
 	jsonResponse(w, http.StatusOK, map[string]any{
-		"idle":          idle,
-		"last_activity": session.LastActivityAt,
-		"status":        session.Status,
+		"idle":           idle,
+		"last_activity":  session.LastActivityAt,
+		"status":         session.Status,
 		"waiting_review": status == "waiting_review",
 		"human_takeover": status == "human_takeover",
 	})
@@ -818,7 +967,10 @@ func mapSessionError(err error) (int, string) {
 		return http.StatusNotFound, err.Error()
 	case sessionpkg.IsCommandPolicyError(err):
 		return http.StatusForbidden, err.Error()
-	case strings.Contains(err.Error(), "required"), strings.Contains(err.Error(), "unknown agent type"):
+	case strings.Contains(err.Error(), "required"),
+		strings.Contains(err.Error(), "unknown agent type"),
+		strings.Contains(err.Error(), "unsupported"),
+		strings.Contains(err.Error(), "op is"):
 		return http.StatusBadRequest, err.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()

@@ -54,6 +54,20 @@ type Session struct {
 	LastActivityAt  time.Time `json:"last_activity_at"`
 }
 
+type SessionCommand struct {
+	ID          string    `json:"id"`
+	SessionID   string    `json:"session_id"`
+	Op          string    `json:"op"`
+	PayloadJSON string    `json:"payload_json,omitempty"`
+	Status      string    `json:"status"`
+	ResultJSON  string    `json:"result_json,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	SentAt      time.Time `json:"sent_at,omitempty"`
+	AckedAt     time.Time `json:"acked_at,omitempty"`
+	CompletedAt time.Time `json:"completed_at,omitempty"`
+}
+
 type DemandPoolItem struct {
 	ID             string    `json:"id"`
 	ProjectID      string    `json:"project_id"`

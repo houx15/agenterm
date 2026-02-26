@@ -43,6 +43,7 @@ type handler struct {
 	taskRepo                *db.TaskRepo
 	worktreeRepo            *db.WorktreeRepo
 	sessionRepo             *db.SessionRepo
+	sessionCommandRepo      *db.SessionCommandRepo
 	historyRepo             *db.OrchestratorHistoryRepo
 	projectOrchestratorRepo *db.ProjectOrchestratorRepo
 	workflowRepo            *db.WorkflowRepo
@@ -74,6 +75,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		taskRepo:                db.NewTaskRepo(conn),
 		worktreeRepo:            db.NewWorktreeRepo(conn),
 		sessionRepo:             db.NewSessionRepo(conn),
+		sessionCommandRepo:      db.NewSessionCommandRepo(conn),
 		historyRepo:             db.NewOrchestratorHistoryRepo(conn),
 		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
 		workflowRepo:            db.NewWorkflowRepo(conn),
@@ -118,6 +120,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("GET /api/sessions/{id}", handler.getSession)
 	mux.HandleFunc("POST /api/sessions/{id}/send", handler.sendSessionCommand)
 	mux.HandleFunc("POST /api/sessions/{id}/send-key", handler.sendSessionKey)
+	mux.HandleFunc("POST /api/sessions/{id}/commands", handler.enqueueSessionCommand)
+	mux.HandleFunc("GET /api/sessions/{id}/commands", handler.listSessionCommands)
+	mux.HandleFunc("GET /api/sessions/{id}/commands/{command_id}", handler.getSessionCommand)
 	mux.HandleFunc("GET /api/sessions/{id}/output", handler.getSessionOutput)
 	mux.HandleFunc("GET /api/sessions/{id}/idle", handler.getSessionIdle)
 	mux.HandleFunc("GET /api/sessions/{id}/ready", handler.getSessionReady)

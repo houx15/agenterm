@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,6 +39,24 @@ type CreateSessionRequest struct {
 	Role      string
 }
 
+type CommandOp string
+
+const (
+	CommandOpSendText  CommandOp = "send_text"
+	CommandOpSendKey   CommandOp = "send_key"
+	CommandOpInterrupt CommandOp = "interrupt"
+	CommandOpResize    CommandOp = "resize"
+	CommandOpClose     CommandOp = "close"
+)
+
+type CommandRequest struct {
+	Op   CommandOp
+	Text string
+	Key  string
+	Cols int
+	Rows int
+}
+
 type OutputEntry struct {
 	Text      string    `json:"text"`
 	Timestamp time.Time `json:"timestamp"`
@@ -48,6 +67,7 @@ type Manager struct {
 	registry     *registry.Registry
 	hub          *hub.Hub
 	sessionRepo  *db.SessionRepo
+	commandRepo  *db.SessionCommandRepo
 	taskRepo     *db.TaskRepo
 	projectRepo  *db.ProjectRepo
 	worktreeRepo *db.WorktreeRepo
@@ -61,11 +81,25 @@ type Manager struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	monitors map[string]monitorHandle
+
+	commandMu sync.Mutex
+	commandQ  map[string]chan queuedCommand
 }
 
 type monitorHandle struct {
 	monitor *Monitor
 	cancel  context.CancelFunc
+}
+
+type queuedCommand struct {
+	cmd  *db.SessionCommand
+	req  CommandRequest
+	done chan commandResult
+}
+
+type commandResult struct {
+	cmd *db.SessionCommand
+	err error
 }
 
 func NewManager(conn *sql.DB, tmuxMgr TmuxManager, reg *registry.Registry, hubInst *hub.Hub) *Manager {
@@ -78,6 +112,7 @@ func NewManager(conn *sql.DB, tmuxMgr TmuxManager, reg *registry.Registry, hubIn
 		registry:      reg,
 		hub:           hubInst,
 		sessionRepo:   db.NewSessionRepo(conn),
+		commandRepo:   db.NewSessionCommandRepo(conn),
 		taskRepo:      db.NewTaskRepo(conn),
 		projectRepo:   db.NewProjectRepo(conn),
 		worktreeRepo:  db.NewWorktreeRepo(conn),
@@ -86,6 +121,7 @@ func NewManager(conn *sql.DB, tmuxMgr TmuxManager, reg *registry.Registry, hubIn
 		ringBufferLen: defaultRingBufferLen,
 		captureLines:  defaultCaptureLines,
 		monitors:      make(map[string]monitorHandle),
+		commandQ:      make(map[string]chan queuedCommand),
 	}
 }
 
@@ -132,11 +168,16 @@ func (sm *Manager) Close() {
 		sm.cancel = nil
 	}
 	sm.monitors = make(map[string]monitorHandle)
+	commandQueues := sm.commandQ
+	sm.commandQ = make(map[string]chan queuedCommand)
 	sm.mu.Unlock()
 	for _, handle := range handles {
 		if handle.cancel != nil {
 			handle.cancel()
 		}
+	}
+	for _, q := range commandQueues {
+		close(q)
 	}
 }
 
@@ -231,62 +272,123 @@ func (sm *Manager) CreateSession(ctx context.Context, req CreateSessionRequest) 
 }
 
 func (sm *Manager) SendCommand(ctx context.Context, sessionID string, text string) error {
-	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("text is required")
-	}
-	session, err := sm.sessionRepo.Get(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return errNotFound("session")
-	}
-	if session.TmuxWindowID == "" {
-		return fmt.Errorf("session has no tmux window")
-	}
-	workDir := sm.resolveWorkDirForSession(ctx, session)
-	if err := enforceCommandPolicy(text, workDir); err != nil {
-		if policyErr, ok := err.(*CommandPolicyError); ok {
-			auditCommandPolicyViolation(workDir, sessionID, text, policyErr)
-		}
-		return err
-	}
-
-	gw, err := sm.gatewayForSession(session.TmuxSessionName)
-	if err != nil {
-		return err
-	}
-	normalized := normalizeSessionCommandText(text)
-	submit := strings.HasSuffix(normalized, "\r")
-	if submit {
-		normalized = strings.TrimSuffix(normalized, "\r")
-	}
-	if normalized != "" {
-		if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
-			return err
-		}
-	}
-	if submit {
-		if err := gw.SendKeys(session.TmuxWindowID, "C-m"); err != nil {
-			return err
-		}
-	}
-
-	session.Status = "working"
-	if err := sm.sessionRepo.Update(ctx, session); err != nil {
-		return err
-	}
-	if sm.hub != nil {
-		sm.hub.BroadcastSessionStatus(sessionID, session.Status)
-	}
-	return nil
+	_, err := sm.EnqueueCommand(ctx, sessionID, CommandRequest{
+		Op:   CommandOpSendText,
+		Text: text,
+	})
+	return err
 }
 
 func (sm *Manager) SendKey(ctx context.Context, sessionID string, key string) error {
-	key = ValidateControlKey(key)
-	if key == "" {
-		return fmt.Errorf("key is required")
+	_, err := sm.EnqueueCommand(ctx, sessionID, CommandRequest{
+		Op:  CommandOpSendKey,
+		Key: key,
+	})
+	return err
+}
+
+func (sm *Manager) EnqueueCommand(ctx context.Context, sessionID string, req CommandRequest) (*db.SessionCommand, error) {
+	if err := sm.ensureStarted(); err != nil {
+		return nil, err
 	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	req.Op = CommandOp(strings.TrimSpace(string(req.Op)))
+	if req.Op == "" {
+		return nil, fmt.Errorf("op is required")
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal command payload: %w", err)
+	}
+	cmd := &db.SessionCommand{
+		SessionID:   sessionID,
+		Op:          string(req.Op),
+		PayloadJSON: string(payload),
+		Status:      "queued",
+	}
+	if err := sm.commandRepo.Create(ctx, cmd); err != nil {
+		return nil, err
+	}
+
+	item := queuedCommand{
+		cmd:  cmd,
+		req:  req,
+		done: make(chan commandResult, 1),
+	}
+	queue := sm.ensureSessionCommandQueue(sessionID)
+	select {
+	case <-ctx.Done():
+		cmd.Status = "failed"
+		cmd.Error = ctx.Err().Error()
+		cmd.CompletedAt = time.Now().UTC()
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+		return nil, ctx.Err()
+	case queue <- item:
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-item.done:
+		if result.err != nil {
+			return nil, result.err
+		}
+		return result.cmd, nil
+	}
+}
+
+func (sm *Manager) GetCommand(ctx context.Context, commandID string) (*db.SessionCommand, error) {
+	return sm.commandRepo.Get(ctx, commandID)
+}
+
+func (sm *Manager) ListCommands(ctx context.Context, sessionID string, limit int) ([]*db.SessionCommand, error) {
+	return sm.commandRepo.ListBySession(ctx, sessionID, limit)
+}
+
+func (sm *Manager) ensureSessionCommandQueue(sessionID string) chan queuedCommand {
+	sm.commandMu.Lock()
+	defer sm.commandMu.Unlock()
+	if q, ok := sm.commandQ[sessionID]; ok {
+		return q
+	}
+	q := make(chan queuedCommand, 64)
+	sm.commandQ[sessionID] = q
+	go sm.runSessionCommandQueue(sessionID, q)
+	return q
+}
+
+func (sm *Manager) runSessionCommandQueue(sessionID string, q chan queuedCommand) {
+	for item := range q {
+		cmd := item.cmd
+		cmd.Status = "sent"
+		cmd.SentAt = time.Now().UTC()
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+		err := sm.dispatchCommand(context.Background(), sessionID, item.req)
+		if err != nil {
+			cmd.Status = "failed"
+			cmd.Error = err.Error()
+			cmd.CompletedAt = time.Now().UTC()
+			_ = sm.commandRepo.Update(context.Background(), cmd)
+			item.done <- commandResult{cmd: cmd, err: err}
+			close(item.done)
+			continue
+		}
+		cmd.Status = "acked"
+		cmd.AckedAt = time.Now().UTC()
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+		cmd.Status = "completed"
+		cmd.CompletedAt = time.Now().UTC()
+		cmd.ResultJSON = `{"status":"ok"}`
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+		item.done <- commandResult{cmd: cmd, err: nil}
+		close(item.done)
+	}
+}
+
+func (sm *Manager) dispatchCommand(ctx context.Context, sessionID string, req CommandRequest) error {
 	session, err := sm.sessionRepo.Get(ctx, sessionID)
 	if err != nil {
 		return err
@@ -301,9 +403,59 @@ func (sm *Manager) SendKey(ctx context.Context, sessionID string, key string) er
 	if err != nil {
 		return err
 	}
-	if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
-		return err
+
+	switch req.Op {
+	case CommandOpSendText:
+		if strings.TrimSpace(req.Text) == "" {
+			return fmt.Errorf("text is required")
+		}
+		workDir := sm.resolveWorkDirForSession(ctx, session)
+		if err := enforceCommandPolicy(req.Text, workDir); err != nil {
+			if policyErr, ok := err.(*CommandPolicyError); ok {
+				auditCommandPolicyViolation(workDir, sessionID, req.Text, policyErr)
+			}
+			return err
+		}
+		normalized := normalizeSessionCommandText(req.Text)
+		submit := strings.HasSuffix(normalized, "\r")
+		if submit {
+			normalized = strings.TrimSuffix(normalized, "\r")
+		}
+		if normalized != "" {
+			if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
+				return err
+			}
+		}
+		if submit {
+			if err := gw.SendKeys(session.TmuxWindowID, "C-m"); err != nil {
+				return err
+			}
+		}
+	case CommandOpSendKey:
+		key := ValidateControlKey(req.Key)
+		if key == "" {
+			return fmt.Errorf("key is required")
+		}
+		if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
+			return err
+		}
+	case CommandOpInterrupt:
+		if err := gw.SendKeys(session.TmuxWindowID, "C-c"); err != nil {
+			return err
+		}
+	case CommandOpResize:
+		if req.Cols <= 0 || req.Rows <= 0 {
+			return fmt.Errorf("cols and rows must be > 0")
+		}
+		if err := gw.ResizeWindow(session.TmuxWindowID, req.Cols, req.Rows); err != nil {
+			return err
+		}
+	case CommandOpClose:
+		return sm.DestroySession(ctx, sessionID)
+	default:
+		return fmt.Errorf("unsupported op %q", req.Op)
 	}
+
 	session.Status = "working"
 	if err := sm.sessionRepo.Update(ctx, session); err != nil {
 		return err
@@ -513,6 +665,7 @@ func (sm *Manager) DestroySession(ctx context.Context, sessionID string) error {
 	}
 
 	sm.stopMonitor(sessionID)
+	sm.stopSessionCommandQueue(sessionID)
 	if err := sm.tmux.DestroySession(session.TmuxSessionName); err != nil {
 		return err
 	}
@@ -525,6 +678,16 @@ func (sm *Manager) DestroySession(ctx context.Context, sessionID string) error {
 		sm.hub.BroadcastSessionStatus(sessionID, session.Status)
 	}
 	return nil
+}
+
+func (sm *Manager) stopSessionCommandQueue(sessionID string) {
+	sm.commandMu.Lock()
+	q := sm.commandQ[sessionID]
+	delete(sm.commandQ, sessionID)
+	sm.commandMu.Unlock()
+	if q != nil {
+		close(q)
+	}
 }
 
 func (sm *Manager) ObserveParsedOutput(tmuxSession string, windowID string, text string, class string, timestamp time.Time) {

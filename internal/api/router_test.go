@@ -27,6 +27,7 @@ type fakeGateway struct {
 	nextID         int
 	newWindowCalls int
 	sentRaw        []string
+	sentKeys       []string
 	failNewWindow  bool
 }
 
@@ -47,6 +48,7 @@ func (f *fakeGateway) ListWindows() []tmux.Window {
 }
 
 func (f *fakeGateway) SendKeys(windowID string, keys string) error {
+	f.sentKeys = append(f.sentKeys, windowID+":"+keys)
 	return nil
 }
 
@@ -754,6 +756,83 @@ func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
 	}
 	if v, ok := idleResp["human_takeover"].(bool); !ok || !v {
 		t.Fatalf("expected human_takeover=true, got=%v", idleResp["human_takeover"])
+	}
+}
+
+func TestSessionCommandQueueEndpoints(t *testing.T) {
+	gw := &fakeGateway{}
+	h, _ := openAPI(t, gw)
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "P1", "repo_path": t.TempDir(),
+	}, true)
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
+		"title": "T1", "description": "D",
+	}, true)
+	var task map[string]any
+	decodeBody(t, createTask, &task)
+	taskID := task["id"].(string)
+
+	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
+		"agent_type": "codex", "role": "coder",
+	}, true)
+	var session map[string]any
+	decodeBody(t, createSession, &session)
+	sessionID := session["id"].(string)
+
+	send := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/commands", map[string]any{
+		"op":   "send_text",
+		"text": "echo hi\\n",
+	}, true)
+	if send.Code != http.StatusOK {
+		t.Fatalf("send command status=%d body=%s", send.Code, send.Body.String())
+	}
+	var sendBody map[string]any
+	decodeBody(t, send, &sendBody)
+	commandID, _ := sendBody["id"].(string)
+	if commandID == "" {
+		t.Fatalf("expected command id in response")
+	}
+	if sendBody["status"] != "completed" {
+		t.Fatalf("status=%v want completed", sendBody["status"])
+	}
+	if len(gw.sentRaw) == 0 {
+		t.Fatalf("expected command to be sent to gateway")
+	}
+
+	sendKey := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/commands", map[string]any{
+		"op":  "send_key",
+		"key": "enter",
+	}, true)
+	if sendKey.Code != http.StatusOK {
+		t.Fatalf("send key status=%d body=%s", sendKey.Code, sendKey.Body.String())
+	}
+	if len(gw.sentKeys) == 0 {
+		t.Fatalf("expected key to be sent to gateway")
+	}
+
+	get := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/commands/"+commandID, nil, true)
+	if get.Code != http.StatusOK {
+		t.Fatalf("get command status=%d body=%s", get.Code, get.Body.String())
+	}
+	var got map[string]any
+	decodeBody(t, get, &got)
+	if got["id"] != commandID {
+		t.Fatalf("id=%v want %s", got["id"], commandID)
+	}
+
+	list := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/commands?limit=5", nil, true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list commands status=%d body=%s", list.Code, list.Body.String())
+	}
+	var items []map[string]any
+	decodeBody(t, list, &items)
+	if len(items) < 2 {
+		t.Fatalf("len(items)=%d want >= 2", len(items))
 	}
 }
 

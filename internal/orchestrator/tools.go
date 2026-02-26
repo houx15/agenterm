@@ -451,7 +451,10 @@ func defaultTools(client *RESTToolClient) []Tool {
 					return nil, err
 				}
 				var out map[string]any
-				err = client.doJSON(ctx, http.MethodPost, "/api/sessions/"+sessionID+"/send", nil, map[string]any{"text": text}, &out)
+				err = client.doJSON(ctx, http.MethodPost, "/api/sessions/"+sessionID+"/commands", nil, map[string]any{
+					"op":   "send_text",
+					"text": text,
+				}, &out)
 				if err != nil {
 					return nil, err
 				}
@@ -475,7 +478,10 @@ func defaultTools(client *RESTToolClient) []Tool {
 					return nil, err
 				}
 				var out map[string]any
-				err = client.doJSON(ctx, http.MethodPost, "/api/sessions/"+sessionID+"/send-key", nil, map[string]any{"key": key}, &out)
+				err = client.doJSON(ctx, http.MethodPost, "/api/sessions/"+sessionID+"/commands", nil, map[string]any{
+					"op":  "send_key",
+					"key": key,
+				}, &out)
 				if err != nil {
 					return nil, err
 				}
