@@ -848,6 +848,46 @@ func TestStageToolGateBlocksCreateWorktreeDuringPlan(t *testing.T) {
 	}
 }
 
+func TestStageToolGateUsesPersistedRunStage(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	runRepo := db.NewRunRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "planning"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	run, err := runRepo.EnsureActive(context.Background(), project.ID, "build", "test")
+	if err != nil {
+		t.Fatalf("ensure run: %v", err)
+	}
+	if err := runRepo.UpdateStage(context.Background(), run.ID, "build", "active"); err != nil {
+		t.Fatalf("update run stage: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo: projectRepo,
+		RunRepo:     runRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_worktree": {
+					Name: "create_worktree",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	if _, err := o.executeTool(context.Background(), "create_worktree", map[string]any{
+		"project_id": project.ID,
+		"path":       "build-demo",
+	}); err != nil {
+		t.Fatalf("expected create_worktree to be allowed by persisted build stage, got: %v", err)
+	}
+}
+
 func TestStageToolGateBlocksCreateProjectInExecutionLane(t *testing.T) {
 	o := New(Options{
 		Toolset: &Toolset{

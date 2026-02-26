@@ -67,6 +67,7 @@ type Options struct {
 	WorktreeRepo            *db.WorktreeRepo
 	SessionRepo             *db.SessionRepo
 	HistoryRepo             *db.OrchestratorHistoryRepo
+	RunRepo                 *db.RunRepo
 	ProjectOrchestratorRepo *db.ProjectOrchestratorRepo
 	WorkflowRepo            *db.WorkflowRepo
 	KnowledgeRepo           *db.ProjectKnowledgeRepo
@@ -94,6 +95,7 @@ type Orchestrator struct {
 	worktreeRepo            *db.WorktreeRepo
 	sessionRepo             *db.SessionRepo
 	historyRepo             *db.OrchestratorHistoryRepo
+	runRepo                 *db.RunRepo
 	projectOrchestratorRepo *db.ProjectOrchestratorRepo
 	workflowRepo            *db.WorkflowRepo
 	knowledgeRepo           *db.ProjectKnowledgeRepo
@@ -209,6 +211,7 @@ func New(opts Options) *Orchestrator {
 		worktreeRepo:            opts.WorktreeRepo,
 		sessionRepo:             opts.SessionRepo,
 		historyRepo:             opts.HistoryRepo,
+		runRepo:                 opts.RunRepo,
 		projectOrchestratorRepo: opts.ProjectOrchestratorRepo,
 		workflowRepo:            opts.WorkflowRepo,
 		knowledgeRepo:           opts.KnowledgeRepo,
@@ -270,7 +273,7 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 		if matchedPlaybook == nil {
 			matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
 		}
-		activeStage := deriveExecutionStage(state, matchedPlaybook)
+		activeStage := o.resolveExecutionStage(ctx, projectID, state, matchedPlaybook)
 		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook, activeStage)
 	}
 	systemPrompt += "\n\nApproval gate:\n"
@@ -1755,6 +1758,19 @@ func deriveExecutionStage(state *ProjectState, pb *Playbook) string {
 	return firstEnabledStage(pb)
 }
 
+func (o *Orchestrator) resolveExecutionStage(ctx context.Context, projectID string, state *ProjectState, pb *Playbook) string {
+	if o != nil && o.runRepo != nil && strings.TrimSpace(projectID) != "" {
+		run, err := o.runRepo.GetActiveByProject(ctx, strings.TrimSpace(projectID))
+		if err == nil && run != nil {
+			stage := strings.ToLower(strings.TrimSpace(run.CurrentStage))
+			if stage == stagePlan || stage == stageBuild || stage == stageTest {
+				return stage
+			}
+		}
+	}
+	return deriveExecutionStage(state, pb)
+}
+
 func firstEnabledStage(pb *Playbook) string {
 	if pb != nil {
 		if pb.Workflow.Plan.Enabled {
@@ -1909,7 +1925,7 @@ func (o *Orchestrator) enforceStageToolGate(ctx context.Context, toolName string
 	if matchedPlaybook == nil {
 		matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
 	}
-	stage := deriveExecutionStage(state, matchedPlaybook)
+	stage := o.resolveExecutionStage(ctx, projectID, state, matchedPlaybook)
 	if stageToolAllowed(stage, toolName) {
 		return nil
 	}

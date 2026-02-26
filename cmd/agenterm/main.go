@@ -451,6 +451,7 @@ func main() {
 	worktreeRepo := db.NewWorktreeRepo(appDB.SQL())
 	sessionRepo := db.NewSessionRepo(appDB.SQL())
 	historyRepo := db.NewOrchestratorHistoryRepo(appDB.SQL())
+	runRepo := db.NewRunRepo(appDB.SQL())
 	projectOrchestratorRepo := db.NewProjectOrchestratorRepo(appDB.SQL())
 	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
 	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
@@ -580,6 +581,7 @@ func main() {
 		WorktreeRepo:            worktreeRepo,
 		SessionRepo:             sessionRepo,
 		HistoryRepo:             historyRepo,
+		RunRepo:                 runRepo,
 		ProjectOrchestratorRepo: projectOrchestratorRepo,
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
@@ -602,6 +604,7 @@ func main() {
 		WorktreeRepo:            worktreeRepo,
 		SessionRepo:             sessionRepo,
 		HistoryRepo:             historyRepo,
+		RunRepo:                 runRepo,
 		ProjectOrchestratorRepo: projectOrchestratorRepo,
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
