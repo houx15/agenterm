@@ -51,6 +51,7 @@ type handler struct {
 	roleAgentAssignRepo     *db.RoleAgentAssignmentRepo
 	knowledgeRepo           *db.ProjectKnowledgeRepo
 	reviewRepo              *db.ReviewRepo
+	runRepo                 *db.RunRepo
 	demandPoolRepo          *db.DemandPoolRepo
 	registry                *registry.Registry
 	playbookRegistry        *playbook.Registry
@@ -84,6 +85,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		roleAgentAssignRepo:     db.NewRoleAgentAssignmentRepo(conn),
 		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
 		reviewRepo:              db.NewReviewRepo(conn),
+		runRepo:                 db.NewRunRepo(conn),
 		demandPoolRepo:          db.NewDemandPoolRepo(conn),
 		registry:                agentRegistry,
 		playbookRegistry:        playbookRegistry,
@@ -157,6 +159,8 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/preview", handler.previewProjectAssignments)
 	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/confirm", handler.confirmProjectAssignments)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator/assignments", handler.listProjectAssignments)
+	mux.HandleFunc("GET /api/projects/{id}/runs/current", handler.getCurrentProjectRun)
+	mux.HandleFunc("POST /api/projects/{id}/runs/{run_id}/transition", handler.transitionProjectRun)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)
 	mux.HandleFunc("POST /api/workflows", handler.createWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}", handler.updateWorkflow)

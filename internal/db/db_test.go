@@ -61,6 +61,8 @@ func TestOpenCreatesDBFileAndRunsMigrations(t *testing.T) {
 	assertTableExists(t, database.SQL(), "role_loop_attempts")
 	assertTableExists(t, database.SQL(), "session_commands")
 	assertTableExists(t, database.SQL(), "role_agent_assignments")
+	assertTableExists(t, database.SQL(), "project_runs")
+	assertTableExists(t, database.SQL(), "stage_runs")
 }
 
 func TestMigrationsAreIdempotent(t *testing.T) {
@@ -74,8 +76,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.SQL().QueryRow(`SELECT value FROM _meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version error = %v", err)
 	}
-	if version != "8" {
-		t.Fatalf("schema version = %s, want 8", version)
+	if version != "9" {
+		t.Fatalf("schema version = %s, want 9", version)
 	}
 }
 

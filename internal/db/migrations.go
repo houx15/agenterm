@@ -327,6 +327,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_role_agent_assignments_project_role ON rol
 CREATE INDEX IF NOT EXISTS idx_role_agent_assignments_project_stage ON role_agent_assignments(project_id, stage);
 `,
 	},
+	{
+		version: 9,
+		name:    "create project run state tables",
+		sql: `
+CREATE TABLE IF NOT EXISTS project_runs (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'active',
+	current_stage TEXT NOT NULL DEFAULT 'plan',
+	trigger TEXT NOT NULL DEFAULT 'manual',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_runs_project_status ON project_runs(project_id, status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS stage_runs (
+	id TEXT PRIMARY KEY,
+	run_id TEXT NOT NULL,
+	stage TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending',
+	evidence_json TEXT NOT NULL DEFAULT '',
+	started_at TEXT NOT NULL,
+	ended_at TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(run_id) REFERENCES project_runs(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_runs_run_stage ON stage_runs(run_id, stage);
+CREATE INDEX IF NOT EXISTS idx_stage_runs_run_updated ON stage_runs(run_id, updated_at DESC);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

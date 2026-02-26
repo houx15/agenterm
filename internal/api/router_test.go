@@ -1564,6 +1564,46 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	}
 }
 
+func TestProjectRunStateEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "RunState", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	current := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/runs/current", nil, true)
+	if current.Code != http.StatusOK {
+		t.Fatalf("get current run status=%d body=%s", current.Code, current.Body.String())
+	}
+	var currentBody map[string]any
+	decodeBody(t, current, &currentBody)
+	run := currentBody["run"].(map[string]any)
+	runID := run["id"].(string)
+	if run["current_stage"] != "plan" {
+		t.Fatalf("current_stage=%v want plan", run["current_stage"])
+	}
+
+	transition := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/transition", map[string]any{
+		"to_stage": "build",
+		"status":   "active",
+		"evidence": map[string]any{"note": "entered build"},
+	}, true)
+	if transition.Code != http.StatusOK {
+		t.Fatalf("transition run status=%d body=%s", transition.Code, transition.Body.String())
+	}
+	var transitionBody map[string]any
+	decodeBody(t, transition, &transitionBody)
+	updatedRun := transitionBody["run"].(map[string]any)
+	if updatedRun["current_stage"] != "build" {
+		t.Fatalf("current_stage=%v want build", updatedRun["current_stage"])
+	}
+}
+
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	repo := filepath.Join(t.TempDir(), "repo")

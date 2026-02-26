@@ -614,7 +614,8 @@ func isExecutionOperationalTool(name string) bool {
 		"read_session_output", "is_session_idle", "close_session", "can_close_session",
 		"merge_worktree", "resolve_merge_conflict", "create_review_cycle",
 		"create_review_issue", "update_review_issue", "update_task",
-		"preview_assignments", "confirm_assignments", "list_assignments":
+		"preview_assignments", "confirm_assignments", "list_assignments",
+		"get_current_run", "transition_run_stage":
 		return true
 	default:
 		return false
@@ -626,7 +627,7 @@ func isMutatingTool(name string) bool {
 	case "create_project", "create_task", "create_worktree", "merge_worktree", "resolve_merge_conflict",
 		"create_session", "send_command", "close_session", "write_task_spec",
 		"create_demand_item", "update_demand_item", "reprioritize_demand_pool", "promote_demand_item",
-		"confirm_assignments":
+		"confirm_assignments", "transition_run_stage":
 		return true
 	default:
 		return false
@@ -1818,6 +1819,8 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"list_skills":            {},
 			"get_skill_details":      {},
 			"get_project_status":     {},
+			"get_current_run":        {},
+			"transition_run_stage":   {},
 			"preview_assignments":    {},
 			"confirm_assignments":    {},
 			"list_assignments":       {},
@@ -1835,6 +1838,8 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"list_skills":            {},
 			"get_skill_details":      {},
 			"get_project_status":     {},
+			"get_current_run":        {},
+			"transition_run_stage":   {},
 			"preview_assignments":    {},
 			"confirm_assignments":    {},
 			"list_assignments":       {},
@@ -1855,6 +1860,8 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"list_skills":            {},
 			"get_skill_details":      {},
 			"get_project_status":     {},
+			"get_current_run":        {},
+			"transition_run_stage":   {},
 			"preview_assignments":    {},
 			"list_assignments":       {},
 			"write_task_spec":        {},
@@ -1918,6 +1925,8 @@ func (o *Orchestrator) projectIDForTool(ctx context.Context, toolName string, ar
 	case "create_task", "create_worktree", "write_task_spec", "get_project_status",
 		"preview_assignments", "confirm_assignments", "list_assignments":
 		return optionalString(args, "project_id")
+	case "get_current_run", "transition_run_stage":
+		return optionalString(args, "project_id")
 	case "create_session":
 		taskID, err := optionalString(args, "task_id")
 		if err != nil || strings.TrimSpace(taskID) == "" || o.taskRepo == nil {
@@ -1972,6 +1981,7 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 			"create_task", "create_worktree", "write_task_spec", "create_session",
 			"read_session_output", "is_session_idle", "get_project_status",
 			"preview_assignments", "confirm_assignments", "list_assignments",
+			"get_current_run", "transition_run_stage",
 		}, toolName)
 	case "reviewer":
 		return containsFold([]string{
@@ -1987,7 +1997,7 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
 			"write_task_spec", "can_close_session", "close_session", "resolve_merge_conflict",
-			"preview_assignments", "list_assignments",
+			"preview_assignments", "list_assignments", "get_current_run",
 		}, toolName)
 	}
 }

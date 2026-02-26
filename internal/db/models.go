@@ -163,6 +163,27 @@ type RoleAgentAssignment struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type ProjectRun struct {
+	ID           string    `json:"id"`
+	ProjectID    string    `json:"project_id"`
+	Status       string    `json:"status"`
+	CurrentStage string    `json:"current_stage"`
+	Trigger      string    `json:"trigger"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type StageRun struct {
+	ID           string    `json:"id"`
+	RunID        string    `json:"run_id"`
+	Stage        string    `json:"stage"`
+	Status       string    `json:"status"`
+	EvidenceJSON string    `json:"evidence_json,omitempty"`
+	StartedAt    time.Time `json:"started_at"`
+	EndedAt      time.Time `json:"ended_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type RoleLoopAttempt struct {
 	TaskID    string    `json:"task_id"`
 	RoleName  string    `json:"role_name"`

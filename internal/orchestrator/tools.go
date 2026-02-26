@@ -647,6 +647,64 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "get_current_run",
+			Description: "Get current persisted run and stage state for a project",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/projects/"+projectID+"/runs/current", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "transition_run_stage",
+			Description: "Transition project run to a new stage with evidence",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+				"run_id":     {Type: "string", Description: "Run id", Required: true},
+				"to_stage":   {Type: "string", Description: "Target stage: plan|build|test", Required: true},
+				"status":     {Type: "string", Description: "Stage status: active|completed|failed|blocked"},
+				"evidence":   {Type: "object", Description: "Optional evidence payload"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				runID, err := requiredString(args, "run_id")
+				if err != nil {
+					return nil, err
+				}
+				toStage, err := requiredString(args, "to_stage")
+				if err != nil {
+					return nil, err
+				}
+				status, _ := optionalString(args, "status")
+				payload := map[string]any{"to_stage": strings.ToLower(strings.TrimSpace(toStage))}
+				if strings.TrimSpace(status) != "" {
+					payload["status"] = strings.ToLower(strings.TrimSpace(status))
+				}
+				if evidence, ok := args["evidence"]; ok {
+					payload["evidence"] = evidence
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/transition", nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "preview_assignments",
 			Description: "Preview role-to-agent assignments for the active playbook roles",
 			Parameters: map[string]Param{
