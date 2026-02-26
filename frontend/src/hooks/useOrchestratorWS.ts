@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OrchestratorClientMessage, OrchestratorHistoryMessage, OrchestratorServerMessage } from '../api/types'
 import type { MessageActionOption, SessionMessage } from '../components/ChatMessage'
 import { getToken, listOrchestratorHistory } from '../api/client'
+import { orchestratorEventBus } from '../orchestrator/bus'
+import { loadProjectTimeline, saveProjectTimeline } from '../orchestrator/replay'
+import { sessionMessageToEvent } from '../orchestrator/schema'
 
 const INITIAL_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30000
@@ -162,12 +165,50 @@ function sanitizeAssistantText(text: string): string {
   const stripped = text
     .replace(/\[tool_result:[\s\S]*?\]/gi, '')
     .replace(/\[tool_call:[\s\S]*?\]/gi, '')
+    .replace(/\[tool_result:[^\n\r]*/gi, '')
+    .replace(/\[tool_call:[^\n\r]*/gi, '')
     .replace(/\[✅[\s\S]*?\]/g, '')
   const cleanedLines = stripped
     .split('\n')
-    .map((line) => line.trimEnd())
+    .map((line) => line.trim())
+    .filter((line) => Boolean(line))
     .filter((line) => !/^\s*command\s*$/i.test(line))
+    .filter((line) => !/^\s*(tool_result|tool_call|discussion)\s*$/i.test(line))
+    .filter((line) => !looksLikeToolPayloadLine(line))
   return cleanedLines.join('\n').trim()
+}
+
+function looksLikeToolPayloadLine(line: string): boolean {
+  const trimmed = line.trim()
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+    return false
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return false
+    }
+    const payload = parsed as Record<string, unknown>
+    const keys = Object.keys(payload)
+    if (keys.length === 0) {
+      return false
+    }
+    const toolKeys = new Set([
+      'error',
+      'reason',
+      'hint',
+      'created_at',
+      'updated_at',
+      'project_id',
+      'task_id',
+      'status',
+      'id',
+      'skills',
+    ])
+    return keys.some((key) => toolKeys.has(key))
+  } catch {
+    return false
+  }
 }
 
 function extractJSONObjectChunks(text: string): string[] {
@@ -236,12 +277,23 @@ function parseAssistantEnvelopes(text: string): AssistantEnvelope[] {
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         continue
       }
+      if (!isAssistantEnvelopePayload(parsed)) {
+        continue
+      }
       envelopes.push(parsed as AssistantEnvelope)
     } catch {
       // Skip malformed chunk and keep parsing others.
     }
   }
   return envelopes
+}
+
+function isAssistantEnvelopePayload(value: unknown): value is AssistantEnvelope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+  const payload = value as Record<string, unknown>
+  return 'discussion' in payload || 'commands' in payload || 'state_update' in payload || 'confirmation' in payload
 }
 
 function asStringArray(value: unknown): string[] {
@@ -471,6 +523,7 @@ export function useOrchestratorWS(projectId: string) {
   const activeAssistantIDRef = useRef<string | null>(null)
   const activeAssistantCommandsRef = useRef<string[]>([])
   const activeAssistantStateUpdatesRef = useRef<string[]>([])
+  const lastEmittedMessageRef = useRef<string>('')
 
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
@@ -805,7 +858,9 @@ export function useOrchestratorWS(projectId: string) {
   useEffect(() => {
     let canceled = false
 
-    setMessages([])
+    const cachedTimeline = projectId ? loadProjectTimeline(projectId) : []
+    setMessages(cachedTimeline)
+    lastEmittedMessageRef.current = ''
     tokenBufferRef.current = []
     activeAssistantIDRef.current = null
     clearActiveAssistantMetadata()
@@ -834,6 +889,26 @@ export function useOrchestratorWS(projectId: string) {
       canceled = true
     }
   }, [clearActiveAssistantMetadata, projectId])
+
+  useEffect(() => {
+    if (!projectId) {
+      return
+    }
+    saveProjectTimeline(projectId, messages)
+  }, [messages, projectId])
+
+  useEffect(() => {
+    if (!projectId || messages.length === 0) {
+      return
+    }
+    const lastMessage = messages[messages.length - 1]
+    const fingerprint = `${projectId}:${lastMessage.id ?? ''}:${lastMessage.timestamp}:${lastMessage.text.slice(0, 80)}`
+    if (lastEmittedMessageRef.current === fingerprint) {
+      return
+    }
+    lastEmittedMessageRef.current = fingerprint
+    orchestratorEventBus.emit(sessionMessageToEvent(projectId, lastMessage))
+  }, [messages, projectId])
 
   const send = useCallback(
     (text: string) => {

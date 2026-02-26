@@ -1,0 +1,22 @@
+[package]
+name = "agenterm-desktop"
+version = "0.1.0"
+description = "agenTerm desktop shell"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+name = "agenterm_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "1", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "1", features = ["shell-open"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
