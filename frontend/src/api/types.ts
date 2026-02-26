@@ -81,6 +81,7 @@ export interface OrchestratorHistoryMessage {
   project_id: string
   role: string
   content: string
+  message_json?: string
   created_at: string
 }
 

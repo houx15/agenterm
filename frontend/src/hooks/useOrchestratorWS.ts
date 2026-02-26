@@ -6,6 +6,31 @@ import { getToken, listOrchestratorHistory } from '../api/client'
 const INITIAL_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30000
 
+type AssistantEnvelope = {
+  discussion?: string
+  commands?: string[]
+  state_update?: unknown
+  confirmation?: {
+    needed?: boolean
+    prompt?: string
+  }
+}
+
+type NormalizedAssistantMessage = {
+  text: string
+  status: 'discussion' | 'confirmation'
+  confirmationOptions?: MessageActionOption[]
+  discussion?: string
+  commands?: string[]
+  stateUpdates?: string[]
+  confirmationPrompt?: string
+}
+
+type StoredContentBlock = {
+  type?: string
+  text?: string
+}
+
 function createMessage(partial: Partial<SessionMessage> & Pick<SessionMessage, 'text' | 'className'>): SessionMessage {
   return {
     timestamp: Date.now(),
@@ -17,11 +42,9 @@ function summarizeData(value: unknown): string {
   if (value == null) {
     return ''
   }
-
   if (typeof value === 'string') {
     return value
   }
-
   try {
     return JSON.stringify(value)
   } catch {
@@ -29,20 +52,16 @@ function summarizeData(value: unknown): string {
   }
 }
 
-function buildToolCallText(name: string, args?: Record<string, unknown>): string {
+function buildToolCallSummary(name: string, args?: Record<string, unknown>): string {
+  const command = String(name || 'tool_call').trim()
+  if (!args || Object.keys(args).length === 0) {
+    return command
+  }
   const argsText = summarizeData(args)
   if (!argsText || argsText === '{}') {
-    return `[${name}]`
+    return command
   }
-  return `[${name} ${argsText}]`
-}
-
-function buildToolResultText(result: unknown): string {
-  const text = summarizeData(result)
-  if (!text) {
-    return '[\u2705 done]'
-  }
-  return `[\u2705 ${text}]`
+  return `${command} ${argsText}`
 }
 
 function parseApprovalRequiredResult(
@@ -95,6 +114,26 @@ function parseStageToolBlockedResult(
   }
 }
 
+function parseToolFailureResult(result: unknown): string {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return ''
+  }
+  const payload = result as Record<string, unknown>
+  const error = String(payload.error ?? '').trim()
+  if (!error || error === 'approval_required' || error === 'stage_tool_not_allowed') {
+    return ''
+  }
+  const reason = String(payload.reason ?? '').trim()
+  if (reason) {
+    return `${error}: ${reason}`
+  }
+  const hint = String(payload.hint ?? '').trim()
+  if (hint) {
+    return `${error}: ${hint}`
+  }
+  return error
+}
+
 function buildConfirmationOptions(text: string): MessageActionOption[] | undefined {
   const trimmed = text.trim()
   if (!trimmed.endsWith('?')) {
@@ -114,15 +153,6 @@ function buildConfirmationOptions(text: string): MessageActionOption[] | undefin
   }
 
   return undefined
-}
-
-type AssistantEnvelope = {
-  discussion?: string
-  commands?: string[]
-  confirmation?: {
-    needed?: boolean
-    prompt?: string
-  }
 }
 
 function sanitizeAssistantText(text: string): string {
@@ -221,33 +251,113 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
 }
 
-function normalizeAssistantMessage(
-  rawText: string,
-): { text: string; status: 'discussion' | 'confirmation'; confirmationOptions?: MessageActionOption[] } {
-  const sanitizedRaw = sanitizeAssistantText(rawText)
-  const envelopes = parseAssistantEnvelopes(rawText)
-  if (envelopes.length === 0) {
-    const fallbackOptions = buildConfirmationOptions(sanitizedRaw)
-    return {
-      text: sanitizedRaw,
-      status: fallbackOptions ? 'confirmation' : 'discussion',
-      confirmationOptions: fallbackOptions,
+function collectStateUpdates(value: unknown): string[] {
+  if (value == null) {
+    return []
+  }
+  if (typeof value === 'string') {
+    const text = value.trim()
+    return text ? [text] : []
+  }
+  if (Array.isArray(value)) {
+    const items: string[] = []
+    for (const entry of value) {
+      const text = summarizeData(entry).trim()
+      if (text) {
+        items.push(text)
+      }
+    }
+    return items
+  }
+  if (typeof value === 'object') {
+    const objectValue = value as Record<string, unknown>
+    return Object.keys(objectValue)
+      .sort((left, right) => left.localeCompare(right))
+      .map((key) => {
+        const summary = summarizeData(objectValue[key]).trim()
+        if (!summary) {
+          return key
+        }
+        return `${key}: ${summary}`
+      })
+      .filter(Boolean)
+  }
+  const fallback = summarizeData(value).trim()
+  return fallback ? [fallback] : []
+}
+
+function uniqueMerge(items: string[]): string[] {
+  const output: string[] = []
+  const seen = new Set<string>()
+  for (const item of items) {
+    const normalized = item.trim()
+    if (!normalized) {
+      continue
+    }
+    if (seen.has(normalized)) {
+      continue
+    }
+    seen.add(normalized)
+    output.push(normalized)
+  }
+  return output
+}
+
+function buildDisplayText(discussion: string, commands: string[], stateUpdates: string[], confirmationPrompt: string): string {
+  const lines: string[] = []
+  if (discussion) {
+    lines.push(discussion)
+  }
+  if (commands.length > 0) {
+    lines.push('Commands:')
+    for (const command of commands) {
+      lines.push(`- ${command}`)
     }
   }
+  if (stateUpdates.length > 0) {
+    lines.push('State updates:')
+    for (const update of stateUpdates) {
+      lines.push(`- ${update}`)
+    }
+  }
+  if (confirmationPrompt) {
+    lines.push(confirmationPrompt)
+  }
+  return sanitizeAssistantText(lines.join('\n').trim())
+}
 
+function normalizeAssistantMessage(rawText: string, draftCommands: string[] = [], draftStateUpdates: string[] = []): NormalizedAssistantMessage {
+  const envelopes = parseAssistantEnvelopes(rawText)
+  const commandLines: string[] = [...draftCommands]
+  const stateLines: string[] = [...draftStateUpdates]
   const discussionParts: string[] = []
-  const commandLines: string[] = []
   let confirmationNeeded = false
   let confirmationPrompt = ''
+
+  if (envelopes.length === 0) {
+    const discussion = sanitizeAssistantText(rawText)
+    const commands = uniqueMerge(commandLines)
+    const stateUpdates = uniqueMerge(stateLines)
+    const text = buildDisplayText(discussion, commands, stateUpdates, '')
+    const fallbackOptions = buildConfirmationOptions(text)
+    return {
+      text,
+      status: fallbackOptions ? 'confirmation' : 'discussion',
+      confirmationOptions: fallbackOptions,
+      discussion,
+      commands,
+      stateUpdates,
+    }
+  }
 
   for (const envelope of envelopes) {
     const discussion = typeof envelope.discussion === 'string' ? envelope.discussion.trim() : ''
     if (discussion) {
       discussionParts.push(discussion)
     }
-    for (const command of asStringArray(envelope.commands)) {
-      commandLines.push(command)
-    }
+    commandLines.push(...asStringArray(envelope.commands))
+    stateLines.push(...collectStateUpdates(envelope.state_update))
+
     const needed = Boolean(envelope.confirmation?.needed)
     const prompt = typeof envelope.confirmation?.prompt === 'string' ? envelope.confirmation.prompt.trim() : ''
     if (needed) {
@@ -258,25 +368,17 @@ function normalizeAssistantMessage(
     }
   }
 
-  const lines: string[] = []
-  if (discussionParts.length > 0) {
-    lines.push(...discussionParts)
-  }
-  if (commandLines.length > 0) {
-    lines.push('Planned commands:')
-    for (const command of commandLines) {
-      lines.push(`- ${command}`)
-    }
-  }
-  if (confirmationNeeded && confirmationPrompt) {
-    lines.push(confirmationPrompt)
-  }
-
-  const text = sanitizeAssistantText(lines.join('\n').trim())
+  const discussion = sanitizeAssistantText(discussionParts.join('\n').trim())
+  const commands = uniqueMerge(commandLines)
+  const stateUpdates = uniqueMerge(stateLines)
+  const text = buildDisplayText(discussion, commands, stateUpdates, confirmationNeeded ? confirmationPrompt : '')
   if (!confirmationNeeded) {
     return {
       text,
       status: 'discussion',
+      discussion,
+      commands,
+      stateUpdates,
     }
   }
   return {
@@ -287,12 +389,39 @@ function normalizeAssistantMessage(
       { label: 'Modify', value: 'Modify plan' },
       { label: 'Cancel', value: 'Cancel' },
     ],
+    discussion,
+    commands,
+    stateUpdates,
+    confirmationPrompt,
   }
+}
+
+function parseHistoryText(item: OrchestratorHistoryMessage): string {
+  const raw = (item.message_json ?? '').trim()
+  if (!raw) {
+    return item.content ?? ''
+  }
+  try {
+    const blocks = JSON.parse(raw) as unknown
+    if (!Array.isArray(blocks)) {
+      return item.content ?? ''
+    }
+    const texts = (blocks as StoredContentBlock[])
+      .filter((block) => String(block.type ?? '').trim() === 'text')
+      .map((block) => (block.text ?? '').trim())
+      .filter(Boolean)
+    if (texts.length > 0) {
+      return texts.join('\n')
+    }
+  } catch {
+    // Fall back to summarized content.
+  }
+  return item.content ?? ''
 }
 
 function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessage {
   const role = item.role === 'user' ? 'user' : 'assistant'
-  const text = item.content ?? ''
+  const text = parseHistoryText(item)
   const normalized = role === 'assistant' ? normalizeAssistantMessage(text) : null
   return createMessage({
     id: item.id,
@@ -304,6 +433,10 @@ function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessa
     isUser: role === 'user',
     timestamp: Date.parse(item.created_at) || Date.now(),
     confirmationOptions: normalized?.confirmationOptions,
+    discussion: normalized?.discussion,
+    commands: normalized?.commands,
+    stateUpdates: normalized?.stateUpdates,
+    confirmationPrompt: normalized?.confirmationPrompt,
   })
 }
 
@@ -331,6 +464,8 @@ export function useOrchestratorWS(projectId: string) {
   const rafRef = useRef<number | null>(null)
   const tokenBufferRef = useRef<string[]>([])
   const activeAssistantIDRef = useRef<string | null>(null)
+  const activeAssistantCommandsRef = useRef<string[]>([])
+  const activeAssistantStateUpdatesRef = useRef<string[]>([])
 
   const [messages, setMessages] = useState<SessionMessage[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
@@ -342,6 +477,11 @@ export function useOrchestratorWS(projectId: string) {
       window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = null
     }
+  }, [])
+
+  const clearActiveAssistantMetadata = useCallback(() => {
+    activeAssistantCommandsRef.current = []
+    activeAssistantStateUpdatesRef.current = []
   }, [])
 
   const appendTokenChunk = useCallback((chunk: string) => {
@@ -389,6 +529,7 @@ export function useOrchestratorWS(projectId: string) {
   const pushAssistantPlaceholder = useCallback(() => {
     const id = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     activeAssistantIDRef.current = id
+    clearActiveAssistantMetadata()
     setMessages((prev) =>
       prev.concat(
         createMessage({
@@ -401,13 +542,44 @@ export function useOrchestratorWS(projectId: string) {
         }),
       ),
     )
+  }, [clearActiveAssistantMetadata])
+
+  const ensureActiveAssistant = useCallback(() => {
+    if (activeAssistantIDRef.current) {
+      return
+    }
+    pushAssistantPlaceholder()
+    setIsStreaming(true)
+  }, [pushAssistantPlaceholder])
+
+  const appendDraftCommand = useCallback((line: string) => {
+    const normalized = line.trim()
+    if (!normalized) {
+      return
+    }
+    if (!activeAssistantCommandsRef.current.includes(normalized)) {
+      activeAssistantCommandsRef.current.push(normalized)
+    }
+  }, [])
+
+  const appendDraftStateUpdate = useCallback((line: string) => {
+    const normalized = line.trim()
+    if (!normalized) {
+      return
+    }
+    if (!activeAssistantStateUpdatesRef.current.includes(normalized)) {
+      activeAssistantStateUpdatesRef.current.push(normalized)
+    }
   }, [])
 
   const finishActiveAssistant = useCallback(() => {
     flushBufferedTokens()
 
     const activeID = activeAssistantIDRef.current
+    const draftCommands = [...activeAssistantCommandsRef.current]
+    const draftStateUpdates = [...activeAssistantStateUpdatesRef.current]
     if (!activeID) {
+      clearActiveAssistantMetadata()
       setIsStreaming(false)
       return
     }
@@ -417,8 +589,14 @@ export function useOrchestratorWS(projectId: string) {
         if (item.id !== activeID) {
           return [item]
         }
-        const normalized = normalizeAssistantMessage(item.text)
-        if (!normalized.text.trim()) {
+        const normalized = normalizeAssistantMessage(item.text, draftCommands, draftStateUpdates)
+        const hasStructured = Boolean(
+          normalized.text.trim() ||
+            (normalized.discussion ?? '').trim() ||
+            (normalized.commands && normalized.commands.length > 0) ||
+            (normalized.stateUpdates && normalized.stateUpdates.length > 0),
+        )
+        if (!hasStructured) {
           return []
         }
         return [
@@ -427,14 +605,19 @@ export function useOrchestratorWS(projectId: string) {
             text: normalized.text,
             confirmationOptions: normalized.confirmationOptions,
             status: normalized.status,
+            discussion: normalized.discussion,
+            commands: normalized.commands,
+            stateUpdates: normalized.stateUpdates,
+            confirmationPrompt: normalized.confirmationPrompt,
           },
         ]
       }),
     )
 
     activeAssistantIDRef.current = null
+    clearActiveAssistantMetadata()
     setIsStreaming(false)
-  }, [flushBufferedTokens])
+  }, [clearActiveAssistantMetadata, flushBufferedTokens])
 
   const addMessage = useCallback((message: SessionMessage) => {
     setMessages((prev) => prev.concat(message))
@@ -499,31 +682,25 @@ export function useOrchestratorWS(projectId: string) {
         if (!tokenText) {
           return
         }
+        ensureActiveAssistant()
         tokenBufferRef.current.push(tokenText)
         scheduleTokenFlush()
         return
       }
 
       if (parsed.type === 'tool_call') {
+        ensureActiveAssistant()
         flushBufferedTokens()
-        addMessage(
-          createMessage({
-            id: `tool-call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            text: buildToolCallText(parsed.name ?? 'tool_call', parsed.args),
-            className: 'prompt',
-            role: 'tool',
-            kind: 'tool_call',
-            status: 'command',
-            timestamp: Date.now(),
-          }),
-        )
+        appendDraftCommand(buildToolCallSummary(parsed.name ?? 'tool_call', parsed.args))
         return
       }
 
       if (parsed.type === 'tool_result') {
+        ensureActiveAssistant()
         flushBufferedTokens()
         const approvalPrompt = parseApprovalRequiredResult(parsed.result)
         if (approvalPrompt) {
+          finishActiveAssistant()
           addMessage(
             createMessage({
               id: `approval-required-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -532,6 +709,8 @@ export function useOrchestratorWS(projectId: string) {
               role: 'assistant',
               kind: 'text',
               status: 'confirmation',
+              discussion: approvalPrompt.text,
+              confirmationPrompt: approvalPrompt.text,
               confirmationOptions: approvalPrompt.confirmationOptions,
               timestamp: Date.now(),
             }),
@@ -540,6 +719,7 @@ export function useOrchestratorWS(projectId: string) {
         }
         const stageBlockedPrompt = parseStageToolBlockedResult(parsed.result)
         if (stageBlockedPrompt) {
+          finishActiveAssistant()
           addMessage(
             createMessage({
               id: `stage-tool-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -548,23 +728,19 @@ export function useOrchestratorWS(projectId: string) {
               role: 'assistant',
               kind: 'text',
               status: 'confirmation',
+              discussion: stageBlockedPrompt.text,
+              confirmationPrompt: stageBlockedPrompt.text,
               confirmationOptions: stageBlockedPrompt.confirmationOptions,
               timestamp: Date.now(),
             }),
           )
           return
         }
-        addMessage(
-          createMessage({
-            id: `tool-result-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            text: buildToolResultText(parsed.result),
-            className: 'code',
-            role: 'tool',
-            kind: 'tool_result',
-            status: 'command',
-            timestamp: Date.now(),
-          }),
-        )
+
+        const toolFailure = parseToolFailureResult(parsed.result)
+        if (toolFailure) {
+          appendDraftStateUpdate(`Tool error: ${toolFailure}`)
+        }
         return
       }
 
@@ -588,7 +764,18 @@ export function useOrchestratorWS(projectId: string) {
         )
       }
     }
-  }, [addMessage, clearReconnectTimer, finishActiveAssistant, flushBufferedTokens, projectId, scheduleTokenFlush, token])
+  }, [
+    addMessage,
+    appendDraftCommand,
+    appendDraftStateUpdate,
+    clearReconnectTimer,
+    ensureActiveAssistant,
+    finishActiveAssistant,
+    flushBufferedTokens,
+    projectId,
+    scheduleTokenFlush,
+    token,
+  ])
 
   connectRef.current = connect
 
@@ -604,10 +791,11 @@ export function useOrchestratorWS(projectId: string) {
       }
       tokenBufferRef.current = []
       activeAssistantIDRef.current = null
+      clearActiveAssistantMetadata()
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [clearReconnectTimer, connect])
+  }, [clearActiveAssistantMetadata, clearReconnectTimer, connect])
 
   useEffect(() => {
     let canceled = false
@@ -615,6 +803,7 @@ export function useOrchestratorWS(projectId: string) {
     setMessages([])
     tokenBufferRef.current = []
     activeAssistantIDRef.current = null
+    clearActiveAssistantMetadata()
     setIsStreaming(false)
 
     if (!projectId) {
@@ -639,7 +828,7 @@ export function useOrchestratorWS(projectId: string) {
     return () => {
       canceled = true
     }
-  }, [projectId])
+  }, [clearActiveAssistantMetadata, projectId])
 
   const send = useCallback(
     (text: string) => {

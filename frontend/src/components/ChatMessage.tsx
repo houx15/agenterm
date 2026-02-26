@@ -28,6 +28,10 @@ export interface SessionMessage {
   status?: ChatStatus
   taskLinks?: MessageTaskLink[]
   confirmationOptions?: MessageActionOption[]
+  discussion?: string
+  commands?: string[]
+  stateUpdates?: string[]
+  confirmationPrompt?: string
 }
 
 interface ChatMessageProps {
@@ -169,6 +173,48 @@ function renderDataBlock(value: unknown): ReactNode {
 }
 
 function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: string) => void): ReactNode {
+  const discussion = (message.discussion ?? '').trim()
+  const commands = Array.isArray(message.commands) ? message.commands.filter((item) => typeof item === 'string' && item.trim()) : []
+  const stateUpdates = Array.isArray(message.stateUpdates) ? message.stateUpdates.filter((item) => typeof item === 'string' && item.trim()) : []
+  const confirmationPrompt = (message.confirmationPrompt ?? '').trim()
+
+  const hasStructuredContent = discussion || commands.length > 0 || stateUpdates.length > 0 || confirmationPrompt
+  if (hasStructuredContent) {
+    return (
+      <div className="pm-structured-card">
+        {discussion && <p>{renderTextWithTaskLinks(discussion, message.taskLinks, onTaskClick)}</p>}
+        {commands.length > 0 && (
+          <div className="pm-tool-section">
+            <small>Commands</small>
+            <ul className="pm-structured-list">
+              {commands.map((command, index) => (
+                <li key={`${command}-${index}`}>
+                  <code>{command}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {stateUpdates.length > 0 && (
+          <div className="pm-tool-section">
+            <small>State Updates</small>
+            <ul className="pm-structured-list">
+              {stateUpdates.map((item, index) => (
+                <li key={`${item}-${index}`}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {message.status === 'confirmation' && confirmationPrompt && (
+          <div className="pm-tool-section">
+            <small>Confirmation</small>
+            <p>{confirmationPrompt}</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   if (message.kind === 'tool_call') {
     const parsed = parseToolCallText(message.text)
     if (parsed) {

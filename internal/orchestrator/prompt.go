@@ -131,7 +131,8 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")
 	b.WriteString("12.1) In project-scoped chat, do not create other projects; use current project only.\n\n")
 	b.WriteString("13) Assistant text responses must use a JSON envelope for UI parsing:\n")
-	b.WriteString(`{"discussion":"...","commands":["..."],"confirmation":{"needed":true|false,"prompt":"..."}}` + "\n")
+	b.WriteString(`{"discussion":"...","commands":["..."],"state_update":{"key":"value"},"confirmation":{"needed":true|false,"prompt":"..."}}` + "\n")
+	b.WriteString("13.1) Use state_update for machine-readable status deltas (assignment, stage, lane, blockers). Omit when not needed.\n")
 	b.WriteString("14) If confirmation is needed, set confirmation.needed=true and provide a concise confirmation.prompt.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\n\n")
