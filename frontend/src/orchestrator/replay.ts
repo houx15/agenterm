@@ -84,6 +84,24 @@ export function saveProjectTimeline(projectId: string, messages: SessionMessage[
     return
   }
   const state = readState()
-  state.projects[key] = messages.map(normalizeMessage).slice(-MAX_MESSAGES_PER_PROJECT)
+  const persisted = messages
+    .filter((message) => {
+      if ((message.text ?? '').trim()) {
+        return true
+      }
+      if ((message.discussion ?? '').trim()) {
+        return true
+      }
+      if ((message.commands ?? []).length > 0) {
+        return true
+      }
+      if ((message.stateUpdates ?? []).length > 0) {
+        return true
+      }
+      return false
+    })
+    .map(normalizeMessage)
+    .slice(-MAX_MESSAGES_PER_PROJECT)
+  state.projects[key] = persisted
   writeState(state)
 }
