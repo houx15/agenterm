@@ -319,14 +319,12 @@ func (sm *Manager) EnqueueCommand(ctx context.Context, sessionID string, req Com
 		done: make(chan commandResult, 1),
 	}
 	queue := sm.ensureSessionCommandQueue(sessionID)
-	select {
-	case <-ctx.Done():
+	if err := sendQueuedCommand(ctx, queue, item); err != nil {
 		cmd.Status = "failed"
-		cmd.Error = ctx.Err().Error()
+		cmd.Error = err.Error()
 		cmd.CompletedAt = time.Now().UTC()
 		_ = sm.commandRepo.Update(context.Background(), cmd)
-		return nil, ctx.Err()
-	case queue <- item:
+		return nil, err
 	}
 
 	select {
@@ -687,6 +685,20 @@ func (sm *Manager) stopSessionCommandQueue(sessionID string) {
 	sm.commandMu.Unlock()
 	if q != nil {
 		close(q)
+	}
+}
+
+func sendQueuedCommand(ctx context.Context, q chan queuedCommand, item queuedCommand) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("session command queue is closed")
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case q <- item:
+		return nil
 	}
 }
 
