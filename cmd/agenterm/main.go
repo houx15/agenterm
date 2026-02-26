@@ -455,6 +455,7 @@ func main() {
 	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
 	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
 	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
+	roleAgentAssignRepo := db.NewRoleAgentAssignmentRepo(appDB.SQL())
 	roleLoopAttemptRepo := db.NewRoleLoopAttemptRepo(appDB.SQL())
 
 	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
@@ -583,6 +584,7 @@ func main() {
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
+		RoleAgentAssignRepo:     roleAgentAssignRepo,
 		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
@@ -604,6 +606,7 @@ func main() {
 		WorkflowRepo:            workflowRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
+		RoleAgentAssignRepo:     roleAgentAssignRepo,
 		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,

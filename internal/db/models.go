@@ -152,6 +152,17 @@ type RoleBinding struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type RoleAgentAssignment struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Stage       string    `json:"stage"`
+	Role        string    `json:"role"`
+	AgentType   string    `json:"agent_type"`
+	MaxParallel int       `json:"max_parallel"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type RoleLoopAttempt struct {
 	TaskID    string    `json:"task_id"`
 	RoleName  string    `json:"role_name"`

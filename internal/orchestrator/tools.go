@@ -647,6 +647,76 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "preview_assignments",
+			Description: "Preview role-to-agent assignments for the active playbook roles",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+				"stage":      {Type: "string", Description: "Optional stage filter: plan|build|test"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				stage, _ := optionalString(args, "stage")
+				body := map[string]any{}
+				if strings.TrimSpace(stage) != "" {
+					body["stage"] = strings.ToLower(strings.TrimSpace(stage))
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/preview", nil, body, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "confirm_assignments",
+			Description: "Confirm role-to-agent assignments and persist scheduler constraints",
+			Parameters: map[string]Param{
+				"project_id":  {Type: "string", Description: "Project id", Required: true},
+				"assignments": {Type: "array", Description: "Assignment items: [{stage, role, agent_type, max_parallel}]", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				assignments, ok := args["assignments"]
+				if !ok {
+					return nil, fmt.Errorf("assignments is required")
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/confirm", nil, map[string]any{
+					"assignments": assignments,
+				}, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "list_assignments",
+			Description: "List persisted role-to-agent assignments for a project",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				var out []map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/projects/"+projectID+"/orchestrator/assignments", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"assignments": out}, nil
+			},
+		},
+		{
 			Name:        "write_task_spec",
 			Description: "Write a markdown task spec inside project repository",
 			Parameters: map[string]Param{

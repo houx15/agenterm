@@ -1470,6 +1470,25 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	if listBindings.Code != http.StatusOK {
 		t.Fatalf("list role bindings status=%d body=%s", listBindings.Code, listBindings.Body.String())
 	}
+	previewAssignments := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/preview", map[string]any{
+		"stage": "plan",
+	}, true)
+	if previewAssignments.Code != http.StatusOK {
+		t.Fatalf("preview assignments status=%d body=%s", previewAssignments.Code, previewAssignments.Body.String())
+	}
+	confirmAssignments := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/confirm", map[string]any{
+		"assignments": []map[string]any{
+			{"stage": "plan", "role": "planner", "agent_type": "claude-code", "max_parallel": 1},
+			{"stage": "build", "role": "coder", "agent_type": "codex", "max_parallel": 2},
+		},
+	}, true)
+	if confirmAssignments.Code != http.StatusOK {
+		t.Fatalf("confirm assignments status=%d body=%s", confirmAssignments.Code, confirmAssignments.Body.String())
+	}
+	listAssignments := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/orchestrator/assignments", nil, true)
+	if listAssignments.Code != http.StatusOK {
+		t.Fatalf("list assignments status=%d body=%s", listAssignments.Code, listAssignments.Body.String())
+	}
 
 	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
 		"title": "Needs review", "description": "loop",

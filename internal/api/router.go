@@ -48,6 +48,7 @@ type handler struct {
 	projectOrchestratorRepo *db.ProjectOrchestratorRepo
 	workflowRepo            *db.WorkflowRepo
 	roleBindingRepo         *db.RoleBindingRepo
+	roleAgentAssignRepo     *db.RoleAgentAssignmentRepo
 	knowledgeRepo           *db.ProjectKnowledgeRepo
 	reviewRepo              *db.ReviewRepo
 	demandPoolRepo          *db.DemandPoolRepo
@@ -80,6 +81,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
 		workflowRepo:            db.NewWorkflowRepo(conn),
 		roleBindingRepo:         db.NewRoleBindingRepo(conn),
+		roleAgentAssignRepo:     db.NewRoleAgentAssignmentRepo(conn),
 		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
 		reviewRepo:              db.NewReviewRepo(conn),
 		demandPoolRepo:          db.NewDemandPoolRepo(conn),
@@ -152,6 +154,9 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
 	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
+	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/preview", handler.previewProjectAssignments)
+	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/confirm", handler.confirmProjectAssignments)
+	mux.HandleFunc("GET /api/projects/{id}/orchestrator/assignments", handler.listProjectAssignments)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)
 	mux.HandleFunc("POST /api/workflows", handler.createWorkflow)
 	mux.HandleFunc("PUT /api/workflows/{id}", handler.updateWorkflow)

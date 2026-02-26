@@ -307,6 +307,26 @@ CREATE INDEX IF NOT EXISTS idx_session_commands_session_id_created ON session_co
 CREATE INDEX IF NOT EXISTS idx_session_commands_status ON session_commands(status);
 `,
 	},
+	{
+		version: 8,
+		name:    "create role agent assignments",
+		sql: `
+CREATE TABLE IF NOT EXISTS role_agent_assignments (
+	id TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	stage TEXT NOT NULL DEFAULT '',
+	role TEXT NOT NULL,
+	agent_type TEXT NOT NULL,
+	max_parallel INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_role_agent_assignments_project_role ON role_agent_assignments(project_id, role);
+CREATE INDEX IF NOT EXISTS idx_role_agent_assignments_project_stage ON role_agent_assignments(project_id, stage);
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {

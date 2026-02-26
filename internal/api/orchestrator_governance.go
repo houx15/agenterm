@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/user/agenterm/internal/db"
+	"github.com/user/agenterm/internal/playbook"
 )
 
 type updateProjectOrchestratorRequest struct {
@@ -80,6 +82,37 @@ type replaceRoleBindingItem struct {
 	Provider    string `json:"provider"`
 	Model       string `json:"model"`
 	MaxParallel int    `json:"max_parallel"`
+}
+
+type previewProjectAssignmentsRequest struct {
+	Stage string `json:"stage,omitempty"`
+}
+
+type confirmProjectAssignmentsRequest struct {
+	Assignments []confirmProjectAssignmentItem `json:"assignments"`
+}
+
+type confirmProjectAssignmentItem struct {
+	Stage       string `json:"stage,omitempty"`
+	Role        string `json:"role"`
+	AgentType   string `json:"agent_type"`
+	MaxParallel int    `json:"max_parallel"`
+}
+
+type assignmentPreviewItem struct {
+	Stage            string   `json:"stage"`
+	Role             string   `json:"role"`
+	Responsibilities string   `json:"responsibilities,omitempty"`
+	AllowedAgents    []string `json:"allowed_agents"`
+	Candidates       []string `json:"candidates"`
+	SelectedAgent    string   `json:"selected_agent,omitempty"`
+	SelectedModel    string   `json:"selected_model,omitempty"`
+	MaxParallel      int      `json:"max_parallel"`
+}
+
+type stageRoleDef struct {
+	Stage string
+	Role  playbook.StageRole
 }
 
 func (h *handler) getProjectOrchestrator(w http.ResponseWriter, r *http.Request) {
@@ -745,6 +778,299 @@ func (h *handler) replaceProjectRoleBindings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	jsonResponse(w, http.StatusOK, items)
+}
+
+func (h *handler) listProjectAssignments(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, ok := h.mustGetProject(w, r, projectID); !ok {
+		return
+	}
+	if h.roleAgentAssignRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "role agent assignment repo unavailable")
+		return
+	}
+	items, err := h.roleAgentAssignRepo.ListByProject(r.Context(), projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	jsonResponse(w, http.StatusOK, items)
+}
+
+func (h *handler) previewProjectAssignments(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	project, ok := h.mustGetProject(w, r, projectID)
+	if !ok {
+		return
+	}
+	if h.roleAgentAssignRepo == nil || h.registry == nil || h.playbookRegistry == nil {
+		jsonError(w, http.StatusServiceUnavailable, "assignment preview unavailable")
+		return
+	}
+
+	var req previewProjectAssignmentsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	stageFilter := strings.ToLower(strings.TrimSpace(req.Stage))
+	if stageFilter != "" && stageFilter != "plan" && stageFilter != "build" && stageFilter != "test" {
+		jsonError(w, http.StatusBadRequest, "stage must be one of: plan, build, test")
+		return
+	}
+
+	pb := h.resolveProjectPlaybook(project)
+	if pb == nil {
+		jsonError(w, http.StatusBadRequest, "project playbook not found")
+		return
+	}
+	roleDefs := collectPlaybookRoleDefs(pb, stageFilter)
+	agents := h.registry.List()
+	agentByID := make(map[string]string, len(agents))
+	allAgentIDs := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		id := strings.TrimSpace(agent.ID)
+		if id == "" {
+			continue
+		}
+		agentByID[id] = strings.TrimSpace(agent.Model)
+		allAgentIDs = append(allAgentIDs, id)
+	}
+	sort.Strings(allAgentIDs)
+
+	current, err := h.roleAgentAssignRepo.ListByProject(r.Context(), projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	currentByRole := make(map[string]*db.RoleAgentAssignment, len(current))
+	for _, item := range current {
+		if item == nil {
+			continue
+		}
+		currentByRole[strings.ToLower(strings.TrimSpace(item.Role))] = item
+	}
+
+	items := make([]assignmentPreviewItem, 0, len(roleDefs))
+	for _, def := range roleDefs {
+		allowed := append([]string(nil), def.Role.AllowedAgents...)
+		if len(allowed) == 0 {
+			allowed = append(allowed, allAgentIDs...)
+		}
+		candidates := make([]string, 0, len(allowed))
+		for _, id := range allowed {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := agentByID[id]; ok {
+				candidates = append(candidates, id)
+			}
+		}
+		sort.Strings(candidates)
+		maxParallel := 1
+		selected := ""
+		existing := currentByRole[strings.ToLower(strings.TrimSpace(def.Role.Name))]
+		if existing != nil {
+			if existing.MaxParallel > 0 {
+				maxParallel = existing.MaxParallel
+			}
+			if containsFold(candidates, existing.AgentType) {
+				selected = strings.TrimSpace(existing.AgentType)
+			}
+		}
+		if selected == "" && len(candidates) > 0 {
+			selected = candidates[0]
+		}
+
+		items = append(items, assignmentPreviewItem{
+			Stage:            def.Stage,
+			Role:             strings.TrimSpace(def.Role.Name),
+			Responsibilities: strings.TrimSpace(def.Role.Responsibilities),
+			AllowedAgents:    allowed,
+			Candidates:       candidates,
+			SelectedAgent:    selected,
+			SelectedModel:    agentByID[selected],
+			MaxParallel:      maxParallel,
+		})
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"project_id":          projectID,
+		"playbook_id":         project.Playbook,
+		"stage_filter":        stageFilter,
+		"current_assignments": current,
+		"items":               items,
+	})
+}
+
+func (h *handler) confirmProjectAssignments(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	if _, ok := h.mustGetProject(w, r, projectID); !ok {
+		return
+	}
+	if h.roleAgentAssignRepo == nil || h.registry == nil || h.roleBindingRepo == nil || h.projectOrchestratorRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "assignment confirmation unavailable")
+		return
+	}
+	var req confirmProjectAssignmentsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(req.Assignments) == 0 {
+		jsonError(w, http.StatusBadRequest, "assignments are required")
+		return
+	}
+	if err := h.projectOrchestratorRepo.EnsureDefaultForProject(r.Context(), projectID); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	profile, err := h.projectOrchestratorRepo.Get(r.Context(), projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if profile == nil {
+		jsonError(w, http.StatusNotFound, "project orchestrator not found")
+		return
+	}
+	provider := strings.TrimSpace(profile.DefaultProvider)
+	if provider == "" {
+		provider = "anthropic"
+	}
+
+	seenRole := map[string]struct{}{}
+	assignments := make([]*db.RoleAgentAssignment, 0, len(req.Assignments))
+	bindings := make([]*db.RoleBinding, 0, len(req.Assignments))
+	for _, item := range req.Assignments {
+		role := strings.TrimSpace(item.Role)
+		agentType := strings.TrimSpace(item.AgentType)
+		stage := strings.ToLower(strings.TrimSpace(item.Stage))
+		if role == "" || agentType == "" {
+			jsonError(w, http.StatusBadRequest, "role and agent_type are required")
+			return
+		}
+		roleKey := strings.ToLower(role)
+		if _, dup := seenRole[roleKey]; dup {
+			jsonError(w, http.StatusBadRequest, fmt.Sprintf("duplicate role assignment: %s", role))
+			return
+		}
+		seenRole[roleKey] = struct{}{}
+		agent := h.registry.Get(agentType)
+		if agent == nil {
+			jsonError(w, http.StatusBadRequest, fmt.Sprintf("unknown agent_type %q", agentType))
+			return
+		}
+		maxParallel := item.MaxParallel
+		if maxParallel <= 0 {
+			maxParallel = 1
+		}
+		if maxParallel > 64 {
+			jsonError(w, http.StatusBadRequest, "max_parallel must be between 1 and 64")
+			return
+		}
+		model := strings.TrimSpace(agent.Model)
+		if model == "" {
+			model = "default"
+		}
+		assignments = append(assignments, &db.RoleAgentAssignment{
+			ProjectID:   projectID,
+			Stage:       stage,
+			Role:        role,
+			AgentType:   agentType,
+			MaxParallel: maxParallel,
+		})
+		bindings = append(bindings, &db.RoleBinding{
+			ProjectID:   projectID,
+			Role:        role,
+			Provider:    provider,
+			Model:       model,
+			MaxParallel: maxParallel,
+		})
+	}
+
+	if err := h.roleAgentAssignRepo.ReplaceForProject(r.Context(), projectID, assignments); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.roleBindingRepo.ReplaceForProject(r.Context(), projectID, bindings); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	saved, err := h.roleAgentAssignRepo.ListByProject(r.Context(), projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	savedBindings, err := h.roleBindingRepo.ListByProject(r.Context(), projectID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if h.hub != nil {
+		h.hub.BroadcastProjectEvent(projectID, "assignment_state", map[string]any{
+			"count": len(saved),
+		})
+	}
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"assignments":   saved,
+		"role_bindings": savedBindings,
+	})
+}
+
+func (h *handler) resolveProjectPlaybook(project *db.Project) *playbook.Playbook {
+	if h == nil || h.playbookRegistry == nil || project == nil {
+		return nil
+	}
+	if overrideID := strings.TrimSpace(project.Playbook); overrideID != "" {
+		if pb := h.playbookRegistry.Get(overrideID); pb != nil {
+			return pb
+		}
+	}
+	return h.playbookRegistry.MatchProject(project.RepoPath)
+}
+
+func collectPlaybookRoleDefs(pb *playbook.Playbook, stageFilter string) []stageRoleDef {
+	if pb == nil {
+		return nil
+	}
+	defs := make([]stageRoleDef, 0)
+	appendStage := func(stage string, def playbook.Stage) {
+		if !def.Enabled {
+			return
+		}
+		if stageFilter != "" && stageFilter != stage {
+			return
+		}
+		for _, role := range def.Roles {
+			name := strings.TrimSpace(role.Name)
+			if name == "" {
+				continue
+			}
+			defs = append(defs, stageRoleDef{Stage: stage, Role: role})
+		}
+	}
+	appendStage("plan", pb.Workflow.Plan)
+	appendStage("build", pb.Workflow.Build)
+	appendStage("test", pb.Workflow.Test)
+	return defs
+}
+
+func containsFold(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *handler) mustGetProject(w http.ResponseWriter, r *http.Request, id string) (*db.Project, bool) {

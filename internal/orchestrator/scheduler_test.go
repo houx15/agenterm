@@ -345,6 +345,60 @@ func TestSchedulerBlocksCreateSessionWhenGlobalModelLimitReached(t *testing.T) {
 	}
 }
 
+func TestSchedulerBlocksCreateSessionWhenRoleAssignedToDifferentAgent(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	profileRepo := db.NewProjectOrchestratorRepo(database.SQL())
+	workflowRepo := db.NewWorkflowRepo(database.SQL())
+	roleAgentAssignRepo := db.NewRoleAgentAssignmentRepo(database.SQL())
+	ctx := context.Background()
+
+	project := &db.Project{Name: "P", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := profileRepo.EnsureDefaultForProject(ctx, project.ID); err != nil {
+		t.Fatalf("ensure profile: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "t", Description: "d", Status: "pending"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := roleAgentAssignRepo.ReplaceForProject(ctx, project.ID, []*db.RoleAgentAssignment{
+		{Role: "coder", AgentType: "codex", MaxParallel: 1},
+	}); err != nil {
+		t.Fatalf("replace assignments: %v", err)
+	}
+
+	reg, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
+	if err != nil {
+		t.Fatalf("new registry: %v", err)
+	}
+	o := New(Options{
+		ProjectRepo:             projectRepo,
+		TaskRepo:                taskRepo,
+		SessionRepo:             sessionRepo,
+		ProjectOrchestratorRepo: profileRepo,
+		WorkflowRepo:            workflowRepo,
+		RoleAgentAssignRepo:     roleAgentAssignRepo,
+		Registry:                reg,
+	})
+
+	decision := o.checkSessionCreationAllowed(ctx, map[string]any{
+		"task_id":    task.ID,
+		"role":       "coder",
+		"agent_type": "claude-code",
+	})
+	if decision.Allowed {
+		t.Fatalf("expected session creation to be blocked by assigned agent mismatch")
+	}
+	if !strings.Contains(decision.Reason, "is assigned to agent") {
+		t.Fatalf("reason=%q want assignment mismatch", decision.Reason)
+	}
+}
+
 func TestSchedulerAllowsCreateSessionWhenRoleNotInWorkflow(t *testing.T) {
 	database := openOrchestratorTestDB(t)
 	projectRepo := db.NewProjectRepo(database.SQL())

@@ -40,6 +40,15 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	if err != nil || profile == nil {
 		return scheduleDecision{Allowed: true}
 	}
+	roleAssignment := o.getRoleAgentAssignment(ctx, projectID, strings.TrimSpace(role))
+	if roleAssignment != nil {
+		if strings.TrimSpace(agentType) == "" {
+			return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("agent_type is required for assigned role %s", role)}
+		}
+		if !strings.EqualFold(strings.TrimSpace(roleAssignment.AgentType), strings.TrimSpace(agentType)) {
+			return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("role %s is assigned to agent %s, got %s", role, roleAssignment.AgentType, agentType)}
+		}
+	}
 
 	projectSessions, err := o.listSessionsByProject(ctx, projectID)
 	if err != nil {
@@ -102,6 +111,9 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 			return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("model max_parallel limit reached for %s (%d)", targetModel, roleBinding.MaxParallel)}
 		}
 	}
+	if roleAssignment != nil && roleAssignment.MaxParallel > 0 && activeRole >= roleAssignment.MaxParallel {
+		return scheduleDecision{Allowed: false, Reason: fmt.Sprintf("assigned agent max_parallel limit reached for %s (%d)", role, roleAssignment.MaxParallel)}
+	}
 
 	if o.registry != nil && strings.TrimSpace(agentType) != "" {
 		agent := o.registry.Get(agentType)
@@ -119,6 +131,25 @@ func (o *Orchestrator) checkSessionCreationAllowed(ctx context.Context, args map
 	}
 
 	return scheduleDecision{Allowed: true}
+}
+
+func (o *Orchestrator) getRoleAgentAssignment(ctx context.Context, projectID string, role string) *db.RoleAgentAssignment {
+	if o == nil || o.roleAgentAssignRepo == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(role) == "" {
+		return nil
+	}
+	items, err := o.roleAgentAssignRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(item.Role), strings.TrimSpace(role)) {
+			return item
+		}
+	}
+	return nil
 }
 
 func (o *Orchestrator) resolveModelForSession(agentType string) string {
