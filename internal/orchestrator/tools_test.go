@@ -50,9 +50,13 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 					bodyText = strings.TrimSpace(string(b))
 				}
 				calls = append(calls, req.Method+" "+req.URL.Path+" "+bodyText)
+				responseBody := `{"ok":true}`
+				if req.Method == http.MethodGet && (strings.Contains(req.URL.Path, "/review-cycles") || strings.Contains(req.URL.Path, "/issues") || strings.Contains(req.URL.Path, "/knowledge")) {
+					responseBody = `[]`
+				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+					Body:       io.NopCloser(strings.NewReader(responseBody)),
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
 				}, nil
 			}),
@@ -89,6 +93,120 @@ func TestMergeToolsCallExpectedEndpoints(t *testing.T) {
 	}
 	if !strings.HasPrefix(calls[2], "GET /api/sessions/s-1/close-check") {
 		t.Fatalf("unexpected third call: %q", calls[2])
+	}
+}
+
+func TestQualityLoopAndKnowledgeToolsCallExpectedEndpoints(t *testing.T) {
+	var calls []string
+	client := &RESTToolClient{
+		BaseURL: "http://example.test",
+		HTTPClient: &http.Client{
+			Transport: toolsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				bodyText := ""
+				if req.Body != nil {
+					b, _ := io.ReadAll(req.Body)
+					bodyText = strings.TrimSpace(string(b))
+				}
+				calls = append(calls, req.Method+" "+req.URL.Path+" "+bodyText)
+				responseBody := `{"ok":true}`
+				if req.Method == http.MethodGet && (strings.Contains(req.URL.Path, "/review-cycles") || strings.Contains(req.URL.Path, "/issues") || strings.Contains(req.URL.Path, "/knowledge")) {
+					responseBody = `[]`
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(responseBody)),
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+				}, nil
+			}),
+		},
+	}
+	ts := NewToolset(client)
+
+	if _, err := ts.Execute(context.Background(), "update_task", map[string]any{
+		"task_id": "task-1",
+		"status":  "in_review",
+	}); err != nil {
+		t.Fatalf("update_task failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "list_task_review_cycles", map[string]any{
+		"task_id": "task-1",
+	}); err != nil {
+		t.Fatalf("list_task_review_cycles failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "create_review_cycle", map[string]any{
+		"task_id":     "task-1",
+		"commit_hash": "abc123",
+	}); err != nil {
+		t.Fatalf("create_review_cycle failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "update_review_cycle", map[string]any{
+		"cycle_id": "cycle-1",
+		"status":   "review_running",
+	}); err != nil {
+		t.Fatalf("update_review_cycle failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "list_review_issues", map[string]any{
+		"cycle_id": "cycle-1",
+	}); err != nil {
+		t.Fatalf("list_review_issues failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "create_review_issue", map[string]any{
+		"cycle_id": "cycle-1",
+		"summary":  "Found defect",
+		"severity": "high",
+	}); err != nil {
+		t.Fatalf("create_review_issue failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "update_review_issue", map[string]any{
+		"issue_id":   "issue-1",
+		"status":     "resolved",
+		"resolution": "patched",
+	}); err != nil {
+		t.Fatalf("update_review_issue failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "list_project_knowledge", map[string]any{
+		"project_id": "project-1",
+	}); err != nil {
+		t.Fatalf("list_project_knowledge failed: %v", err)
+	}
+	if _, err := ts.Execute(context.Background(), "create_project_knowledge", map[string]any{
+		"project_id": "project-1",
+		"kind":       "summary",
+		"title":      "Build completed",
+		"content":    "All roles completed and quality gates passed",
+	}); err != nil {
+		t.Fatalf("create_project_knowledge failed: %v", err)
+	}
+
+	if len(calls) != 9 {
+		t.Fatalf("calls=%d want 9", len(calls))
+	}
+	if !strings.HasPrefix(calls[0], "PATCH /api/tasks/task-1 ") {
+		t.Fatalf("unexpected call 0: %q", calls[0])
+	}
+	if !strings.HasPrefix(calls[1], "GET /api/tasks/task-1/review-cycles ") {
+		t.Fatalf("unexpected call 1: %q", calls[1])
+	}
+	if !strings.HasPrefix(calls[2], "POST /api/tasks/task-1/review-cycles ") {
+		t.Fatalf("unexpected call 2: %q", calls[2])
+	}
+	if !strings.HasPrefix(calls[3], "PATCH /api/review-cycles/cycle-1 ") {
+		t.Fatalf("unexpected call 3: %q", calls[3])
+	}
+	if !strings.HasPrefix(calls[4], "GET /api/review-cycles/cycle-1/issues ") {
+		t.Fatalf("unexpected call 4: %q", calls[4])
+	}
+	if !strings.HasPrefix(calls[5], "POST /api/review-cycles/cycle-1/issues ") {
+		t.Fatalf("unexpected call 5: %q", calls[5])
+	}
+	if !strings.HasPrefix(calls[6], "PATCH /api/review-issues/issue-1 ") {
+		t.Fatalf("unexpected call 6: %q", calls[6])
+	}
+	if !strings.HasPrefix(calls[7], "GET /api/projects/project-1/knowledge ") {
+		t.Fatalf("unexpected call 7: %q", calls[7])
+	}
+	if !strings.HasPrefix(calls[8], "POST /api/projects/project-1/knowledge ") {
+		t.Fatalf("unexpected call 8: %q", calls[8])
 	}
 }
 

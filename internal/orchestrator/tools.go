@@ -647,6 +647,273 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "update_task",
+			Description: "Update task status/details (used for role loop progression and quality gates)",
+			Parameters: map[string]Param{
+				"task_id":     {Type: "string", Description: "Task id", Required: true},
+				"status":      {Type: "string", Description: "Optional status update"},
+				"title":       {Type: "string", Description: "Optional title update"},
+				"description": {Type: "string", Description: "Optional description update"},
+				"spec_path":   {Type: "string", Description: "Optional spec path update"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				taskID, err := requiredString(args, "task_id")
+				if err != nil {
+					return nil, err
+				}
+				payload := map[string]any{}
+				if status, _ := optionalString(args, "status"); strings.TrimSpace(status) != "" {
+					payload["status"] = strings.TrimSpace(status)
+				}
+				if title, _ := optionalString(args, "title"); strings.TrimSpace(title) != "" {
+					payload["title"] = strings.TrimSpace(title)
+				}
+				if desc, _ := optionalString(args, "description"); strings.TrimSpace(desc) != "" {
+					payload["description"] = strings.TrimSpace(desc)
+				}
+				if specPath, _ := optionalString(args, "spec_path"); strings.TrimSpace(specPath) != "" {
+					payload["spec_path"] = strings.TrimSpace(specPath)
+				}
+				if len(payload) == 0 {
+					return nil, fmt.Errorf("at least one task field is required")
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPatch, "/api/tasks/"+taskID, nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "list_task_review_cycles",
+			Description: "List review cycles for one task",
+			Parameters: map[string]Param{
+				"task_id": {Type: "string", Description: "Task id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				taskID, err := requiredString(args, "task_id")
+				if err != nil {
+					return nil, err
+				}
+				var out []map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/tasks/"+taskID+"/review-cycles", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"cycles": out}, nil
+			},
+		},
+		{
+			Name:        "create_review_cycle",
+			Description: "Create a review cycle for one task",
+			Parameters: map[string]Param{
+				"task_id":     {Type: "string", Description: "Task id", Required: true},
+				"commit_hash": {Type: "string", Description: "Optional commit hash under review"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				taskID, err := requiredString(args, "task_id")
+				if err != nil {
+					return nil, err
+				}
+				commitHash, _ := optionalString(args, "commit_hash")
+				payload := map[string]any{}
+				if strings.TrimSpace(commitHash) != "" {
+					payload["commit_hash"] = strings.TrimSpace(commitHash)
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/tasks/"+taskID+"/review-cycles", nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "update_review_cycle",
+			Description: "Update review cycle status",
+			Parameters: map[string]Param{
+				"cycle_id": {Type: "string", Description: "Review cycle id", Required: true},
+				"status":   {Type: "string", Description: "Status (review_running|review_changes_requested|review_passed)", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				cycleID, err := requiredString(args, "cycle_id")
+				if err != nil {
+					return nil, err
+				}
+				status, err := requiredString(args, "status")
+				if err != nil {
+					return nil, err
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPatch, "/api/review-cycles/"+cycleID, nil, map[string]any{
+					"status": strings.TrimSpace(status),
+				}, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "list_review_issues",
+			Description: "List issues in a review cycle",
+			Parameters: map[string]Param{
+				"cycle_id": {Type: "string", Description: "Review cycle id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				cycleID, err := requiredString(args, "cycle_id")
+				if err != nil {
+					return nil, err
+				}
+				var out []map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/review-cycles/"+cycleID+"/issues", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"issues": out}, nil
+			},
+		},
+		{
+			Name:        "create_review_issue",
+			Description: "Create a review issue under one cycle",
+			Parameters: map[string]Param{
+				"cycle_id": {Type: "string", Description: "Review cycle id", Required: true},
+				"summary":  {Type: "string", Description: "Issue summary", Required: true},
+				"severity": {Type: "string", Description: "Optional severity"},
+				"status":   {Type: "string", Description: "Optional status"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				cycleID, err := requiredString(args, "cycle_id")
+				if err != nil {
+					return nil, err
+				}
+				summary, err := requiredString(args, "summary")
+				if err != nil {
+					return nil, err
+				}
+				severity, _ := optionalString(args, "severity")
+				status, _ := optionalString(args, "status")
+				payload := map[string]any{
+					"summary": strings.TrimSpace(summary),
+				}
+				if strings.TrimSpace(severity) != "" {
+					payload["severity"] = strings.TrimSpace(severity)
+				}
+				if strings.TrimSpace(status) != "" {
+					payload["status"] = strings.TrimSpace(status)
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/review-cycles/"+cycleID+"/issues", nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "update_review_issue",
+			Description: "Update one review issue (status/resolution/severity/summary)",
+			Parameters: map[string]Param{
+				"issue_id":   {Type: "string", Description: "Review issue id", Required: true},
+				"status":     {Type: "string", Description: "Optional status"},
+				"resolution": {Type: "string", Description: "Optional resolution"},
+				"severity":   {Type: "string", Description: "Optional severity"},
+				"summary":    {Type: "string", Description: "Optional summary"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				issueID, err := requiredString(args, "issue_id")
+				if err != nil {
+					return nil, err
+				}
+				payload := map[string]any{}
+				if status, _ := optionalString(args, "status"); strings.TrimSpace(status) != "" {
+					payload["status"] = strings.TrimSpace(status)
+				}
+				if resolution, _ := optionalString(args, "resolution"); strings.TrimSpace(resolution) != "" {
+					payload["resolution"] = strings.TrimSpace(resolution)
+				}
+				if severity, _ := optionalString(args, "severity"); strings.TrimSpace(severity) != "" {
+					payload["severity"] = strings.TrimSpace(severity)
+				}
+				if summary, _ := optionalString(args, "summary"); strings.TrimSpace(summary) != "" {
+					payload["summary"] = strings.TrimSpace(summary)
+				}
+				if len(payload) == 0 {
+					return nil, fmt.Errorf("at least one review issue field is required")
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPatch, "/api/review-issues/"+issueID, nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "list_project_knowledge",
+			Description: "List persisted project knowledge entries",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				var out []map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/projects/"+projectID+"/knowledge", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"entries": out}, nil
+			},
+		},
+		{
+			Name:        "create_project_knowledge",
+			Description: "Persist a durable project knowledge artifact",
+			Parameters: map[string]Param{
+				"project_id": {Type: "string", Description: "Project id", Required: true},
+				"kind":       {Type: "string", Description: "Entry kind", Required: true},
+				"title":      {Type: "string", Description: "Entry title", Required: true},
+				"content":    {Type: "string", Description: "Entry content", Required: true},
+				"source_uri": {Type: "string", Description: "Optional source URI"},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				projectID, err := requiredString(args, "project_id")
+				if err != nil {
+					return nil, err
+				}
+				kind, err := requiredString(args, "kind")
+				if err != nil {
+					return nil, err
+				}
+				title, err := requiredString(args, "title")
+				if err != nil {
+					return nil, err
+				}
+				content, err := requiredString(args, "content")
+				if err != nil {
+					return nil, err
+				}
+				sourceURI, _ := optionalString(args, "source_uri")
+				payload := map[string]any{
+					"kind":    strings.TrimSpace(kind),
+					"title":   strings.TrimSpace(title),
+					"content": strings.TrimSpace(content),
+				}
+				if strings.TrimSpace(sourceURI) != "" {
+					payload["source_uri"] = strings.TrimSpace(sourceURI)
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodPost, "/api/projects/"+projectID+"/knowledge", nil, payload, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "get_current_run",
 			Description: "Get current persisted run and stage state for a project",
 			Parameters: map[string]Param{

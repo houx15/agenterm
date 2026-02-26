@@ -101,9 +101,9 @@ func stageExecutionContract(stage string) string {
 	case "plan":
 		return "Plan stage objectives: start planning TUI, analyze codebase, produce staged implementation plan, define parallel worktrees, and write specs under docs/. Ask user confirmation before transitioning to build."
 	case "test":
-		return "Test stage objectives: verify all implementation work is committed/pushed, run a testing TUI to build and execute test plan against specs, and report automated vs manual follow-ups."
+		return "Test stage objectives: verify all implementation work is committed/pushed, run a testing TUI to build and execute test plan against specs, report automated vs manual follow-ups, and persist a concise final summary via project knowledge."
 	default:
-		return "Build stage objectives: execute approved plan per phase/worktree, dispatch coding and review sessions, run review-fix loops until issues are closed, merge finished worktrees, then prepare transition to test."
+		return "Build stage objectives: execute approved plan per phase/worktree, dispatch coding and review sessions, run review-fix loops using review cycle/issue tools until issues are closed, update task status accordingly, merge finished worktrees, then prepare transition to test."
 	}
 }
 
@@ -128,6 +128,7 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("11.3) When calling create_session, include the role's required inputs in the create_session.inputs object (example: {\"goal\":\"...\"}) so role contracts are satisfied explicitly.\n\n")
 	b.WriteString("11.1) When a session is waiting_review or shows confirmation prompts in output, treat it as a response-required state: call read_session_output, decide whether to send a safe confirmation command, or ask user for confirmation if risky.\n")
 	b.WriteString("11.2) Never ignore response-required sessions; each such session must end in one of: send_command response, explicit user handoff, or close_session if finished.\n\n")
+	b.WriteString("11.4) During build/test quality loops, track review state using create/list/update review cycle and review issue tools; do not claim quality gate pass without evidence.\n\n")
 	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")
 	b.WriteString("12.1) In project-scoped chat, do not create other projects; use current project only.\n\n")
 	b.WriteString("13) Assistant text responses must use a JSON envelope for UI parsing:\n")

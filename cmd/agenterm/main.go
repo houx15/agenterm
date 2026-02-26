@@ -454,6 +454,7 @@ func main() {
 	runRepo := db.NewRunRepo(appDB.SQL())
 	projectOrchestratorRepo := db.NewProjectOrchestratorRepo(appDB.SQL())
 	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
+	reviewRepo := db.NewReviewRepo(appDB.SQL())
 	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
 	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
 	roleAgentAssignRepo := db.NewRoleAgentAssignmentRepo(appDB.SQL())
@@ -584,6 +585,7 @@ func main() {
 		RunRepo:                 runRepo,
 		ProjectOrchestratorRepo: projectOrchestratorRepo,
 		WorkflowRepo:            workflowRepo,
+		ReviewRepo:              reviewRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
 		RoleAgentAssignRepo:     roleAgentAssignRepo,
@@ -607,6 +609,7 @@ func main() {
 		RunRepo:                 runRepo,
 		ProjectOrchestratorRepo: projectOrchestratorRepo,
 		WorkflowRepo:            workflowRepo,
+		ReviewRepo:              reviewRepo,
 		KnowledgeRepo:           knowledgeRepo,
 		RoleBindingRepo:         roleBindingRepo,
 		RoleAgentAssignRepo:     roleAgentAssignRepo,

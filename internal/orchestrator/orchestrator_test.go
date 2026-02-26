@@ -848,6 +848,89 @@ func TestStageToolGateBlocksCreateWorktreeDuringPlan(t *testing.T) {
 	}
 }
 
+func TestStageToolGateAllowsCreateReviewCycleDuringBuild(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "building"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo: projectRepo,
+		TaskRepo:    taskRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_review_cycle": {
+					Name: "create_review_cycle",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	if _, err := o.executeTool(context.Background(), "create_review_cycle", map[string]any{
+		"task_id": task.ID,
+	}); err != nil {
+		t.Fatalf("expected create_review_cycle to be allowed in build stage: %v", err)
+	}
+}
+
+func TestStageToolGateBlocksCreateReviewIssueDuringTest(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	reviewRepo := db.NewReviewRepo(database.SQL())
+
+	project := &db.Project{Name: "Demo", RepoPath: t.TempDir(), Status: "testing"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	cycle := &db.ReviewCycle{TaskID: task.ID, Status: "review_pending"}
+	if err := reviewRepo.CreateCycle(context.Background(), cycle); err != nil {
+		t.Fatalf("create cycle: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo: projectRepo,
+		TaskRepo:    taskRepo,
+		ReviewRepo:  reviewRepo,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_review_issue": {
+					Name: "create_review_issue",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	_, err := o.executeTool(context.Background(), "create_review_issue", map[string]any{
+		"cycle_id": cycle.ID,
+		"summary":  "issue",
+	})
+	if err == nil {
+		t.Fatalf("expected create_review_issue to be blocked in test stage")
+	}
+	if !strings.Contains(err.Error(), "stage_tool_not_allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestStageToolGateUsesPersistedRunStage(t *testing.T) {
 	database := openOrchestratorTestDB(t)
 	projectRepo := db.NewProjectRepo(database.SQL())

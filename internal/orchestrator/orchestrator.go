@@ -74,6 +74,7 @@ type Options struct {
 	RoleBindingRepo         *db.RoleBindingRepo
 	RoleAgentAssignRepo     *db.RoleAgentAssignmentRepo
 	RoleLoopAttemptRepo     *db.RoleLoopAttemptRepo
+	ReviewRepo              *db.ReviewRepo
 	Registry                *registry.Registry
 	PlaybookRegistry        *playbook.Registry
 	Toolset                 *Toolset
@@ -102,6 +103,7 @@ type Orchestrator struct {
 	roleBindingRepo         *db.RoleBindingRepo
 	roleAgentAssignRepo     *db.RoleAgentAssignmentRepo
 	roleLoopAttemptRepo     *db.RoleLoopAttemptRepo
+	reviewRepo              *db.ReviewRepo
 	registry                *registry.Registry
 	playbookRegistry        *playbook.Registry
 	toolset                 *Toolset
@@ -218,6 +220,7 @@ func New(opts Options) *Orchestrator {
 		roleBindingRepo:         opts.RoleBindingRepo,
 		roleAgentAssignRepo:     opts.RoleAgentAssignRepo,
 		roleLoopAttemptRepo:     opts.RoleLoopAttemptRepo,
+		reviewRepo:              opts.ReviewRepo,
 		registry:                opts.Registry,
 		playbookRegistry:        opts.PlaybookRegistry,
 		toolset:                 toolset,
@@ -615,8 +618,10 @@ func isExecutionOperationalTool(name string) bool {
 	case "create_task", "create_worktree", "write_task_spec",
 		"create_session", "wait_for_session_ready", "send_command", "send_key",
 		"read_session_output", "is_session_idle", "close_session", "can_close_session",
-		"merge_worktree", "resolve_merge_conflict", "create_review_cycle",
-		"create_review_issue", "update_review_issue", "update_task",
+		"merge_worktree", "resolve_merge_conflict", "update_task",
+		"list_task_review_cycles", "create_review_cycle", "update_review_cycle",
+		"list_review_issues", "create_review_issue", "update_review_issue",
+		"list_project_knowledge", "create_project_knowledge",
 		"preview_assignments", "confirm_assignments", "list_assignments",
 		"get_current_run", "transition_run_stage":
 		return true
@@ -629,6 +634,8 @@ func isMutatingTool(name string) bool {
 	switch strings.TrimSpace(name) {
 	case "create_project", "create_task", "create_worktree", "merge_worktree", "resolve_merge_conflict",
 		"create_session", "send_command", "close_session", "write_task_spec",
+		"update_task", "create_review_cycle", "update_review_cycle",
+		"create_review_issue", "update_review_issue", "create_project_knowledge",
 		"create_demand_item", "update_demand_item", "reprioritize_demand_pool", "promote_demand_item",
 		"confirm_assignments", "transition_run_stage":
 		return true
@@ -1832,62 +1839,78 @@ func stageToolAllowed(stage string, toolName string) bool {
 	}
 	allowedByStage := map[string]map[string]struct{}{
 		stagePlan: {
-			"list_skills":            {},
-			"get_skill_details":      {},
-			"get_project_status":     {},
-			"get_current_run":        {},
-			"transition_run_stage":   {},
-			"preview_assignments":    {},
-			"confirm_assignments":    {},
-			"list_assignments":       {},
-			"create_task":            {},
-			"write_task_spec":        {},
-			"create_session":         {},
-			"wait_for_session_ready": {},
-			"send_command":           {},
-			"read_session_output":    {},
-			"is_session_idle":        {},
-			"can_close_session":      {},
-			"close_session":          {},
+			"list_skills":              {},
+			"get_skill_details":        {},
+			"get_project_status":       {},
+			"list_project_knowledge":   {},
+			"create_project_knowledge": {},
+			"get_current_run":          {},
+			"transition_run_stage":     {},
+			"preview_assignments":      {},
+			"confirm_assignments":      {},
+			"list_assignments":         {},
+			"create_task":              {},
+			"write_task_spec":          {},
+			"create_session":           {},
+			"wait_for_session_ready":   {},
+			"send_command":             {},
+			"read_session_output":      {},
+			"is_session_idle":          {},
+			"can_close_session":        {},
+			"close_session":            {},
 		},
 		stageBuild: {
-			"list_skills":            {},
-			"get_skill_details":      {},
-			"get_project_status":     {},
-			"get_current_run":        {},
-			"transition_run_stage":   {},
-			"preview_assignments":    {},
-			"confirm_assignments":    {},
-			"list_assignments":       {},
-			"create_task":            {},
-			"create_worktree":        {},
-			"write_task_spec":        {},
-			"merge_worktree":         {},
-			"resolve_merge_conflict": {},
-			"create_session":         {},
-			"wait_for_session_ready": {},
-			"send_command":           {},
-			"read_session_output":    {},
-			"is_session_idle":        {},
-			"can_close_session":      {},
-			"close_session":          {},
+			"list_skills":              {},
+			"get_skill_details":        {},
+			"get_project_status":       {},
+			"list_project_knowledge":   {},
+			"create_project_knowledge": {},
+			"get_current_run":          {},
+			"transition_run_stage":     {},
+			"preview_assignments":      {},
+			"confirm_assignments":      {},
+			"list_assignments":         {},
+			"create_task":              {},
+			"create_worktree":          {},
+			"update_task":              {},
+			"write_task_spec":          {},
+			"merge_worktree":           {},
+			"resolve_merge_conflict":   {},
+			"list_task_review_cycles":  {},
+			"create_review_cycle":      {},
+			"update_review_cycle":      {},
+			"list_review_issues":       {},
+			"create_review_issue":      {},
+			"update_review_issue":      {},
+			"create_session":           {},
+			"wait_for_session_ready":   {},
+			"send_command":             {},
+			"read_session_output":      {},
+			"is_session_idle":          {},
+			"can_close_session":        {},
+			"close_session":            {},
 		},
 		stageTest: {
-			"list_skills":            {},
-			"get_skill_details":      {},
-			"get_project_status":     {},
-			"get_current_run":        {},
-			"transition_run_stage":   {},
-			"preview_assignments":    {},
-			"list_assignments":       {},
-			"write_task_spec":        {},
-			"create_session":         {},
-			"wait_for_session_ready": {},
-			"send_command":           {},
-			"read_session_output":    {},
-			"is_session_idle":        {},
-			"can_close_session":      {},
-			"close_session":          {},
+			"list_skills":              {},
+			"get_skill_details":        {},
+			"get_project_status":       {},
+			"list_project_knowledge":   {},
+			"create_project_knowledge": {},
+			"get_current_run":          {},
+			"transition_run_stage":     {},
+			"preview_assignments":      {},
+			"list_assignments":         {},
+			"list_task_review_cycles":  {},
+			"list_review_issues":       {},
+			"write_task_spec":          {},
+			"update_task":              {},
+			"create_session":           {},
+			"wait_for_session_ready":   {},
+			"send_command":             {},
+			"read_session_output":      {},
+			"is_session_idle":          {},
+			"can_close_session":        {},
+			"close_session":            {},
 		},
 	}
 	stage = strings.ToLower(strings.TrimSpace(stage))
@@ -1939,10 +1962,53 @@ func (o *Orchestrator) projectIDForTool(ctx context.Context, toolName string, ar
 	toolName = strings.TrimSpace(toolName)
 	switch toolName {
 	case "create_task", "create_worktree", "write_task_spec", "get_project_status",
+		"list_project_knowledge", "create_project_knowledge",
 		"preview_assignments", "confirm_assignments", "list_assignments":
 		return optionalString(args, "project_id")
 	case "get_current_run", "transition_run_stage":
 		return optionalString(args, "project_id")
+	case "update_task", "list_task_review_cycles", "create_review_cycle":
+		taskID, err := optionalString(args, "task_id")
+		if err != nil || strings.TrimSpace(taskID) == "" || o.taskRepo == nil {
+			return "", err
+		}
+		task, err := o.taskRepo.Get(ctx, strings.TrimSpace(taskID))
+		if err != nil || task == nil {
+			return "", err
+		}
+		return strings.TrimSpace(task.ProjectID), nil
+	case "update_review_cycle", "list_review_issues", "create_review_issue":
+		cycleID, err := optionalString(args, "cycle_id")
+		if err != nil || strings.TrimSpace(cycleID) == "" || o.reviewRepo == nil || o.taskRepo == nil {
+			return "", err
+		}
+		cycle, err := o.reviewRepo.GetCycle(ctx, strings.TrimSpace(cycleID))
+		if err != nil || cycle == nil {
+			return "", err
+		}
+		task, err := o.taskRepo.Get(ctx, strings.TrimSpace(cycle.TaskID))
+		if err != nil || task == nil {
+			return "", err
+		}
+		return strings.TrimSpace(task.ProjectID), nil
+	case "update_review_issue":
+		issueID, err := optionalString(args, "issue_id")
+		if err != nil || strings.TrimSpace(issueID) == "" || o.reviewRepo == nil || o.taskRepo == nil {
+			return "", err
+		}
+		issue, err := o.reviewRepo.GetIssue(ctx, strings.TrimSpace(issueID))
+		if err != nil || issue == nil {
+			return "", err
+		}
+		cycle, err := o.reviewRepo.GetCycle(ctx, strings.TrimSpace(issue.CycleID))
+		if err != nil || cycle == nil {
+			return "", err
+		}
+		task, err := o.taskRepo.Get(ctx, strings.TrimSpace(cycle.TaskID))
+		if err != nil || task == nil {
+			return "", err
+		}
+		return strings.TrimSpace(task.ProjectID), nil
 	case "create_session":
 		taskID, err := optionalString(args, "task_id")
 		if err != nil || strings.TrimSpace(taskID) == "" || o.taskRepo == nil {
@@ -1996,23 +2062,31 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 		return containsFold([]string{
 			"create_task", "create_worktree", "write_task_spec", "create_session",
 			"read_session_output", "is_session_idle", "get_project_status",
+			"update_task", "list_task_review_cycles", "list_review_issues",
+			"list_project_knowledge", "create_project_knowledge",
 			"preview_assignments", "confirm_assignments", "list_assignments",
 			"get_current_run", "transition_run_stage",
 		}, toolName)
 	case "reviewer":
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"can_close_session",
+			"can_close_session", "list_task_review_cycles", "create_review_cycle",
+			"update_review_cycle", "list_review_issues", "create_review_issue",
+			"update_review_issue", "update_task", "list_project_knowledge", "create_project_knowledge",
 		}, toolName)
 	case "tester":
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"can_close_session", "close_session",
+			"can_close_session", "close_session", "list_task_review_cycles",
+			"list_review_issues", "update_task", "list_project_knowledge", "create_project_knowledge",
 		}, toolName)
 	default:
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"write_task_spec", "can_close_session", "close_session", "resolve_merge_conflict",
+			"write_task_spec", "update_task", "can_close_session", "close_session", "resolve_merge_conflict",
+			"list_task_review_cycles", "create_review_cycle", "update_review_cycle",
+			"list_review_issues", "create_review_issue", "update_review_issue",
+			"list_project_knowledge", "create_project_knowledge",
 			"preview_assignments", "list_assignments", "get_current_run",
 		}, toolName)
 	}
