@@ -171,7 +171,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		return nil
 	}
 
-	endedAt := formatTimestampOrEmpty(existing.EndedAt)
+	endedAt := ""
 	if status == "completed" || status == "failed" || status == "blocked" {
 		endedAt = formatTimestamp(now)
 	}
