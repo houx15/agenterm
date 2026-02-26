@@ -413,15 +413,20 @@ function parseHistoryText(item: OrchestratorHistoryMessage): string {
     if (texts.length > 0) {
       return texts.join('\n')
     }
+    // Stored non-text blocks (tool_use/tool_result) should not be rendered in PM chat history.
+    return ''
   } catch {
     // Fall back to summarized content.
   }
   return item.content ?? ''
 }
 
-function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessage {
+function toHistorySessionMessage(item: OrchestratorHistoryMessage): SessionMessage | null {
   const role = item.role === 'user' ? 'user' : 'assistant'
   const text = parseHistoryText(item)
+  if (!text.trim()) {
+    return null
+  }
   const normalized = role === 'assistant' ? normalizeAssistantMessage(text) : null
   return createMessage({
     id: item.id,
@@ -818,7 +823,7 @@ export function useOrchestratorWS(projectId: string) {
         if (canceled) {
           return
         }
-        const historyMessages = items.map(toHistorySessionMessage)
+        const historyMessages = items.map(toHistorySessionMessage).filter((item): item is SessionMessage => item !== null)
         setMessages((prev) => mergeHistoryMessages(historyMessages, prev))
       } catch {
         // Keep any local in-flight/optimistic chat messages if the history request fails.
