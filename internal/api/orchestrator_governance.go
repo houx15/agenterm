@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -810,8 +812,10 @@ func (h *handler) previewProjectAssignments(w http.ResponseWriter, r *http.Reque
 
 	var req previewProjectAssignmentsRequest
 	if err := decodeJSON(r, &req); err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid JSON body")
-		return
+		if !errors.Is(err, io.EOF) {
+			jsonError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
 	}
 	stageFilter := strings.ToLower(strings.TrimSpace(req.Stage))
 	if stageFilter != "" && stageFilter != "plan" && stageFilter != "build" && stageFilter != "test" {
