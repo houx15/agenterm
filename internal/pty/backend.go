@@ -166,6 +166,8 @@ func mapNamedKey(key string) string {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "enter":
 		return "\r"
+	case "c-m":
+		return "\r"
 	case "c-c":
 		return "\x03"
 	case "c-d":

@@ -15,7 +15,6 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/registry"
-	"github.com/user/agenterm/internal/tmux"
 )
 
 const (
@@ -29,13 +28,6 @@ const (
 	commandRetryBaseDelay  = 200 * time.Millisecond
 )
 
-type TmuxManager interface {
-	CreateSession(name string, workDir string) (*tmux.Gateway, error)
-	AttachSession(name string) (*tmux.Gateway, error)
-	GetGateway(name string) (*tmux.Gateway, error)
-	DestroySession(name string) error
-	ListSessions() []string
-}
 
 type CreateSessionRequest struct {
 	TaskID    string
@@ -67,7 +59,7 @@ type OutputEntry struct {
 }
 
 type Manager struct {
-	tmux         TmuxManager
+	backend      TerminalBackend
 	registry     *registry.Registry
 	hub          *hub.Hub
 	sessionRepo  *db.SessionRepo
@@ -106,13 +98,13 @@ type commandResult struct {
 	err error
 }
 
-func NewManager(conn *sql.DB, tmuxMgr TmuxManager, reg *registry.Registry, hubInst *hub.Hub) *Manager {
-	if conn == nil || tmuxMgr == nil || reg == nil {
+func NewManager(conn *sql.DB, backend TerminalBackend, reg *registry.Registry, hubInst *hub.Hub) *Manager {
+	if conn == nil || backend == nil || reg == nil {
 		return nil
 	}
 
 	return &Manager{
-		tmux:          tmuxMgr,
+		backend:       backend,
 		registry:      reg,
 		hub:           hubInst,
 		sessionRepo:   db.NewSessionRepo(conn),
@@ -225,44 +217,46 @@ func (sm *Manager) CreateSession(ctx context.Context, req CreateSessionRequest) 
 		return nil, err
 	}
 
-	sessionName, gw, err := sm.createTmuxSession(project.Name, task.Title, req.Role, workDir)
+	sessionID, err := db.NewID()
+	if err != nil {
+		return nil, fmt.Errorf("generate session id: %w", err)
+	}
+
+	agentName := agent.Name
+	if agentName == "" {
+		agentName = req.AgentType
+	}
+	agentCommand := agent.Command
+
+	terminalID, err := sm.backend.CreateSession(ctx, sessionID, agentName, agentCommand, workDir)
 	if err != nil {
 		return nil, err
 	}
 
-	windows := gw.ListWindows()
-	if len(windows) == 0 {
-		_ = sm.tmux.DestroySession(sessionName)
-		return nil, fmt.Errorf("created tmux session has no windows")
-	}
-
 	session := &db.Session{
 		TaskID:          req.TaskID,
-		TmuxSessionName: sessionName,
-		TmuxWindowID:    windows[0].ID,
+		TmuxSessionName: terminalID,
+		TmuxWindowID:    terminalID,
 		AgentType:       req.AgentType,
 		Role:            req.Role,
 		Status:          "working",
 		HumanAttached:   false,
 	}
+	session.ID = sessionID
 	if err := sm.sessionRepo.Create(ctx, session); err != nil {
-		_ = sm.tmux.DestroySession(sessionName)
+		_ = sm.backend.DestroySession(ctx, terminalID)
 		return nil, err
 	}
 
-	if err := gw.SendRaw(session.TmuxWindowID, agent.Command+"\n"); err != nil {
-		session.Status = "failed"
-		_ = sm.sessionRepo.Update(ctx, session)
-		return nil, err
-	}
-
+	// PTY backend already runs the command directly — no need to send it.
+	// But handle auto-accept sequence if configured.
 	if seq, ok := autoAcceptSequence(agent.AutoAcceptMode); ok {
-		go func(windowID string, mode string) {
+		go func(tid string, mode string) {
 			time.Sleep(600 * time.Millisecond)
-			if err := gw.SendRaw(windowID, mode); err != nil {
+			if err := sm.backend.SendInput(context.Background(), tid, mode); err != nil {
 				slog.Debug("auto-accept send failed", "session", session.ID, "error", err)
 			}
-		}(session.TmuxWindowID, seq)
+		}(terminalID, seq)
 	}
 
 	if err := sm.ensureMonitorForSession(ctx, session); err != nil {
@@ -454,12 +448,9 @@ func (sm *Manager) dispatchCommand(ctx context.Context, sessionID string, req Co
 	if session == nil {
 		return errNotFound("session")
 	}
-	if session.TmuxWindowID == "" {
-		return fmt.Errorf("session has no tmux window")
-	}
-	gw, err := sm.gatewayForSession(session.TmuxSessionName)
-	if err != nil {
-		return err
+	terminalID := session.TmuxWindowID
+	if terminalID == "" {
+		return fmt.Errorf("session has no terminal")
 	}
 
 	switch req.Op {
@@ -480,12 +471,12 @@ func (sm *Manager) dispatchCommand(ctx context.Context, sessionID string, req Co
 			normalized = strings.TrimSuffix(normalized, "\r")
 		}
 		if normalized != "" {
-			if err := gw.SendRaw(session.TmuxWindowID, normalized); err != nil {
+			if err := sm.backend.SendInput(ctx, terminalID, normalized); err != nil {
 				return err
 			}
 		}
 		if submit {
-			if err := gw.SendKeys(session.TmuxWindowID, "C-m"); err != nil {
+			if err := sm.backend.SendInput(ctx, terminalID, "\r"); err != nil {
 				return err
 			}
 		}
@@ -494,18 +485,18 @@ func (sm *Manager) dispatchCommand(ctx context.Context, sessionID string, req Co
 		if key == "" {
 			return fmt.Errorf("key is required")
 		}
-		if err := gw.SendKeys(session.TmuxWindowID, key); err != nil {
+		if err := sm.backend.SendKey(ctx, terminalID, key); err != nil {
 			return err
 		}
 	case CommandOpInterrupt:
-		if err := gw.SendKeys(session.TmuxWindowID, "C-c"); err != nil {
+		if err := sm.backend.SendKey(ctx, terminalID, "C-c"); err != nil {
 			return err
 		}
 	case CommandOpResize:
 		if req.Cols <= 0 || req.Rows <= 0 {
 			return fmt.Errorf("cols and rows must be > 0")
 		}
-		if err := gw.ResizeWindow(session.TmuxWindowID, req.Cols, req.Rows); err != nil {
+		if err := sm.backend.Resize(ctx, terminalID, req.Cols, req.Rows); err != nil {
 			return err
 		}
 	case CommandOpClose:
@@ -724,7 +715,7 @@ func (sm *Manager) DestroySession(ctx context.Context, sessionID string) error {
 
 	sm.stopMonitor(sessionID)
 	sm.stopSessionCommandQueue(sessionID)
-	if err := sm.tmux.DestroySession(session.TmuxSessionName); err != nil {
+	if err := sm.backend.DestroySession(ctx, session.TmuxWindowID); err != nil {
 		return err
 	}
 
@@ -762,13 +753,13 @@ func sendQueuedCommand(ctx context.Context, q chan queuedCommand, item queuedCom
 	}
 }
 
-func (sm *Manager) ObserveParsedOutput(tmuxSession string, windowID string, text string, class string, timestamp time.Time) {
+func (sm *Manager) ObserveParsedOutput(sessionID string, windowID string, text string, class string, timestamp time.Time) {
 	if sm == nil {
 		return
 	}
-	tmuxSession = strings.TrimSpace(tmuxSession)
+	sessionID = strings.TrimSpace(sessionID)
 	windowID = strings.TrimSpace(windowID)
-	if tmuxSession == "" || windowID == "" {
+	if sessionID == "" || windowID == "" {
 		return
 	}
 	if timestamp.IsZero() {
@@ -786,7 +777,7 @@ func (sm *Manager) ObserveParsedOutput(tmuxSession string, windowID string, text
 		if handle.monitor == nil {
 			continue
 		}
-		if !handle.monitor.matches(tmuxSession, windowID) {
+		if !handle.monitor.matches(sessionID, windowID) {
 			continue
 		}
 		handle.monitor.IngestParsed(text, class, timestamp)
@@ -806,51 +797,6 @@ func (sm *Manager) ensureStarted() error {
 	return sm.Start(context.Background())
 }
 
-func (sm *Manager) createTmuxSession(projectName string, taskTitle string, role string, workDir string) (string, *tmux.Gateway, error) {
-	base := buildTmuxSessionName(projectName, taskTitle, role)
-	if base == "" {
-		base = "session"
-	}
-
-	for attempt := 0; attempt < 8; attempt++ {
-		name := base
-		if attempt > 0 {
-			suffix := fmt.Sprintf("-%02d", attempt)
-			if len(name)+len(suffix) > 80 {
-				name = name[:80-len(suffix)]
-			}
-			name += suffix
-		}
-		gw, err := sm.tmux.CreateSession(name, workDir)
-		if err == nil {
-			return name, gw, nil
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "already exists") {
-			return "", nil, err
-		}
-	}
-	const maxRandomAttempts = 8
-	for i := 0; i < maxRandomAttempts; i++ {
-		name := base
-		randomID, err := db.NewID()
-		if err != nil {
-			return "", nil, err
-		}
-		suffix := "-" + randomID[:8]
-		if len(name)+len(suffix) > 80 {
-			name = name[:80-len(suffix)]
-		}
-		name += suffix
-		gw, err := sm.tmux.CreateSession(name, workDir)
-		if err == nil {
-			return name, gw, nil
-		}
-		if !strings.Contains(strings.ToLower(err.Error()), "already exists") {
-			return "", nil, err
-		}
-	}
-	return "", nil, fmt.Errorf("failed to allocate unique tmux session name")
-}
 
 func (sm *Manager) resolveWorkDir(ctx context.Context, task *db.Task, project *db.Project) (string, error) {
 	workDir := project.RepoPath
@@ -910,6 +856,7 @@ func (sm *Manager) ensureMonitorForSession(ctx context.Context, session *db.Sess
 		TmuxSession:    session.TmuxSessionName,
 		WindowID:       session.TmuxWindowID,
 		WorkDir:        workDir,
+		Backend:        sm.backend,
 		SessionRepo:    sm.sessionRepo,
 		Hub:            sm.hub,
 		IdleTimeout:    sm.idleTimeout,
@@ -940,47 +887,6 @@ func (sm *Manager) stopMonitor(sessionID string) {
 	if handle.cancel != nil {
 		handle.cancel()
 	}
-}
-
-func (sm *Manager) gatewayForSession(sessionName string) (*tmux.Gateway, error) {
-	gw, err := sm.tmux.GetGateway(sessionName)
-	if err == nil {
-		return gw, nil
-	}
-	return sm.tmux.AttachSession(sessionName)
-}
-
-func buildTmuxSessionName(projectName string, taskTitle string, role string) string {
-	parts := []string{slugPart(projectName), slugPart(taskTitle), slugPart(role)}
-	for i := range parts {
-		if parts[i] == "" {
-			parts[i] = "x"
-		}
-	}
-	return strings.Join(parts, "-")
-}
-
-func slugPart(v string) string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	var b strings.Builder
-	lastDash := false
-	for _, r := range v {
-		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
-		if isAlphaNum {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	s := strings.Trim(b.String(), "-")
-	if len(s) > 36 {
-		s = s[:36]
-	}
-	return s
 }
 
 func errNotFound(kind string) error {

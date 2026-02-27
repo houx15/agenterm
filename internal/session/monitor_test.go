@@ -43,8 +43,8 @@ func seedSession(t *testing.T, sessionRepo *db.SessionRepo, taskRepo *db.TaskRep
 
 	sess := &db.Session{
 		TaskID:          task.ID,
-		TmuxSessionName: "tmux-test",
-		TmuxWindowID:    "@1",
+		TmuxSessionName: "test-terminal",
+		TmuxWindowID:    "test-terminal",
 		AgentType:       "codex",
 		Role:            "coder",
 		Status:          "working",
@@ -68,8 +68,8 @@ func TestMonitorDetectStatusPromptBeatsMarker(t *testing.T) {
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    "s1",
-		TmuxSession:  "tmux-s1",
-		WindowID:     "@1",
+		TmuxSession:  "s1",
+		WindowID:     "s1",
 		WorkDir:      workDir,
 		IdleTimeout:  30 * time.Second,
 		PollInterval: 10 * time.Millisecond,
@@ -92,8 +92,8 @@ func TestMonitorDetectStatusIdleBeatsMarker(t *testing.T) {
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    "s2",
-		TmuxSession:  "tmux-s2",
-		WindowID:     "@2",
+		TmuxSession:  "s2",
+		WindowID:     "s2",
 		WorkDir:      workDir,
 		IdleTimeout:  10 * time.Millisecond,
 		PollInterval: 10 * time.Millisecond,
@@ -116,17 +116,14 @@ func TestMonitorRunRefreshesLastActivityWithoutStatusChange(t *testing.T) {
 	old := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Second)
 	sess := seedSession(t, sessionRepo, taskRepo, projectRepo, old)
 
-	origExists := tmuxSessionExistsFn
-	t.Cleanup(func() {
-		tmuxSessionExistsFn = origExists
-	})
-
-	tmuxSessionExistsFn = func(string) bool { return true }
+	backend := newFakeBackend()
+	backend.sessions[sess.ID] = true
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    sess.ID,
 		TmuxSession:  sess.TmuxSessionName,
 		WindowID:     sess.TmuxWindowID,
+		Backend:      backend,
 		SessionRepo:  sessionRepo,
 		IdleTimeout:  10 * time.Second,
 		PollInterval: 20 * time.Millisecond,
@@ -161,16 +158,14 @@ func TestMonitorRunMarksFailedWhenSessionDisappearsWithoutCompletionSignal(t *te
 	now := time.Now().UTC().Truncate(time.Second)
 	sess := seedSession(t, sessionRepo, taskRepo, projectRepo, now)
 
-	origExists := tmuxSessionExistsFn
-	t.Cleanup(func() {
-		tmuxSessionExistsFn = origExists
-	})
-	tmuxSessionExistsFn = func(string) bool { return false }
+	// Backend returns false for SessionExists — session is gone.
+	backend := newFakeBackend()
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    sess.ID,
 		TmuxSession:  sess.TmuxSessionName,
 		WindowID:     sess.TmuxWindowID,
+		Backend:      backend,
 		SessionRepo:  sessionRepo,
 		IdleTimeout:  10 * time.Second,
 		PollInterval: 10 * time.Millisecond,
@@ -194,27 +189,25 @@ func TestMonitorRunMarksFailedWhenSessionDisappearsWithoutCompletionSignal(t *te
 	}
 }
 
-func TestMonitorOutputSinceBootstrapsFromPane(t *testing.T) {
-	origCapture := capturePaneOutputFn
-	t.Cleanup(func() { capturePaneOutputFn = origCapture })
-
-	called := 0
-	capturePaneOutputFn = func(windowID string, lines int) ([]string, error) {
-		called++
-		return []string{"", "boot-a", "boot-b"}, nil
+func TestMonitorOutputSinceBootstrapsFromBackend(t *testing.T) {
+	backend := &bootstrapBackend{
+		fakeBackend: newFakeBackend(),
+		lines:       []string{"", "boot-a", "boot-b"},
 	}
+	backend.sessions["s-bootstrap"] = true
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    "s-bootstrap",
-		TmuxSession:  "tmux-bootstrap",
-		WindowID:     "@9",
+		TmuxSession:  "s-bootstrap",
+		WindowID:     "s-bootstrap",
+		Backend:      backend,
 		IdleTimeout:  30 * time.Second,
 		PollInterval: 10 * time.Millisecond,
 	})
 
 	out := m.OutputSince(time.Time{})
-	if called != 1 {
-		t.Fatalf("capture called=%d want 1", called)
+	if backend.captureCalled != 1 {
+		t.Fatalf("capture called=%d want 1", backend.captureCalled)
 	}
 	if len(out) != 2 {
 		t.Fatalf("len(out)=%d want 2", len(out))
@@ -240,16 +233,17 @@ func TestRingBufferSinceIsExclusive(t *testing.T) {
 }
 
 func TestMonitorReadyStateUsesPromptFromBootstrapSnapshot(t *testing.T) {
-	origCapture := capturePaneOutputFn
-	t.Cleanup(func() { capturePaneOutputFn = origCapture })
-	capturePaneOutputFn = func(windowID string, lines int) ([]string, error) {
-		return []string{"$ "}, nil
+	backend := &bootstrapBackend{
+		fakeBackend: newFakeBackend(),
+		lines:       []string{"$ "},
 	}
+	backend.sessions["s-ready"] = true
 
 	m := NewMonitor(MonitorConfig{
 		SessionID:    "s-ready",
-		TmuxSession:  "tmux-ready",
-		WindowID:     "@10",
+		TmuxSession:  "s-ready",
+		WindowID:     "s-ready",
+		Backend:      backend,
 		IdleTimeout:  30 * time.Second,
 		PollInterval: 10 * time.Millisecond,
 	})
@@ -258,4 +252,16 @@ func TestMonitorReadyStateUsesPromptFromBootstrapSnapshot(t *testing.T) {
 	if !ready.PromptDetected {
 		t.Fatalf("PromptDetected=%v want true", ready.PromptDetected)
 	}
+}
+
+// bootstrapBackend is a fakeBackend that returns canned CaptureOutput.
+type bootstrapBackend struct {
+	*fakeBackend
+	lines         []string
+	captureCalled int
+}
+
+func (b *bootstrapBackend) CaptureOutput(_ context.Context, id string, lines int) ([]string, error) {
+	b.captureCalled++
+	return b.lines, nil
 }

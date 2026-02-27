@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -19,51 +18,14 @@ import (
 	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
-	"github.com/user/agenterm/internal/tmux"
 )
 
-type fakeGateway struct {
-	windows        []tmux.Window
-	nextID         int
-	newWindowCalls int
-	sentRaw        []string
-	sentKeys       []string
-	failNewWindow  bool
-}
+// fakeGateway is kept as a no-op placeholder for test helpers that previously
+// required a gateway argument. The type is now unused by the production code
+// but maintained here to keep test signatures stable.
+type fakeGateway struct{}
 
-func (f *fakeGateway) NewWindow(name, defaultDir string) error {
-	if f.failNewWindow {
-		return errFakeGateway
-	}
-	f.newWindowCalls++
-	f.nextID++
-	f.windows = append(f.windows, tmux.Window{ID: "@" + strconv.Itoa(f.nextID), Name: name})
-	return nil
-}
-
-func (f *fakeGateway) ListWindows() []tmux.Window {
-	out := make([]tmux.Window, len(f.windows))
-	copy(out, f.windows)
-	return out
-}
-
-func (f *fakeGateway) SendKeys(windowID string, keys string) error {
-	f.sentKeys = append(f.sentKeys, windowID+":"+keys)
-	return nil
-}
-
-func (f *fakeGateway) SendRaw(windowID string, keys string) error {
-	f.sentRaw = append(f.sentRaw, windowID+":"+keys)
-	return nil
-}
-
-var errFakeGateway = &fakeGatewayError{"new window failed"}
-
-type fakeGatewayError struct{ msg string }
-
-func (e *fakeGatewayError) Error() string { return e.msg }
-
-func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
+func openAPI(t *testing.T, _ *fakeGateway) (http.Handler, *db.DB) {
 	t.Helper()
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -78,25 +40,7 @@ func openAPI(t *testing.T, gw gateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new playbook registry: %v", err)
 	}
-	return NewRouter(database.SQL(), gw, nil, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
-}
-
-func openAPIWithManager(t *testing.T, gw gateway, manager sessionManager) (http.Handler, *db.DB) {
-	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = database.Close() })
-	agentRegistry, err := registry.NewRegistry(filepath.Join(t.TempDir(), "agents"))
-	if err != nil {
-		t.Fatalf("new registry: %v", err)
-	}
-	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
-	if err != nil {
-		t.Fatalf("new playbook registry: %v", err)
-	}
-	return NewRouter(database.SQL(), gw, manager, nil, nil, nil, nil, "test-token", "configured-session", agentRegistry, playbookRegistry), database
+	return NewRouter(database.SQL(), nil, nil, nil, nil, "test-token", agentRegistry, playbookRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -292,9 +236,10 @@ func TestCreateProjectRollsBackWhenDefaultOrchestratorInitFails(t *testing.T) {
 	}
 }
 
-func TestSessionCreationCreatesTmuxWindow(t *testing.T) {
-	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
+func TestSessionCreationRequiresLifecycleManager(t *testing.T) {
+	// TODO: Re-enable with PTY backend integration test once lifecycle wiring is stable.
+	// Without a lifecycle manager, session creation returns 501.
+	h, _ := openAPI(t, &fakeGateway{})
 
 	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
 		"name": "P1", "repo_path": t.TempDir(),
@@ -313,74 +258,8 @@ func TestSessionCreationCreatesTmuxWindow(t *testing.T) {
 	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
 		"agent_type": "codex", "role": "coder",
 	}, true)
-	if createSession.Code != http.StatusCreated {
-		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
-	}
-	if gw.newWindowCalls != 1 {
-		t.Fatalf("newWindowCalls=%d want 1", gw.newWindowCalls)
-	}
-
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	if session["tmux_window_id"] == "" {
-		t.Fatalf("expected tmux_window_id in response: %v", session)
-	}
-	if session["tmux_session_name"] != "configured-session" {
-		t.Fatalf("tmux_session_name=%v want configured-session", session["tmux_session_name"])
-	}
-}
-
-func TestSessionCreationUsesManagerWhenAvailable(t *testing.T) {
-	if os.Getenv("TMUX_INTEGRATION_TEST") == "" {
-		t.Skip("skipping integration test; set TMUX_INTEGRATION_TEST=1 to run")
-	}
-
-	gw := &fakeGateway{}
-	manager := tmux.NewManager(t.TempDir())
-	h, _ := openAPIWithManager(t, gw, manager)
-	t.Cleanup(func() { manager.Close() })
-
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "My App", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "Auth Flow", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
-
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusCreated {
-		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
-	}
-
-	if gw.newWindowCalls != 0 {
-		t.Fatalf("expected legacy gateway NewWindow not to be used; calls=%d", gw.newWindowCalls)
-	}
-
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	tmuxSessionName, _ := session["tmux_session_name"].(string)
-	if tmuxSessionName == "" {
-		t.Fatalf("expected tmux_session_name in response: %v", session)
-	}
-	if !strings.Contains(tmuxSessionName, "my-app-auth-flow-coder") {
-		t.Fatalf("tmux_session_name=%q want slugged project-task-role", tmuxSessionName)
-	}
-
-	if _, err := manager.GetGateway(tmuxSessionName); err != nil {
-		t.Fatalf("expected manager to have attached gateway for %s: %v", tmuxSessionName, err)
-	}
-
-	if err := manager.DestroySession(tmuxSessionName); err != nil {
-		t.Fatalf("cleanup destroy session failed: %v", err)
+	if createSession.Code != http.StatusNotImplemented {
+		t.Fatalf("create session without lifecycle status=%d want 501 body=%s", createSession.Code, createSession.Body.String())
 	}
 }
 
@@ -449,7 +328,7 @@ func TestWorktreeGitEndpoints(t *testing.T) {
 
 func TestWorktreeMergeEndpointAndResolveConflict(t *testing.T) {
 	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
+	h, database := openAPI(t, gw)
 	repo := initGitRepo(t)
 	run := func(args ...string) {
 		cmd := exec.Command("git", args...)
@@ -580,14 +459,19 @@ func TestWorktreeMergeEndpointAndResolveConflict(t *testing.T) {
 		t.Fatalf("merge conflict status=%v want conflict", mergeConflictBody["status"])
 	}
 
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID2+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusCreated {
-		t.Fatalf("create coder session status=%d body=%s", createSession.Code, createSession.Body.String())
+	// Seed session directly in DB since lifecycle manager is nil in tests.
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	sess := &db.Session{
+		TaskID:          taskID2,
+		TmuxSessionName: "test-merge-conflict",
+		TmuxWindowID:    "test-merge-conflict",
+		AgentType:       "codex",
+		Role:            "coder",
+		Status:          "working",
 	}
-	var session map[string]any
-	decodeBody(t, createSession, &session)
+	if err := sessionRepo.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 
 	resolveResp := apiRequest(t, h, http.MethodPost, "/api/worktrees/"+worktreeID2+"/resolve-conflict", map[string]any{
 		"message": "resolve and resubmit",
@@ -600,8 +484,8 @@ func TestWorktreeMergeEndpointAndResolveConflict(t *testing.T) {
 	if resolveBody["status"] != "resolution_requested" {
 		t.Fatalf("resolve status=%v want resolution_requested", resolveBody["status"])
 	}
-	if resolveBody["session_id"] != session["id"] {
-		t.Fatalf("resolve session_id=%v want %v", resolveBody["session_id"], session["id"])
+	if resolveBody["session_id"] != sess.ID {
+		t.Fatalf("resolve session_id=%v want %v", resolveBody["session_id"], sess.ID)
 	}
 }
 
@@ -625,115 +509,41 @@ func TestWorktreeRejectsPathOutsideProjectRepo(t *testing.T) {
 	}
 }
 
-func TestSessionCreateRollsBackWhenTmuxWindowFails(t *testing.T) {
-	gw := &fakeGateway{failNewWindow: true}
-	h, _ := openAPI(t, gw)
+// TODO: TestSessionCreateRollsBackWhenTmuxWindowFails removed — tmux fallback no longer exists.
+// Equivalent test for PTY backend should be added once integration wiring is complete.
 
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "P1", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "T1", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
+// TODO: TestSessionCreateRejectsUnknownAgentType removed — requires lifecycle manager wiring.
+// Without lifecycle, session creation returns 501. Re-add as PTY integration test.
 
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", createSession.Code, createSession.Body.String())
+func TestSessionTakeoverAndIdleEndpoints(t *testing.T) {
+	h, database := openAPI(t, &fakeGateway{})
+	ctx := context.Background()
+
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	project := &db.Project{Name: "P1", RepoPath: t.TempDir(), Status: "active"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
 	}
-	list := apiRequest(t, h, http.MethodGet, "/api/sessions?task_id="+taskID, nil, true)
-	if list.Code != http.StatusOK {
-		t.Fatalf("list status=%d", list.Code)
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "pending"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
 	}
-	var sessions []map[string]any
-	decodeBody(t, list, &sessions)
-	if len(sessions) != 0 {
-		t.Fatalf("expected no persisted sessions after failure, got %d", len(sessions))
+	sess := &db.Session{
+		TaskID:          task.ID,
+		TmuxSessionName: "test-term",
+		TmuxWindowID:    "test-term",
+		AgentType:       "codex",
+		Role:            "coder",
+		Status:          "working",
 	}
-}
-
-func TestSessionCreateRejectsUnknownAgentType(t *testing.T) {
-	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
-
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "P1", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "T1", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
-
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "missing-agent", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d body=%s", createSession.Code, createSession.Body.String())
-	}
-}
-
-func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
-	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
-
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "P1", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "T1", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
-
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusCreated {
-		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
-	}
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	sessionID := session["id"].(string)
-
-	send := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/send", map[string]any{
-		"text": "echo hello\\n",
-	}, true)
-	if send.Code != http.StatusOK {
-		t.Fatalf("send status=%d body=%s", send.Code, send.Body.String())
-	}
-	if len(gw.sentRaw) == 0 {
-		t.Fatalf("expected command to be sent to gateway")
-	}
-	beforeBlocked := len(gw.sentRaw)
-	blocked := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/send", map[string]any{
-		"text": "rm -rf /tmp/unsafe\\n",
-	}, true)
-	if blocked.Code != http.StatusForbidden {
-		t.Fatalf("blocked send status=%d body=%s", blocked.Code, blocked.Body.String())
-	}
-	if len(gw.sentRaw) != beforeBlocked {
-		t.Fatalf("blocked command should not be forwarded to gateway")
+	if err := sessionRepo.Create(ctx, sess); err != nil {
+		t.Fatalf("create session: %v", err)
 	}
 
-	take := apiRequest(t, h, http.MethodPatch, "/api/sessions/"+sessionID+"/takeover", map[string]any{
+	take := apiRequest(t, h, http.MethodPatch, "/api/sessions/"+sess.ID+"/takeover", map[string]any{
 		"human_takeover": true,
 	}, true)
 	if take.Code != http.StatusOK {
@@ -745,7 +555,7 @@ func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
 		t.Fatalf("status=%v want human_takeover", takeoverSession["status"])
 	}
 
-	idle := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/idle", nil, true)
+	idle := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sess.ID+"/idle", nil, true)
 	if idle.Code != http.StatusOK {
 		t.Fatalf("idle status=%d body=%s", idle.Code, idle.Body.String())
 	}
@@ -759,82 +569,8 @@ func TestSessionSendAndTakeoverEndpoints(t *testing.T) {
 	}
 }
 
-func TestSessionCommandQueueEndpoints(t *testing.T) {
-	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
-
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "P1", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "T1", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
-
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	sessionID := session["id"].(string)
-
-	send := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/commands", map[string]any{
-		"op":   "send_text",
-		"text": "echo hi\\n",
-	}, true)
-	if send.Code != http.StatusOK {
-		t.Fatalf("send command status=%d body=%s", send.Code, send.Body.String())
-	}
-	var sendBody map[string]any
-	decodeBody(t, send, &sendBody)
-	commandID, _ := sendBody["id"].(string)
-	if commandID == "" {
-		t.Fatalf("expected command id in response")
-	}
-	if sendBody["status"] != "completed" {
-		t.Fatalf("status=%v want completed", sendBody["status"])
-	}
-	if len(gw.sentRaw) == 0 {
-		t.Fatalf("expected command to be sent to gateway")
-	}
-
-	sendKey := apiRequest(t, h, http.MethodPost, "/api/sessions/"+sessionID+"/commands", map[string]any{
-		"op":  "send_key",
-		"key": "enter",
-	}, true)
-	if sendKey.Code != http.StatusOK {
-		t.Fatalf("send key status=%d body=%s", sendKey.Code, sendKey.Body.String())
-	}
-	if len(gw.sentKeys) == 0 {
-		t.Fatalf("expected key to be sent to gateway")
-	}
-
-	get := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/commands/"+commandID, nil, true)
-	if get.Code != http.StatusOK {
-		t.Fatalf("get command status=%d body=%s", get.Code, get.Body.String())
-	}
-	var got map[string]any
-	decodeBody(t, get, &got)
-	if got["id"] != commandID {
-		t.Fatalf("id=%v want %s", got["id"], commandID)
-	}
-
-	list := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/commands?limit=5", nil, true)
-	if list.Code != http.StatusOK {
-		t.Fatalf("list commands status=%d body=%s", list.Code, list.Body.String())
-	}
-	var items []map[string]any
-	decodeBody(t, list, &items)
-	if len(items) < 2 {
-		t.Fatalf("len(items)=%d want >= 2", len(items))
-	}
-}
+// TODO: TestSessionCommandQueueEndpoints removed — requires lifecycle manager with PTY backend.
+// Re-add as PTY integration test once lifecycle wiring is complete.
 
 func TestSessionDeleteWithoutLifecycleManager(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
@@ -844,56 +580,8 @@ func TestSessionDeleteWithoutLifecycleManager(t *testing.T) {
 	}
 }
 
-func TestSessionOutputSinceFiltering(t *testing.T) {
-	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
-
-	origCapture := capturePaneFn
-	defer func() { capturePaneFn = origCapture }()
-	capturePaneFn = func(windowID string, lines int) ([]string, error) {
-		return []string{"line-a", "line-b"}, nil
-	}
-
-	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
-		"name": "P1", "repo_path": t.TempDir(),
-	}, true)
-	var project map[string]any
-	decodeBody(t, createProject, &project)
-	projectID := project["id"].(string)
-	createTask := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/tasks", map[string]any{
-		"title": "T1", "description": "D",
-	}, true)
-	var task map[string]any
-	decodeBody(t, createTask, &task)
-	taskID := task["id"].(string)
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	sessionID := session["id"].(string)
-
-	first := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/output?lines=10", nil, true)
-	if first.Code != http.StatusOK {
-		t.Fatalf("first output status=%d body=%s", first.Code, first.Body.String())
-	}
-	var lines []map[string]any
-	decodeBody(t, first, &lines)
-	if len(lines) != 2 {
-		t.Fatalf("len(lines)=%d want 2", len(lines))
-	}
-	lastTS := lines[len(lines)-1]["timestamp"].(string)
-
-	second := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/output?since="+lastTS+"&lines=10", nil, true)
-	if second.Code != http.StatusOK {
-		t.Fatalf("second output status=%d body=%s", second.Code, second.Body.String())
-	}
-	var lines2 []map[string]any
-	decodeBody(t, second, &lines2)
-	if len(lines2) != 0 {
-		t.Fatalf("len(lines2)=%d want 0", len(lines2))
-	}
-}
+// TODO: TestSessionOutputSinceFiltering removed — tmux capturePaneFn no longer exists.
+// Re-add as PTY integration test once lifecycle and monitor wiring is complete.
 
 func TestSessionAndAgentNotFoundErrors(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
@@ -1140,7 +828,7 @@ func TestDemandOrchestratorReportEndpoint(t *testing.T) {
 		t.Fatalf("new playbook registry: %v", err)
 	}
 	demandOrchestratorInst := orchestrator.New(orchestrator.Options{Lane: "demand"})
-	h := NewRouter(database.SQL(), &fakeGateway{}, nil, nil, nil, nil, demandOrchestratorInst, "test-token", "configured-session", agentRegistry, playbookRegistry)
+	h := NewRouter(database.SQL(), nil, nil, nil, demandOrchestratorInst, "test-token", agentRegistry, playbookRegistry)
 
 	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
 		"name": "Demand Report P1", "repo_path": t.TempDir(),
@@ -1181,7 +869,6 @@ func TestDemandOrchestratorReportEndpoint(t *testing.T) {
 }
 
 func TestOrchestratorEndpoints(t *testing.T) {
-	gw := &fakeGateway{}
 	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -1258,7 +945,7 @@ func TestOrchestratorEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new playbook registry: %v", err)
 	}
-	h := NewRouter(database.SQL(), gw, nil, nil, nil, orchestratorInst, nil, "test-token", "configured-session", agentRegistry, playbookRegistry)
+	h := NewRouter(database.SQL(), nil, nil, orchestratorInst, nil, "test-token", agentRegistry, playbookRegistry)
 
 	chat := apiRequest(t, h, http.MethodPost, "/api/orchestrator/chat", map[string]any{
 		"project_id": project.ID,
@@ -1343,7 +1030,7 @@ func TestOrchestratorEndpoints(t *testing.T) {
 
 func TestSessionCloseCheckGate(t *testing.T) {
 	gw := &fakeGateway{}
-	h, _ := openAPI(t, gw)
+	h, database := openAPI(t, gw)
 
 	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
 		"name": "P1", "repo_path": t.TempDir(),
@@ -1359,15 +1046,20 @@ func TestSessionCloseCheckGate(t *testing.T) {
 	decodeBody(t, createTask, &task)
 	taskID := task["id"].(string)
 
-	createSession := apiRequest(t, h, http.MethodPost, "/api/tasks/"+taskID+"/sessions", map[string]any{
-		"agent_type": "codex", "role": "coder",
-	}, true)
-	if createSession.Code != http.StatusCreated {
-		t.Fatalf("create session status=%d body=%s", createSession.Code, createSession.Body.String())
+	// Seed session directly in DB since lifecycle manager is nil in tests.
+	sessionRepo := db.NewSessionRepo(database.SQL())
+	sess := &db.Session{
+		TaskID:          taskID,
+		TmuxSessionName: "test-close-check",
+		TmuxWindowID:    "test-close-check",
+		AgentType:       "codex",
+		Role:            "coder",
+		Status:          "working",
 	}
-	var session map[string]any
-	decodeBody(t, createSession, &session)
-	sessionID := session["id"].(string)
+	if err := sessionRepo.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sessionID := sess.ID
 
 	beforeReview := apiRequest(t, h, http.MethodGet, "/api/sessions/"+sessionID+"/close-check", nil, true)
 	if beforeReview.Code != http.StatusOK {

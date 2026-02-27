@@ -1,9 +1,7 @@
 package session
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,14 +14,12 @@ import (
 	"github.com/user/agenterm/internal/parser"
 )
 
-var tmuxSessionExistsFn = tmuxSessionExists
-var capturePaneOutputFn = capturePaneOutput
-
 type MonitorConfig struct {
 	SessionID      string
 	TmuxSession    string
 	WindowID       string
 	WorkDir        string
+	Backend        TerminalBackend
 	SessionRepo    *db.SessionRepo
 	Hub            *hub.Hub
 	IdleTimeout    time.Duration
@@ -37,6 +33,7 @@ type Monitor struct {
 	tmuxSession string
 	windowID    string
 	workDir     string
+	backend     TerminalBackend
 	sessionRepo *db.SessionRepo
 	hub         *hub.Hub
 
@@ -80,6 +77,7 @@ func NewMonitor(cfg MonitorConfig) *Monitor {
 		tmuxSession:  cfg.TmuxSession,
 		windowID:     cfg.WindowID,
 		workDir:      cfg.WorkDir,
+		backend:      cfg.Backend,
 		sessionRepo:  cfg.SessionRepo,
 		hub:          cfg.Hub,
 		idleTimeout:  idleTimeout,
@@ -92,7 +90,7 @@ func NewMonitor(cfg MonitorConfig) *Monitor {
 }
 
 func (m *Monitor) Run(ctx context.Context) {
-	if m.sessionID == "" || m.tmuxSession == "" {
+	if m.sessionID == "" {
 		return
 	}
 
@@ -104,7 +102,7 @@ func (m *Monitor) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !tmuxSessionExistsFn(m.tmuxSession) {
+			if m.backend != nil && !m.backend.SessionExists(context.Background(), m.sessionID) {
 				m.persistStatus(context.Background(), m.statusOnSessionExit())
 				return
 			}
@@ -150,7 +148,7 @@ func (m *Monitor) ReadyState() ReadyState {
 }
 
 func (m *Monitor) tryBootstrapOutput() {
-	if m == nil || strings.TrimSpace(m.windowID) == "" {
+	if m == nil || m.backend == nil || strings.TrimSpace(m.sessionID) == "" {
 		return
 	}
 	if len(m.buffer.Last(1)) > 0 {
@@ -165,10 +163,9 @@ func (m *Monitor) tryBootstrapOutput() {
 	}
 	m.bootstrapAttemptAt = now
 	captureLines := m.captureLines
-	windowID := m.windowID
 	m.mu.Unlock()
 
-	lines, err := capturePaneOutputFn(windowID, captureLines)
+	lines, err := m.backend.CaptureOutput(context.Background(), m.sessionID, captureLines)
 	if err != nil || len(lines) == 0 {
 		return
 	}
@@ -342,31 +339,6 @@ func (m *Monitor) touchActivity(ctx context.Context) {
 	_ = m.sessionRepo.Update(ctx, sess)
 }
 
-func tmuxSessionExists(name string) bool {
-	cmd := exec.Command("tmux", "has-session", "-t", name)
-	return cmd.Run() == nil
-}
-
-func capturePaneOutput(windowID string, lines int) ([]string, error) {
-	if strings.TrimSpace(windowID) == "" {
-		return nil, fmt.Errorf("window id is required")
-	}
-	if lines <= 0 {
-		lines = defaultCaptureLines
-	}
-	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", windowID, "-S", fmt.Sprintf("-%d", lines))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		if stderr.Len() > 0 {
-			return nil, fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(stderr.String()))
-		}
-		return nil, err
-	}
-	raw := strings.ReplaceAll(string(out), "\r\n", "\n")
-	return strings.Split(raw, "\n"), nil
-}
 
 type ringBuffer struct {
 	mu      sync.RWMutex
@@ -419,9 +391,15 @@ func (r *ringBuffer) Last(n int) []OutputEntry {
 	return out
 }
 
-func (m *Monitor) matches(tmuxSession string, windowID string) bool {
-	if strings.TrimSpace(tmuxSession) == "" || strings.TrimSpace(windowID) == "" {
+func (m *Monitor) matches(sessionID string, windowID string) bool {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(windowID) == "" {
 		return false
 	}
-	return m.tmuxSession == tmuxSession && m.windowID == windowID
+	// In PTY mode, sessionID == tmuxSession == windowID == terminalID.
+	// Match if session ID matches directly.
+	if m.sessionID == sessionID {
+		return true
+	}
+	// Legacy tmux matching path.
+	return m.tmuxSession == sessionID && m.windowID == windowID
 }

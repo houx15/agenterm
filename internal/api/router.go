@@ -14,29 +14,7 @@ import (
 	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/session"
-	"github.com/user/agenterm/internal/tmux"
 )
-
-type gateway interface {
-	NewWindow(name, defaultDir string) error
-	ListWindows() []tmux.Window
-	SendKeys(windowID string, keys string) error
-	SendRaw(windowID string, keys string) error
-}
-
-type sessionGateway interface {
-	ListWindows() []tmux.Window
-	SendKeys(windowID string, keys string) error
-	SendRaw(windowID string, keys string) error
-}
-
-type sessionManager interface {
-	CreateSession(name string, workDir string) (*tmux.Gateway, error)
-	AttachSession(name string) (*tmux.Gateway, error)
-	GetGateway(name string) (*tmux.Gateway, error)
-	DestroySession(name string) error
-	ListSessions() []string
-}
 
 type handler struct {
 	projectRepo             *db.ProjectRepo
@@ -55,14 +33,11 @@ type handler struct {
 	demandPoolRepo          *db.DemandPoolRepo
 	registry                *registry.Registry
 	playbookRegistry        *playbook.Registry
-	gw                      gateway
-	manager                 sessionManager
 	lifecycle               *session.Manager
 	hub                     *hub.Hub
 	orchestrator            *orchestrator.Orchestrator
 	demandOrchestrator      *orchestrator.Orchestrator
 	asrTranscriber          asrTranscriber
-	tmuxSession             string
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
@@ -71,10 +46,7 @@ type handler struct {
 	resolvedException map[string]map[string]bool
 }
 
-func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, demandOrchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
-	if lifecycle == nil {
-		lifecycle = session.NewManager(conn, manager, agentRegistry, hubInst)
-	}
+func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, demandOrchestratorInst *orchestrator.Orchestrator, token string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
 	handler := &handler{
 		projectRepo:             db.NewProjectRepo(conn),
 		taskRepo:                db.NewTaskRepo(conn),
@@ -92,14 +64,11 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		demandPoolRepo:          db.NewDemandPoolRepo(conn),
 		registry:                agentRegistry,
 		playbookRegistry:        playbookRegistry,
-		gw:                      gw,
-		manager:                 manager,
 		lifecycle:               lifecycle,
 		hub:                     hubInst,
 		orchestrator:            orchestratorInst,
 		demandOrchestrator:      demandOrchestratorInst,
 		asrTranscriber:          newVolcASRTranscriber(),
-		tmuxSession:             tmuxSession,
 		outputState:             make(map[string]*windowOutputState),
 		resolvedException:       make(map[string]map[string]bool),
 	}

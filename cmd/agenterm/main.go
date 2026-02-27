@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/user/agenterm/internal/api"
 	"github.com/user/agenterm/internal/automation"
@@ -22,113 +20,85 @@ import (
 	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/playbook"
+	"github.com/user/agenterm/internal/pty"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
 	"github.com/user/agenterm/internal/session"
-	"github.com/user/agenterm/internal/tmux"
 )
 
 var version = "0.1.0"
 
+// sessionRuntime holds the parser for a single PTY session.
 type sessionRuntime struct {
-	gateway *tmux.Gateway
-	parser  *parser.Parser
+	parser *parser.Parser
 }
 
 type runtimeState struct {
-	cfg            *config.Config
-	manager        *tmux.Manager
-	hub            *hub.Hub
-	lifecycle      *session.Manager
-	mu             sync.RWMutex
-	sessions       map[string]*sessionRuntime
-	windowToSessID map[string]string
+	cfg       *config.Config
+	backend   *pty.Backend
+	hub       *hub.Hub
+	lifecycle *session.Manager
+
+	mu       sync.RWMutex
+	sessions map[string]*sessionRuntime
 }
 
-func newRuntimeState(cfg *config.Config, manager *tmux.Manager, h *hub.Hub, lifecycle *session.Manager) *runtimeState {
+func newRuntimeState(cfg *config.Config, backend *pty.Backend, h *hub.Hub, lifecycle *session.Manager) *runtimeState {
 	return &runtimeState{
-		cfg:            cfg,
-		manager:        manager,
-		hub:            h,
-		lifecycle:      lifecycle,
-		sessions:       make(map[string]*sessionRuntime),
-		windowToSessID: make(map[string]string),
+		cfg:       cfg,
+		backend:   backend,
+		hub:       h,
+		lifecycle: lifecycle,
+		sessions:  make(map[string]*sessionRuntime),
 	}
 }
 
-func (s *runtimeState) resolveSessionID(sessionID string, windowID string) string {
-	if sessionID != "" {
-		return sessionID
-	}
-	if windowID != "" {
-		s.mu.RLock()
-		mapped := s.windowToSessID[windowID]
-		s.mu.RUnlock()
-		if mapped != "" {
-			return mapped
-		}
-	}
-	return s.cfg.TmuxSession
-}
-
-func (s *runtimeState) ensureSession(ctx context.Context, sessionID string) (*sessionRuntime, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		sessionID = s.cfg.TmuxSession
-	}
-
-	s.mu.RLock()
-	if rt, ok := s.sessions[sessionID]; ok {
-		s.mu.RUnlock()
-		return rt, nil
-	}
-	s.mu.RUnlock()
-
-	gw, err := s.manager.AttachSession(sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	rt := &sessionRuntime{gateway: gw, parser: parser.New()}
-
+// ensureSessionLoop starts reading events from the PTY backend for
+// the given session and forwards them to the hub and parser.
+func (s *runtimeState) ensureSessionLoop(ctx context.Context, sessionID string) {
 	s.mu.Lock()
-	if existing, ok := s.sessions[sessionID]; ok {
+	if _, ok := s.sessions[sessionID]; ok {
 		s.mu.Unlock()
-		rt.parser.Close()
-		return existing, nil
+		return
 	}
+	rt := &sessionRuntime{parser: parser.New()}
 	s.sessions[sessionID] = rt
 	s.mu.Unlock()
 
-	s.registerWindows(sessionID, gw.ListWindows())
 	s.broadcastWindows()
-	s.startSessionLoops(ctx, sessionID, rt)
 
-	return rt, nil
-}
+	events := s.backend.Events(sessionID)
+	if events == nil {
+		return
+	}
 
-func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, rt *sessionRuntime) {
+	// Event forwarding loop.
 	go func() {
-		for event := range rt.gateway.Events() {
-			switch event.Type {
-			case tmux.EventOutput:
-				if event.WindowID != "" {
-					s.setWindowSession(event.WindowID, sessionID)
-					s.hub.BroadcastTerminal(hub.TerminalDataMessage{
-						Type:      "terminal_data",
-						SessionID: sessionID,
-						Window:    event.WindowID,
-						Text:      event.Data,
-					})
-				}
-				rt.parser.Feed(event.WindowID, event.Data)
-			case tmux.EventWindowAdd, tmux.EventWindowClose, tmux.EventWindowRenamed:
-				s.registerWindows(sessionID, rt.gateway.ListWindows())
+		for evt := range events {
+			switch evt.Type {
+			case pty.EventOutput:
+				s.hub.BroadcastTerminal(hub.TerminalDataMessage{
+					Type:      "terminal_data",
+					SessionID: sessionID,
+					Window:    sessionID,
+					Text:      evt.Data,
+				})
+				rt.parser.Feed(sessionID, evt.Data)
+			case pty.EventClosed:
 				s.broadcastWindows()
 			}
 		}
+		// Session ended — clean up.
+		s.mu.Lock()
+		if current := s.sessions[sessionID]; current == rt {
+			delete(s.sessions, sessionID)
+		}
+		s.mu.Unlock()
+		rt.parser.Close()
+		s.broadcastWindows()
 	}()
 
+	// Parser output forwarding.
 	go func() {
 		for msg := range rt.parser.Messages() {
 			if s.lifecycle != nil {
@@ -147,6 +117,7 @@ func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, 
 		}
 	}()
 
+	// Periodic status broadcast.
 	go func() {
 		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
@@ -155,135 +126,58 @@ func (s *runtimeState) startSessionLoops(ctx context.Context, sessionID string, 
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				windows := rt.gateway.ListWindows()
-				s.registerWindows(sessionID, windows)
-				for _, w := range windows {
-					status := rt.parser.Status(w.ID)
-					s.hub.BroadcastStatusForSession(sessionID, w.ID, string(status))
+				s.mu.RLock()
+				_, alive := s.sessions[sessionID]
+				s.mu.RUnlock()
+				if !alive {
+					return
 				}
+				status := rt.parser.Status(sessionID)
+				s.hub.BroadcastStatusForSession(sessionID, sessionID, string(status))
 			}
 		}
 	}()
 }
 
-func (s *runtimeState) setWindowSession(windowID string, sessionID string) {
-	s.mu.Lock()
-	s.windowToSessID[windowID] = sessionID
-	s.mu.Unlock()
-}
-
-func (s *runtimeState) registerWindows(sessionID string, windows []tmux.Window) {
-	s.mu.Lock()
-	for _, w := range windows {
-		s.windowToSessID[w.ID] = sessionID
-	}
-	s.mu.Unlock()
-}
-
 func (s *runtimeState) broadcastWindows() {
-	s.mu.RLock()
-	all := make([]hub.WindowInfo, 0)
-	for sessionID, rt := range s.sessions {
-		all = append(all, convertWindows(sessionID, rt.gateway.ListWindows())...)
+	infos := s.backend.Manager().ListSessions()
+	windows := make([]hub.WindowInfo, 0, len(infos))
+	for _, info := range infos {
+		if !info.Active {
+			continue
+		}
+		windows = append(windows, hub.WindowInfo{
+			ID:        info.ID,
+			SessionID: info.ID,
+			Name:      info.Name,
+			Status:    string(parser.StatusIdle),
+		})
 	}
-	s.mu.RUnlock()
-	s.hub.BroadcastWindows(all)
+	s.hub.BroadcastWindows(windows)
 }
 
-func (s *runtimeState) sendKeys(ctx context.Context, sessionID string, windowID string, keys string) error {
-	targetSession := s.resolveSessionID(sessionID, windowID)
-	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
-		return rt.gateway.SendKeys(windowID, keys)
-	})
+func (s *runtimeState) sendKeys(_ context.Context, sessionID string, windowID string, keys string) error {
+	id := sessionID
+	if id == "" {
+		id = windowID
+	}
+	return s.backend.SendInput(context.Background(), id, keys)
 }
 
-func (s *runtimeState) sendRaw(ctx context.Context, sessionID string, windowID string, keys string) error {
-	targetSession := s.resolveSessionID(sessionID, windowID)
-	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
-		return rt.gateway.SendRaw(windowID, keys)
-	})
+func (s *runtimeState) sendRaw(_ context.Context, sessionID string, windowID string, keys string) error {
+	id := sessionID
+	if id == "" {
+		id = windowID
+	}
+	return s.backend.SendInput(context.Background(), id, keys)
 }
 
-func (s *runtimeState) resizeWindow(ctx context.Context, sessionID string, windowID string, cols int, rows int) error {
-	targetSession := s.resolveSessionID(sessionID, windowID)
-	return s.withGatewayRetry(ctx, targetSession, windowID, func(rt *sessionRuntime) error {
-		return rt.gateway.ResizeWindow(windowID, cols, rows)
-	})
-}
-
-func (s *runtimeState) withGatewayRetry(ctx context.Context, sessionID string, windowID string, op func(rt *sessionRuntime) error) error {
-	rt, err := s.ensureSession(ctx, sessionID)
-	if err != nil {
-		return err
+func (s *runtimeState) resizeWindow(_ context.Context, sessionID string, windowID string, cols int, rows int) error {
+	id := sessionID
+	if id == "" {
+		id = windowID
 	}
-	if err := op(rt); err == nil {
-		return nil
-	} else if !isRecoverableGatewayError(err) {
-		return err
-	}
-
-	// Drop stale gateway/parser runtime and re-attach once, then retry the operation.
-	s.invalidateSessionRuntime(sessionID, windowID)
-	rt, err = s.ensureSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	return op(rt)
-}
-
-func isRecoverableGatewayError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "closed pipe") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "not started")
-}
-
-func (s *runtimeState) invalidateSessionRuntime(sessionID string, windowID string) {
-	s.mu.Lock()
-	rt, ok := s.sessions[sessionID]
-	if ok {
-		delete(s.sessions, sessionID)
-	}
-	if strings.TrimSpace(windowID) != "" {
-		delete(s.windowToSessID, windowID)
-	}
-	s.mu.Unlock()
-	if rt != nil && rt.parser != nil {
-		rt.parser.Close()
-	}
-}
-
-func (s *runtimeState) newWindow(ctx context.Context, sessionID string, name string) error {
-	targetSession := s.resolveSessionID(sessionID, "")
-	rt, err := s.ensureSession(ctx, targetSession)
-	if err != nil {
-		return err
-	}
-	if err := rt.gateway.NewWindow(name, s.cfg.DefaultDir); err != nil {
-		return err
-	}
-	time.Sleep(100 * time.Millisecond)
-	s.registerWindows(targetSession, rt.gateway.ListWindows())
-	s.broadcastWindows()
-	return nil
-}
-
-func (s *runtimeState) killWindow(ctx context.Context, sessionID string, windowID string) error {
-	targetSession := s.resolveSessionID(sessionID, windowID)
-	rt, err := s.ensureSession(ctx, targetSession)
-	if err != nil {
-		return err
-	}
-	if err := rt.gateway.KillWindow(windowID); err != nil {
-		return err
-	}
-	time.Sleep(100 * time.Millisecond)
-	s.broadcastWindows()
-	return nil
+	return s.backend.Resize(context.Background(), id, cols, rows)
 }
 
 func (s *runtimeState) close() {
@@ -293,16 +187,17 @@ func (s *runtimeState) close() {
 		parsers = append(parsers, rt.parser)
 	}
 	s.sessions = make(map[string]*sessionRuntime)
-	s.windowToSessID = make(map[string]string)
 	s.mu.Unlock()
 
-	s.manager.Close()
+	s.backend.Close()
 	for _, p := range parsers {
 		p.Close()
 	}
 }
 
-func (s *runtimeState) watchManagerSessions(ctx context.Context) {
+// watchManagedSessions polls PTY sessions created by the lifecycle manager
+// and ensures each one has an event-forwarding loop.
+func (s *runtimeState) watchManagedSessions(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -310,20 +205,13 @@ func (s *runtimeState) watchManagerSessions(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for _, sessionID := range s.manager.ListSessions() {
-				_, _ = s.ensureSession(ctx, sessionID)
+			for _, info := range s.backend.Manager().ListSessions() {
+				if info.Active {
+					s.ensureSessionLoop(ctx, info.ID)
+				}
 			}
 		}
 	}
-}
-
-func (s *runtimeState) defaultSessionWindows() []tmux.Window {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if rt, ok := s.sessions[s.cfg.TmuxSession]; ok {
-		return rt.gateway.ListWindows()
-	}
-	return nil
 }
 
 func main() {
@@ -362,30 +250,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	manager := tmux.NewManager(cfg.DefaultDir)
+	backend := pty.NewBackend()
 	h := hub.New(cfg.Token, nil)
-	lifecycleManager := session.NewManager(appDB.SQL(), manager, agentRegistry, h)
-	state := newRuntimeState(cfg, manager, h, lifecycleManager)
+	lifecycleManager := session.NewManager(appDB.SQL(), backend, agentRegistry, h)
+	state := newRuntimeState(cfg, backend, h, lifecycleManager)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	if _, err := state.ensureSession(ctx, cfg.TmuxSession); err != nil {
-		if errors.Is(err, tmux.ErrSessionNotFound) {
-			slog.Info("default tmux session not found, creating", "session", cfg.TmuxSession)
-			if _, createErr := manager.CreateSession(cfg.TmuxSession, cfg.DefaultDir); createErr != nil {
-				slog.Error("failed to create default tmux session", "session", cfg.TmuxSession, "error", createErr)
-				os.Exit(1)
-			}
-			if _, retryErr := state.ensureSession(ctx, cfg.TmuxSession); retryErr != nil {
-				slog.Error("failed to attach created default tmux session", "session", cfg.TmuxSession, "error", retryErr)
-				os.Exit(1)
-			}
-		} else {
-			slog.Error("failed to attach default tmux session", "session", cfg.TmuxSession, "error", err)
-			os.Exit(1)
-		}
-	}
+	// --- Hub callbacks for terminal I/O ---
 
 	h.SetOnInputWithSession(func(sessionID string, windowID string, keys string) {
 		if err := state.sendKeys(ctx, sessionID, windowID, keys); err != nil {
@@ -403,41 +276,26 @@ func main() {
 		}
 	})
 	h.SetOnNewWindowWithSession(func(sessionID string, name string) {
-		if err := state.newWindow(ctx, sessionID, name); err != nil {
-			slog.Error("failed to create window", "session", sessionID, "error", err)
-		}
+		// In PTY mode, new windows are created as new sessions via the API.
+		slog.Debug("new window request ignored in PTY mode", "session", sessionID, "name", name)
 	})
 	h.SetOnNewSessionWithSession(func(_ string, name string) {
-		sessionName := normalizeSessionName(name)
-		if sessionName == "" {
-			slog.Error("failed to create session", "error", "session name is required")
-			return
+		// In PTY mode, sessions are created through the lifecycle manager.
+		slog.Debug("new session request ignored in PTY mode", "name", name)
+	})
+	h.SetOnKillWindowWithSession(func(sessionID string, windowID string) {
+		id := sessionID
+		if id == "" {
+			id = windowID
 		}
-		if _, err := manager.CreateSession(sessionName, cfg.DefaultDir); err != nil {
-			// If already exists, attach instead.
-			if _, attachErr := manager.AttachSession(sessionName); attachErr != nil {
-				slog.Error("failed to create or attach session", "session", sessionName, "error", err)
-				return
-			}
-		}
-		if _, err := state.ensureSession(ctx, sessionName); err != nil {
-			slog.Error("failed to activate session", "session", sessionName, "error", err)
-			return
+		if err := backend.DestroySession(ctx, id); err != nil {
+			slog.Error("failed to kill session", "session", sessionID, "window", windowID, "error", err)
 		}
 		state.broadcastWindows()
 	})
-	h.SetOnKillWindowWithSession(func(sessionID string, windowID string) {
-		if err := state.killWindow(ctx, sessionID, windowID); err != nil {
-			slog.Error("failed to kill window", "session", sessionID, "window", windowID, "error", err)
-		}
-	})
 	h.SetDefaultDir(cfg.DefaultDir)
 
-	defaultGateway, err := manager.GetGateway(cfg.TmuxSession)
-	if err != nil {
-		slog.Error("failed to resolve default gateway", "session", cfg.TmuxSession, "error", err)
-		os.Exit(1)
-	}
+	// --- Start lifecycle manager ---
 
 	if lifecycleManager != nil {
 		if err := lifecycleManager.Start(ctx); err != nil {
@@ -445,6 +303,8 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	// --- Repos ---
 
 	projectRepo := db.NewProjectRepo(appDB.SQL())
 	taskRepo := db.NewTaskRepo(appDB.SQL())
@@ -459,6 +319,8 @@ func main() {
 	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
 	roleAgentAssignRepo := db.NewRoleAgentAssignmentRepo(appDB.SQL())
 	roleLoopAttemptRepo := db.NewRoleLoopAttemptRepo(appDB.SQL())
+
+	// --- Automation ---
 
 	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
 		Interval:     30 * time.Second,
@@ -521,12 +383,14 @@ func main() {
 		return strings.TrimSpace(task.WorktreeID)
 	}
 
+	// --- Attach/Detach callbacks (must come after coordinator & autoCommitter are declared) ---
+
 	h.SetOnTerminalAttach(func(sessionID string) {
 		if strings.TrimSpace(sessionID) == "" {
 			return
 		}
-		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer callCancel()
 		if lifecycleManager != nil {
 			if err := lifecycleManager.SetTakeover(callCtx, sessionID, true); err != nil {
 				slog.Debug("failed to set human takeover", "session", sessionID, "error", err)
@@ -542,8 +406,8 @@ func main() {
 		if strings.TrimSpace(sessionID) == "" {
 			return
 		}
-		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer callCancel()
 		if lifecycleManager != nil {
 			if err := lifecycleManager.SetTakeover(callCtx, sessionID, false); err != nil {
 				slog.Debug("failed to clear human takeover", "session", sessionID, "error", err)
@@ -555,6 +419,8 @@ func main() {
 		}
 	})
 
+	// --- Ensure default orchestrator settings ---
+
 	if projects, err := projectRepo.List(ctx, db.ProjectFilter{}); err == nil {
 		for _, p := range projects {
 			if p == nil {
@@ -563,6 +429,8 @@ func main() {
 			_ = projectOrchestratorRepo.EnsureDefaultForProject(ctx, p.ID)
 		}
 	}
+
+	// --- Orchestrator ---
 
 	toolClient := &orchestrator.RESTToolClient{
 		BaseURL:    fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
@@ -642,13 +510,15 @@ func main() {
 		return out, nil
 	})
 
+	// --- Event triggers and automation runners ---
+
 	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo, worktreeRepo)
 	eventTrigger.SetOnEvent(func(projectID string, event string, data map[string]any) {
 		h.BroadcastProjectEvent(projectID, event, data)
 	})
 	autoCommitter.SetOnReadyForReview(func(worktreeID string, commitHash string) {
-		callCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer callCancel()
 		wt, err := worktreeRepo.Get(callCtx, worktreeID)
 		if err != nil || wt == nil {
 			return
@@ -700,7 +570,9 @@ func main() {
 		}
 	}()
 
-	apiRouter := api.NewRouter(appDB.SQL(), defaultGateway, manager, lifecycleManager, h, orchestratorInst, demandOrchestratorInst, cfg.Token, cfg.TmuxSession, agentRegistry, playbookRegistry)
+	// --- Server ---
+
+	apiRouter := api.NewRouter(appDB.SQL(), lifecycleManager, h, orchestratorInst, demandOrchestratorInst, cfg.Token, agentRegistry, playbookRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
@@ -708,10 +580,10 @@ func main() {
 	}
 
 	go h.Run(ctx)
-	go state.watchManagerSessions(ctx)
+	go state.watchManagedSessions(ctx)
 	state.broadcastWindows()
 
-	printStartupBanner(cfg, state.defaultSessionWindows())
+	printStartupBanner(cfg)
 
 	if err := srv.Start(ctx); err != nil {
 		slog.Error("server error", "error", err)
@@ -721,18 +593,9 @@ func main() {
 	gracefulShutdown(state, h, lifecycleManager)
 }
 
-func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
-	var windowNames []string
-	for _, w := range windows {
-		windowNames = append(windowNames, w.Name)
-	}
-	windowsStr := "none"
-	if len(windowNames) > 0 {
-		windowsStr = fmt.Sprintf("%d (%s)", len(windowNames), strings.Join(windowNames, ", "))
-	}
-
+func printStartupBanner(cfg *config.Config) {
 	fmt.Printf("\nagenterm v%s\n", version)
-	fmt.Printf("  tmux session: %s\n", cfg.TmuxSession)
+	fmt.Printf("  backend:      pty\n")
 	fmt.Printf("  listening on: http://0.0.0.0:%d\n", cfg.Port)
 	if cfg.PrintToken {
 		fmt.Printf("  access URL:   http://localhost:%d?token=%s\n", cfg.Port, cfg.Token)
@@ -740,21 +603,7 @@ func printStartupBanner(cfg *config.Config, windows []tmux.Window) {
 		fmt.Printf("  access URL:   http://localhost:%d?token=<token>\n", cfg.Port)
 		fmt.Printf("  (use --print-token to reveal token)\n")
 	}
-	fmt.Printf("  windows:      %s\n", windowsStr)
 	fmt.Println("\nCtrl+C to stop")
-}
-
-func convertWindows(sessionID string, windows []tmux.Window) []hub.WindowInfo {
-	result := make([]hub.WindowInfo, len(windows))
-	for i, w := range windows {
-		result[i] = hub.WindowInfo{
-			ID:        w.ID,
-			SessionID: sessionID,
-			Name:      w.Name,
-			Status:    string(parser.StatusIdle),
-		}
-	}
-	return result
 }
 
 func convertActions(actions []parser.QuickAction) []hub.ActionMessage {
@@ -778,25 +627,4 @@ func gracefulShutdown(state *runtimeState, h *hub.Hub, lifecycle *session.Manage
 	state.close()
 
 	slog.Info("agenterm stopped")
-}
-
-func normalizeSessionName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range strings.ToLower(name) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
 }
