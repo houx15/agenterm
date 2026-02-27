@@ -183,3 +183,170 @@ export function Moon({ size, ...props }: IconProps) {
     </IconBase>
   )
 }
+
+export function PanelRight({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M15 3v18" />
+    </IconBase>
+  )
+}
+
+export function PanelLeft({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+    </IconBase>
+  )
+}
+
+export function Bot({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M12 8V4H8" />
+      <rect width="16" height="12" x="4" y="8" rx="2" />
+      <path d="M2 14h2" />
+      <path d="M20 14h2" />
+      <path d="M15 13v2" />
+      <path d="M9 13v2" />
+    </IconBase>
+  )
+}
+
+export function TerminalIcon({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M12 19h8" />
+      <path d="m4 17 6-6-6-6" />
+    </IconBase>
+  )
+}
+
+export function Layers({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z" />
+      <path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12" />
+      <path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17" />
+    </IconBase>
+  )
+}
+
+export function QrCode({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect width="5" height="5" x="3" y="3" rx="1" />
+      <rect width="5" height="5" x="16" y="3" rx="1" />
+      <rect width="5" height="5" x="3" y="16" rx="1" />
+      <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+      <path d="M21 21v.01" />
+      <path d="M12 7v3a2 2 0 0 1-2 2H7" />
+      <path d="M3 12h.01" />
+      <path d="M12 3h.01" />
+      <path d="M12 16v.01" />
+      <path d="M16 12h1" />
+      <path d="M21 12v.01" />
+      <path d="M12 21v-1" />
+    </IconBase>
+  )
+}
+
+export function Inbox({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </IconBase>
+  )
+}
+
+export function X({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </IconBase>
+  )
+}
+
+export function Maximize2({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M15 3h6v6" />
+      <path d="m21 3-7 7" />
+      <path d="m3 21 7-7" />
+      <path d="M9 21H3v-6" />
+    </IconBase>
+  )
+}
+
+export function Minimize2({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="m14 10 7-7" />
+      <path d="M20 10h-6V4" />
+      <path d="m3 21 7-7" />
+      <path d="M4 14h6v6" />
+    </IconBase>
+  )
+}
+
+export function Circle({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <circle cx="12" cy="12" r="10" />
+    </IconBase>
+  )
+}
+
+export function CircleDot({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="1" />
+    </IconBase>
+  )
+}
+
+export function ArrowRight({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </IconBase>
+  )
+}
+
+export function Trash2({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </IconBase>
+  )
+}
+
+export function Pencil({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
+    </IconBase>
+  )
+}
+
+export function RefreshCw({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </IconBase>
+  )
+}

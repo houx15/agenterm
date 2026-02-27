@@ -2357,6 +2357,72 @@ textarea {
   font-size: 0.82rem;
 }
 
+/* Stage Pipeline */
+
+.stage-pipeline-wrapper {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.stage-pipeline-header {
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.stage-pipeline-header:hover {
+  color: var(--text-primary);
+}
+
+.stage-pipeline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.stage-chip {
+  display: inline-block;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+}
+
+.stage-chip.done {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+  color: var(--success);
+}
+
+.stage-chip.active {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.stage-chip.pending {
+  background: color-mix(in oklab, var(--text-dim) 12%, transparent);
+  color: var(--text-dim);
+}
+
+.stage-arrow {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  opacity: 0.55;
+}
+
+.stage-build-detail {
+  padding-left: 1rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 0.25rem;
+}
+
 @media (max-width: 900px) {
   .stats-grid {
     grid-template-columns: 1fr;
