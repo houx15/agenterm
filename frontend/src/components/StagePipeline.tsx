@@ -9,6 +9,14 @@ interface StagePipelineProps {
 
 const STAGES = ['brainstorm', 'plan', 'build', 'test', 'summarize'] as const
 
+const STAGE_TOOLTIPS: Record<string, string> = {
+  brainstorm: 'Generate solution approaches and select a design direction',
+  plan: 'Analyze codebase and produce staged implementation plan',
+  build: 'Execute plan — dispatch coding and review sessions',
+  test: 'Verify implementation against specs and run test suites',
+  summarize: 'Collect artifacts and generate final project summary',
+}
+
 interface WorktreeGroup {
   taskId: string
   entries: { role: string; agentType: string; status: string }[]
@@ -63,7 +71,7 @@ export default function StagePipeline({ currentPhase, sessions, collapsed, onTog
               return (
                 <span key={stage}>
                   {idx > 0 && <span className="stage-arrow">{'\u2192'}</span>}
-                  <span className={`stage-chip ${variant}`}>{stage}</span>
+                  <span className={`stage-chip ${variant}`} title={STAGE_TOOLTIPS[stage] ?? ''}>{stage}</span>
                 </span>
               )
             })}
