@@ -1,16 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { getToken } from './api/client'
 import type { ClientMessage, ServerMessage, WindowInfo } from './api/types'
 import { useWebSocket } from './hooks/useWebSocket'
-import Layout from './components/Layout'
-import Dashboard from './pages/Dashboard'
-import PMChat from './pages/PMChat'
-import ProjectDetail from './pages/ProjectDetail'
-import Sessions from './pages/Sessions'
-import Settings from './pages/Settings'
 import MobileCompanion from './pages/MobileCompanion'
-import ConnectMobile from './pages/ConnectMobile'
+import Workspace from './components/Workspace'
 
 interface AppContextValue {
   token: string
@@ -25,27 +18,6 @@ interface AppContextValue {
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
-
-const router = createBrowserRouter([
-  {
-    path: '/mobile',
-    element: <MobileCompanion />,
-  },
-  {
-    path: '/',
-    element: <Layout />,
-    children: [
-      { index: true, element: <PMChat /> },
-      { path: 'stats', element: <Dashboard /> },
-      { path: 'connect', element: <ConnectMobile /> },
-      { path: 'pm-chat', element: <PMChat /> },
-      { path: 'projects/:projectId', element: <ProjectDetail /> },
-      { path: 'sessions', element: <Sessions /> },
-      { path: 'sessions/:windowId', element: <Sessions /> },
-      { path: 'settings', element: <Settings /> },
-    ],
-  },
-])
 
 export function useAppContext(): AppContextValue {
   const value = useContext(AppContext)
@@ -127,7 +99,7 @@ export default function App() {
 
   return (
     <AppContext.Provider value={value}>
-      <RouterProvider router={router} />
+      {window.location.pathname === '/mobile' ? <MobileCompanion /> : <Workspace />}
     </AppContext.Provider>
   )
 }
