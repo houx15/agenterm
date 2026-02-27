@@ -106,6 +106,13 @@ func (s *Session) waitExit() {
 	close(s.events)
 }
 
+// IsClosed returns true if the session has been closed.
+func (s *Session) IsClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 // ID returns the session identifier.
 func (s *Session) ID() string { return s.id }
 
