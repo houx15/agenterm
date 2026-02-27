@@ -59,7 +59,7 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	if !contains(prompt, "Never send commands to sessions in status human_takeover") {
 		t.Fatalf("prompt missing safety rule")
 	}
-	if !contains(prompt, "You are a coordinator, not a coding worker") {
+	if !contains(prompt, "You are an auxiliary coordinator: TUI agents are primary actors") {
 		t.Fatalf("prompt missing coordinator-only rule")
 	}
 	if !contains(prompt, "Active execution stage: plan") {
@@ -630,6 +630,93 @@ func TestCreateSessionRespectsRetryPolicyMaxIterations(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "max_iterations reached") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateSessionUsesDefaultMaxIterationsWhenUnset(t *testing.T) {
+	database := openOrchestratorTestDB(t)
+	projectRepo := db.NewProjectRepo(database.SQL())
+	taskRepo := db.NewTaskRepo(database.SQL())
+	sessionRepo := db.NewSessionRepo(database.SQL())
+
+	pbRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
+	if err != nil {
+		t.Fatalf("new playbook registry: %v", err)
+	}
+	if err := pbRegistry.Save(&playbook.Playbook{
+		ID:          "default-cap-playbook",
+		Name:        "Default Cap",
+		Description: "desc",
+		Workflow: playbook.Workflow{
+			Plan: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+			Build: playbook.Stage{Enabled: true, Roles: []playbook.StageRole{{
+				Name:             "worker",
+				Mode:             "worker",
+				Responsibilities: "code",
+				AllowedAgents:    []string{"codex"},
+				ActionsAllowed:   []string{"create_session"},
+				RetryPolicy:      playbook.RetryPolicy{MaxIterations: 0}, // unset — should default to 20
+			}}},
+			Test: playbook.Stage{Enabled: false, Roles: []playbook.StageRole{}},
+		},
+	}); err != nil {
+		t.Fatalf("save playbook: %v", err)
+	}
+
+	project := &db.Project{Name: "DefaultCapProject", RepoPath: t.TempDir(), Status: "active", Playbook: "default-cap-playbook"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &db.Task{ProjectID: project.ID, Title: "T1", Description: "D", Status: "running"}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	o := New(Options{
+		ProjectRepo:      projectRepo,
+		TaskRepo:         taskRepo,
+		SessionRepo:      sessionRepo,
+		PlaybookRegistry: pbRegistry,
+		Toolset: &Toolset{
+			tools: map[string]Tool{
+				"create_session": {
+					Name: "create_session",
+					Execute: func(ctx context.Context, args map[string]any) (any, error) {
+						return map[string]any{"status": "created"}, nil
+					},
+				},
+			},
+		},
+	})
+
+	// First 20 calls should succeed (default cap is 20).
+	for i := 0; i < 20; i++ {
+		if _, err := o.executeTool(context.Background(), "create_session", map[string]any{
+			"task_id":    task.ID,
+			"role":       "worker",
+			"agent_type": "codex",
+		}); err != nil {
+			t.Fatalf("create_session attempt %d failed unexpectedly: %v", i+1, err)
+		}
+	}
+
+	// The 21st call should be blocked by the default cap.
+	_, err = o.executeTool(context.Background(), "create_session", map[string]any{
+		"task_id":    task.ID,
+		"role":       "worker",
+		"agent_type": "codex",
+	})
+	if err == nil {
+		t.Fatalf("expected default cap block on attempt 21")
+	}
+	if !strings.Contains(err.Error(), "max_iterations reached") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "20/20") {
+		t.Fatalf("expected default cap of 20 in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "diagnostic:") {
+		t.Fatalf("expected diagnostic escalation info in error, got: %v", err)
 	}
 }
 
