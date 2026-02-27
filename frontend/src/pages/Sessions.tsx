@@ -139,7 +139,12 @@ export default function Sessions() {
   }, [app.lastMessage])
 
   useEffect(() => {
-    saveTerminalReplay(rawBuffers)
+    const timer = window.setTimeout(() => {
+      saveTerminalReplay(rawBuffers)
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+    }
   }, [rawBuffers])
 
   const refreshWindowSnapshot = useCallback(async () => {
