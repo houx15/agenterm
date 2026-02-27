@@ -8,3 +8,5 @@ web/node_modules/
 frontend/node_modules/
 frontend/.vite/
 src-tauri/target/
+reference/*
+reference
