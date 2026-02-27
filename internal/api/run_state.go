@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -91,6 +92,11 @@ func (h *handler) transitionProjectRun(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusNotFound, "run not found")
 		return
 	}
+	currentStage := strings.ToLower(strings.TrimSpace(run.CurrentStage))
+	if err := validateProjectRunTransition(currentStage, stage); err != nil {
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	evidenceJSON := ""
 	if len(req.Evidence) > 0 {
@@ -102,6 +108,13 @@ func (h *handler) transitionProjectRun(w http.ResponseWriter, r *http.Request) {
 		evidenceJSON = string(buf)
 	}
 
+	if currentStage != "" && currentStage != stage {
+		previousEvidence, _ := json.Marshal(map[string]any{
+			"transition_to": stage,
+			"reason":        "stage_transition",
+		})
+		_ = h.runRepo.UpsertStageRun(r.Context(), runID, currentStage, "completed", string(previousEvidence))
+	}
 	if err := h.runRepo.UpdateStage(r.Context(), runID, stage, status); err != nil {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
@@ -152,4 +165,21 @@ func deriveProjectStageFromTasks(tasks []*db.Task) string {
 		return "test"
 	}
 	return "build"
+}
+
+func validateProjectRunTransition(currentStage string, targetStage string) error {
+	currentStage = strings.ToLower(strings.TrimSpace(currentStage))
+	targetStage = strings.ToLower(strings.TrimSpace(targetStage))
+	if currentStage == "" || currentStage == targetStage {
+		return nil
+	}
+	allowed := map[string]string{
+		"plan":  "build",
+		"build": "test",
+	}
+	next := allowed[currentStage]
+	if next == targetStage {
+		return nil
+	}
+	return fmt.Errorf("invalid stage transition: %s -> %s", currentStage, targetStage)
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1014,6 +1015,16 @@ func (h *handler) confirmProjectAssignments(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if h.runRepo != nil {
+		run, err := h.runRepo.GetActiveByProject(r.Context(), projectID)
+		if err == nil && run != nil {
+			evidence, _ := json.Marshal(map[string]any{
+				"assignment_count": len(saved),
+				"event":            "assignment_confirmed",
+			})
+			_ = h.runRepo.UpsertStageRun(r.Context(), run.ID, run.CurrentStage, "active", string(evidence))
+		}
 	}
 	if h.hub != nil {
 		h.hub.BroadcastProjectEvent(projectID, "assignment_state", map[string]any{

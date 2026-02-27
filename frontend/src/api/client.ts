@@ -193,6 +193,19 @@ export function getOrchestratorReport<T>(projectID: string) {
   return apiFetch<T>(`/api/orchestrator/report?${params.toString()}`)
 }
 
+export function listOrchestratorExceptions<T>(projectID: string, status: 'open' | 'resolved' | 'all' = 'open') {
+  const params = new URLSearchParams()
+  params.set('status', status)
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/orchestrator/exceptions?${params.toString()}`)
+}
+
+export function resolveOrchestratorException<T>(projectID: string, exceptionID: string, status: 'resolved' | 'open' = 'resolved') {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}/orchestrator/exceptions/${encodeURIComponent(exceptionID)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  })
+}
+
 export function chatDemandOrchestrator<T>(input: { project_id: string; message: string }) {
   return apiFetch<T>('/api/demand-orchestrator/chat', {
     method: 'POST',

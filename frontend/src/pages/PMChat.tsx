@@ -1,7 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { deleteProject, getOrchestratorReport, listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { OrchestratorProgressReport, OrchestratorServerMessage, Project, Session, Task } from '../api/types'
+import {
+  deleteProject,
+  getOrchestratorReport,
+  listOrchestratorExceptions,
+  listProjects,
+  listProjectTasks,
+  listSessions,
+  resolveOrchestratorException,
+} from '../api/client'
+import type {
+  OrchestratorExceptionItem,
+  OrchestratorExceptionListResponse,
+  OrchestratorProgressReport,
+  OrchestratorServerMessage,
+  Project,
+  Session,
+  Task,
+} from '../api/types'
 import { useAppContext } from '../App'
 import ChatPanel from '../components/ChatPanel'
 import type { MessageTaskLink, SessionMessage } from '../components/ChatMessage'
@@ -36,6 +52,11 @@ export default function PMChat() {
   const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
   const [reportError, setReportError] = useState('')
+  const [exceptions, setExceptions] = useState<OrchestratorExceptionItem[]>([])
+  const [exceptionCounts, setExceptionCounts] = useState<{ total: number; open: number; resolved: number }>({ total: 0, open: 0, resolved: 0 })
+  const [exceptionsLoading, setExceptionsLoading] = useState(false)
+  const [exceptionsError, setExceptionsError] = useState('')
+  const [exceptionsCollapsed, setExceptionsCollapsed] = useState(false)
   const [activePane, setActivePane] = useState<'execution' | 'demand'>('execution')
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
@@ -101,8 +122,9 @@ export default function PMChat() {
   useEffect(() => {
     if (shouldRefreshFromOrchestratorEvent(orchestrator.lastEvent)) {
       void refreshProjectData()
+      void refreshExceptions()
     }
-  }, [orchestrator.lastEvent, refreshProjectData])
+  }, [orchestrator.lastEvent, refreshExceptions, refreshProjectData])
 
   useEffect(() => {
     if (!app.lastMessage || app.lastMessage.type !== 'project_event' || app.lastMessage.project_id !== projectID) {
@@ -116,6 +138,10 @@ export default function PMChat() {
     setReportUpdatedAt(null)
     setReportError('')
     setReportLoading(false)
+    setExceptions([])
+    setExceptionCounts({ total: 0, open: 0, resolved: 0 })
+    setExceptionsError('')
+    setExceptionsLoading(false)
   }, [projectID])
 
   const sessionsByTask = useMemo(() => {
@@ -207,6 +233,29 @@ export default function PMChat() {
     }
   }, [projectID])
 
+  const refreshExceptions = useCallback(async () => {
+    if (!projectID) {
+      setExceptions([])
+      setExceptionCounts({ total: 0, open: 0, resolved: 0 })
+      return
+    }
+    setExceptionsLoading(true)
+    setExceptionsError('')
+    try {
+      const response = await listOrchestratorExceptions<OrchestratorExceptionListResponse>(projectID, 'open')
+      setExceptions(response.items ?? [])
+      setExceptionCounts(response.counts ?? { total: 0, open: 0, resolved: 0 })
+    } catch (err) {
+      setExceptionsError(err instanceof Error ? err.message : 'Failed to load exceptions')
+    } finally {
+      setExceptionsLoading(false)
+    }
+  }, [projectID])
+
+  useEffect(() => {
+    void refreshExceptions()
+  }, [refreshExceptions])
+
   const confirmDeleteProject = useCallback(async () => {
     if (!selectedProject) {
       return
@@ -224,6 +273,21 @@ export default function PMChat() {
       setDeletingProject(false)
     }
   }, [refreshAll, refreshProjectData, selectedProject])
+
+  const resolveException = useCallback(
+    async (exceptionID: string) => {
+      if (!projectID || !exceptionID) {
+        return
+      }
+      try {
+        await resolveOrchestratorException(projectID, exceptionID, 'resolved')
+        await refreshExceptions()
+      } catch (err) {
+        setExceptionsError(err instanceof Error ? err.message : 'Failed to resolve exception')
+      }
+    },
+    [projectID, refreshExceptions],
+  )
 
   const infoPanel = (
     <div className="pm-info-panel">
@@ -265,6 +329,44 @@ export default function PMChat() {
             {reportError && <p className="dashboard-error">{reportError}</p>}
             {!reportError && progressReport && <p>{buildReportSummaryText(progressReport)}</p>}
             {!reportError && !progressReport && <p className="empty-text">Press refresh to request a summary.</p>}
+          </div>
+        )}
+      </section>
+
+      <section className="pm-report-panel">
+        <div className="pm-panel-header">
+          <h3>Exception Inbox</h3>
+          <div className="pm-header-actions">
+            <button className="secondary-btn" onClick={() => void refreshExceptions()} disabled={exceptionsLoading || !selectedProject} type="button">
+              {exceptionsLoading ? 'Loading…' : 'Refresh'}
+            </button>
+            <button className="secondary-btn" onClick={() => setExceptionsCollapsed((prev) => !prev)} type="button">
+              {exceptionsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </div>
+        </div>
+        {!exceptionsCollapsed && (
+          <div className="pm-report-panel-body">
+            <small>
+              Open {exceptionCounts.open} / Total {exceptionCounts.total}
+            </small>
+            {exceptionsError && <p className="dashboard-error">{exceptionsError}</p>}
+            {!exceptionsError && exceptions.length === 0 && <p className="empty-text">No open exceptions.</p>}
+            {!exceptionsError && exceptions.length > 0 && (
+              <ul className="project-detail-task-list">
+                {exceptions.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <div>
+                      <strong>{item.category}</strong>
+                      <p>{item.message}</p>
+                    </div>
+                    <button className="secondary-btn" onClick={() => void resolveException(item.id)} type="button">
+                      Resolve
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </section>

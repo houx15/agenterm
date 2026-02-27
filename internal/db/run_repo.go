@@ -43,6 +43,34 @@ LIMIT 1
 	return &item, nil
 }
 
+func (r *RunRepo) GetLatestByProject(ctx context.Context, projectID string) (*ProjectRun, error) {
+	var item ProjectRun
+	var createdAtRaw, updatedAtRaw string
+	err := r.db.QueryRowContext(ctx, `
+SELECT id, project_id, status, current_stage, trigger, created_at, updated_at
+FROM project_runs
+WHERE project_id = ?
+ORDER BY updated_at DESC
+LIMIT 1
+`, projectID).Scan(&item.ID, &item.ProjectID, &item.Status, &item.CurrentStage, &item.Trigger, &createdAtRaw, &updatedAtRaw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get latest project run: %w", err)
+	}
+	var parseErr error
+	item.CreatedAt, parseErr = parseTimestamp(createdAtRaw)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	item.UpdatedAt, parseErr = parseTimestamp(updatedAtRaw)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+	return &item, nil
+}
+
 func (r *RunRepo) Get(ctx context.Context, runID string) (*ProjectRun, error) {
 	var item ProjectRun
 	var createdAtRaw, updatedAtRaw string

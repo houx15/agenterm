@@ -1602,6 +1602,79 @@ func TestProjectRunStateEndpoints(t *testing.T) {
 	if updatedRun["current_stage"] != "build" {
 		t.Fatalf("current_stage=%v want build", updatedRun["current_stage"])
 	}
+
+	invalidTransition := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/transition", map[string]any{
+		"to_stage": "plan",
+		"status":   "active",
+	}, true)
+	if invalidTransition.Code != http.StatusConflict {
+		t.Fatalf("invalid transition status=%d body=%s", invalidTransition.Code, invalidTransition.Body.String())
+	}
+}
+
+func TestProjectOrchestratorExceptionInboxEndpoints(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name": "ExceptionInbox", "repo_path": t.TempDir(),
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	current := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/runs/current", nil, true)
+	if current.Code != http.StatusOK {
+		t.Fatalf("get current run status=%d body=%s", current.Code, current.Body.String())
+	}
+	var currentBody map[string]any
+	decodeBody(t, current, &currentBody)
+	run := currentBody["run"].(map[string]any)
+	runID := run["id"].(string)
+
+	blocked := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/transition", map[string]any{
+		"to_stage": "build",
+		"status":   "failed",
+		"evidence": map[string]any{"reason": "test failure"},
+	}, true)
+	if blocked.Code != http.StatusOK {
+		t.Fatalf("set failed stage status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+
+	list := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/orchestrator/exceptions?status=open", nil, true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list exceptions status=%d body=%s", list.Code, list.Body.String())
+	}
+	var listed map[string]any
+	decodeBody(t, list, &listed)
+	items := listed["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected at least one open exception item")
+	}
+	first := items[0].(map[string]any)
+	exceptionID := first["id"].(string)
+	if exceptionID == "" {
+		t.Fatalf("expected exception id")
+	}
+
+	resolve := apiRequest(t, h, http.MethodPatch, "/api/projects/"+projectID+"/orchestrator/exceptions/"+exceptionID, map[string]any{
+		"status": "resolved",
+	}, true)
+	if resolve.Code != http.StatusOK {
+		t.Fatalf("resolve exception status=%d body=%s", resolve.Code, resolve.Body.String())
+	}
+
+	resolved := apiRequest(t, h, http.MethodGet, "/api/projects/"+projectID+"/orchestrator/exceptions?status=resolved", nil, true)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("list resolved exceptions status=%d body=%s", resolved.Code, resolved.Body.String())
+	}
+	var resolvedBody map[string]any
+	decodeBody(t, resolved, &resolvedBody)
+	resolvedItems := resolvedBody["items"].([]any)
+	if len(resolvedItems) == 0 {
+		t.Fatalf("expected resolved exception item")
+	}
 }
 
 func initGitRepo(t *testing.T) string {

@@ -178,6 +178,28 @@ export interface ProjectOrchestratorProfile {
   updated_at: string
 }
 
+export interface OrchestratorExceptionItem {
+  id: string
+  project_id: string
+  source: string
+  category: string
+  severity: string
+  message: string
+  metadata?: Record<string, unknown>
+  created_at: string
+  status: 'open' | 'resolved' | string
+}
+
+export interface OrchestratorExceptionListResponse {
+  project_id: string
+  items: OrchestratorExceptionItem[]
+  counts: {
+    total: number
+    open: number
+    resolved: number
+  }
+}
+
 export interface Task {
   id: string
   project_id: string

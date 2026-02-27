@@ -66,6 +66,9 @@ type handler struct {
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
+
+	exceptionMu       sync.Mutex
+	resolvedException map[string]map[string]bool
 }
 
 func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, demandOrchestratorInst *orchestrator.Orchestrator, token string, tmuxSession string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
@@ -98,6 +101,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 		asrTranscriber:          newVolcASRTranscriber(),
 		tmuxSession:             tmuxSession,
 		outputState:             make(map[string]*windowOutputState),
+		resolvedException:       make(map[string]map[string]bool),
 	}
 
 	mux := http.NewServeMux()
@@ -159,6 +163,8 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/preview", handler.previewProjectAssignments)
 	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/confirm", handler.confirmProjectAssignments)
 	mux.HandleFunc("GET /api/projects/{id}/orchestrator/assignments", handler.listProjectAssignments)
+	mux.HandleFunc("GET /api/projects/{id}/orchestrator/exceptions", handler.listProjectOrchestratorExceptions)
+	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator/exceptions/{exception_id}", handler.resolveProjectOrchestratorException)
 	mux.HandleFunc("GET /api/projects/{id}/runs/current", handler.getCurrentProjectRun)
 	mux.HandleFunc("POST /api/projects/{id}/runs/{run_id}/transition", handler.transitionProjectRun)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)
