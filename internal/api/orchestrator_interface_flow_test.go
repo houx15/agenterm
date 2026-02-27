@@ -1273,29 +1273,6 @@ func fetchProjectKnowledgeEntries(t *testing.T, baseURL string, token string, pr
 	return out
 }
 
-func fetchCurrentRun(t *testing.T, baseURL string, token string, projectID string) map[string]any {
-	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/projects/"+projectID+"/runs/current", nil)
-	if err != nil {
-		t.Fatalf("new current-run request: %v", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("current-run request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("current-run endpoint code=%d body=%s", resp.StatusCode, string(body))
-	}
-	out := map[string]any{}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatalf("decode current-run response: %v", err)
-	}
-	return out
-}
-
 func boolValue(m map[string]any, key string) bool {
 	if m == nil {
 		return false
