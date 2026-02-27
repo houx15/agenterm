@@ -16,9 +16,11 @@ type Phase struct {
 }
 
 type Workflow struct {
-	Plan  Stage `yaml:"plan" json:"plan"`
-	Build Stage `yaml:"build" json:"build"`
-	Test  Stage `yaml:"test" json:"test"`
+	Brainstorm Stage `yaml:"brainstorm" json:"brainstorm"`
+	Plan       Stage `yaml:"plan" json:"plan"`
+	Build      Stage `yaml:"build" json:"build"`
+	Test       Stage `yaml:"test" json:"test"`
+	Summarize  Stage `yaml:"summarize" json:"summarize"`
 }
 
 type Stage struct {

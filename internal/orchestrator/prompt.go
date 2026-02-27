@@ -24,9 +24,11 @@ type Playbook struct {
 }
 
 type PlaybookWorkflow struct {
-	Plan  PlaybookStage
-	Build PlaybookStage
-	Test  PlaybookStage
+	Brainstorm PlaybookStage
+	Plan       PlaybookStage
+	Build      PlaybookStage
+	Test       PlaybookStage
+	Summarize  PlaybookStage
 }
 
 type PlaybookStage struct {
@@ -98,10 +100,14 @@ func rolePromptGuidance(stageName string, stage PlaybookStage) string {
 
 func stageExecutionContract(stage string) string {
 	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "brainstorm":
+		return "Brainstorm stage objectives: generate 3-5 solution approaches with design motivations, present options to user for selection, produce a design document as artifact under docs/. Get user approval before transitioning to plan."
 	case "plan":
 		return "Plan stage objectives: start planning TUI, analyze codebase, produce staged implementation plan, define parallel worktrees, and write specs under docs/. Ask user confirmation before transitioning to build."
 	case "test":
 		return "Test stage objectives: verify all implementation work is committed/pushed, run a testing TUI to build and execute test plan against specs, report automated vs manual follow-ups, and persist a concise final summary via project knowledge."
+	case "summarize":
+		return "Summarize stage objectives: collect all artifacts from previous stages, generate a concise summary of what was built and tested, persist final summary via project knowledge, and mark the workflow as complete."
 	default:
 		return "Build stage objectives: execute approved plan per phase/worktree, dispatch coding and review sessions, run review-fix loops using review cycle/issue tools until issues are closed, update task status accordingly, merge finished worktrees, then prepare transition to test."
 	}
@@ -198,16 +204,20 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	if playbook != nil {
 		b.WriteString(fmt.Sprintf("Matched playbook: %s (%s)\n", playbook.Name, playbook.ID))
 		b.WriteString("Workflow stages:\n")
+		b.WriteString("- brainstorm: " + roleCatalog(playbook.Workflow.Brainstorm) + "\n")
 		b.WriteString("- plan: " + roleCatalog(playbook.Workflow.Plan) + "\n")
 		b.WriteString("- build: " + roleCatalog(playbook.Workflow.Build) + "\n")
 		b.WriteString("- test: " + roleCatalog(playbook.Workflow.Test) + "\n")
+		b.WriteString("- summarize: " + roleCatalog(playbook.Workflow.Summarize) + "\n")
 		if strings.TrimSpace(playbook.Strategy) != "" {
 			b.WriteString("Parallelism strategy: " + playbook.Strategy + "\n")
 		}
 		guidanceBlocks := []string{
+			rolePromptGuidance("brainstorm", playbook.Workflow.Brainstorm),
 			rolePromptGuidance("plan", playbook.Workflow.Plan),
 			rolePromptGuidance("build", playbook.Workflow.Build),
 			rolePromptGuidance("test", playbook.Workflow.Test),
+			rolePromptGuidance("summarize", playbook.Workflow.Summarize),
 		}
 		nonEmpty := make([]string, 0, len(guidanceBlocks))
 		for _, block := range guidanceBlocks {

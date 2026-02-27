@@ -440,14 +440,16 @@ func compactNonEmpty(values []string) []string {
 }
 
 func workflowIsEmpty(workflow Workflow) bool {
-	return len(workflow.Plan.Roles) == 0 && len(workflow.Build.Roles) == 0 && len(workflow.Test.Roles) == 0
+	return len(workflow.Brainstorm.Roles) == 0 && len(workflow.Plan.Roles) == 0 && len(workflow.Build.Roles) == 0 && len(workflow.Test.Roles) == 0 && len(workflow.Summarize.Roles) == 0
 }
 
 func workflowFromLegacyPhases(phases []Phase) Workflow {
 	workflow := Workflow{
-		Plan:  Stage{Enabled: true, Roles: []StageRole{}},
-		Build: Stage{Enabled: true, Roles: []StageRole{}},
-		Test:  Stage{Enabled: true, Roles: []StageRole{}},
+		Brainstorm: Stage{Enabled: false, Roles: []StageRole{}},
+		Plan:       Stage{Enabled: true, Roles: []StageRole{}},
+		Build:      Stage{Enabled: true, Roles: []StageRole{}},
+		Test:       Stage{Enabled: true, Roles: []StageRole{}},
+		Summarize:  Stage{Enabled: false, Roles: []StageRole{}},
 	}
 	for _, phase := range phases {
 		role := StageRole{
@@ -471,9 +473,11 @@ func workflowFromLegacyPhases(phases []Phase) Workflow {
 			workflow.Build.Roles = append(workflow.Build.Roles, role)
 		}
 	}
+	workflow.Brainstorm.Enabled = len(workflow.Brainstorm.Roles) > 0
 	workflow.Plan.Enabled = len(workflow.Plan.Roles) > 0
 	workflow.Build.Enabled = len(workflow.Build.Roles) > 0
 	workflow.Test.Enabled = len(workflow.Test.Roles) > 0
+	workflow.Summarize.Enabled = len(workflow.Summarize.Roles) > 0
 	return workflow
 }
 
@@ -492,9 +496,11 @@ func stageForLegacyPhase(phase Phase) string {
 
 func cloneWorkflow(workflow Workflow) Workflow {
 	return Workflow{
-		Plan:  cloneStage(workflow.Plan),
-		Build: cloneStage(workflow.Build),
-		Test:  cloneStage(workflow.Test),
+		Brainstorm: cloneStage(workflow.Brainstorm),
+		Plan:       cloneStage(workflow.Plan),
+		Build:      cloneStage(workflow.Build),
+		Test:       cloneStage(workflow.Test),
+		Summarize:  cloneStage(workflow.Summarize),
 	}
 }
 

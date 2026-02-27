@@ -40,9 +40,11 @@ const (
 )
 
 const (
-	stagePlan  = "plan"
-	stageBuild = "build"
-	stageTest  = "test"
+	stageBrainstorm = "brainstorm"
+	stagePlan       = "plan"
+	stageBuild      = "build"
+	stageTest       = "test"
+	stageSummarize  = "summarize"
 )
 
 type StreamEvent struct {
@@ -677,7 +679,7 @@ func (o *Orchestrator) BuildRoleLoopState(ctx context.Context, projectID string)
 	playbookDef, _ := o.loadProjectPlaybookDefinition(ctx, projectID)
 	stageRoles := map[string]playbook.StageRole{}
 	if playbookDef != nil {
-		for _, stage := range []playbook.Stage{playbookDef.Workflow.Plan, playbookDef.Workflow.Build, playbookDef.Workflow.Test} {
+		for _, stage := range []playbook.Stage{playbookDef.Workflow.Brainstorm, playbookDef.Workflow.Plan, playbookDef.Workflow.Build, playbookDef.Workflow.Test, playbookDef.Workflow.Summarize} {
 			for _, role := range stage.Roles {
 				stageRoles[strings.ToLower(strings.TrimSpace(role.Name))] = role
 			}
@@ -931,9 +933,11 @@ func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID str
 		return nil
 	}
 	playbookWorkflow := PlaybookWorkflow{
-		Plan:  PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
-		Build: PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
-		Test:  PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Brainstorm: PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Plan:       PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Build:      PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Test:       PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
+		Summarize:  PlaybookStage{Enabled: false, Roles: []PlaybookRole{}},
 	}
 	for _, p := range workflow.Phases {
 		if p == nil {
@@ -946,12 +950,18 @@ func (o *Orchestrator) loadWorkflowAsPlaybook(ctx context.Context, projectID str
 		}
 		phaseType := strings.ToLower(strings.TrimSpace(p.PhaseType))
 		switch {
+		case strings.Contains(phaseType, "brainstorm"), strings.Contains(phaseType, "ideate"):
+			playbookWorkflow.Brainstorm.Enabled = true
+			playbookWorkflow.Brainstorm.Roles = append(playbookWorkflow.Brainstorm.Roles, role)
 		case strings.Contains(phaseType, "scan"), strings.Contains(phaseType, "plan"):
 			playbookWorkflow.Plan.Enabled = true
 			playbookWorkflow.Plan.Roles = append(playbookWorkflow.Plan.Roles, role)
 		case strings.Contains(phaseType, "review"), strings.Contains(phaseType, "test"), strings.Contains(phaseType, "qa"):
 			playbookWorkflow.Test.Enabled = true
 			playbookWorkflow.Test.Roles = append(playbookWorkflow.Test.Roles, role)
+		case strings.Contains(phaseType, "summarize"), strings.Contains(phaseType, "summary"), strings.Contains(phaseType, "wrap"):
+			playbookWorkflow.Summarize.Enabled = true
+			playbookWorkflow.Summarize.Roles = append(playbookWorkflow.Summarize.Roles, role)
 		default:
 			playbookWorkflow.Build.Enabled = true
 			playbookWorkflow.Build.Roles = append(playbookWorkflow.Build.Roles, role)
@@ -985,6 +995,10 @@ func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Proj
 		ID:   pb.ID,
 		Name: pb.Name,
 		Workflow: PlaybookWorkflow{
+			Brainstorm: PlaybookStage{
+				Enabled: pb.Workflow.Brainstorm.Enabled,
+				Roles:   toPromptRoles(pb.Workflow.Brainstorm.Roles),
+			},
 			Plan: PlaybookStage{
 				Enabled: pb.Workflow.Plan.Enabled,
 				Roles:   toPromptRoles(pb.Workflow.Plan.Roles),
@@ -996,6 +1010,10 @@ func (o *Orchestrator) loadProjectPlaybook(ctx context.Context, project *db.Proj
 			Test: PlaybookStage{
 				Enabled: pb.Workflow.Test.Enabled,
 				Roles:   toPromptRoles(pb.Workflow.Test.Roles),
+			},
+			Summarize: PlaybookStage{
+				Enabled: pb.Workflow.Summarize.Enabled,
+				Roles:   toPromptRoles(pb.Workflow.Summarize.Roles),
 			},
 		},
 	}
@@ -1564,7 +1582,7 @@ func predecessorRoles(pb playbook.Playbook, roleName string) []string {
 	if roleName == "" {
 		return nil
 	}
-	stages := []playbook.Stage{pb.Workflow.Plan, pb.Workflow.Build, pb.Workflow.Test}
+	stages := []playbook.Stage{pb.Workflow.Brainstorm, pb.Workflow.Plan, pb.Workflow.Build, pb.Workflow.Test, pb.Workflow.Summarize}
 	predecessors := make([]string, 0)
 	for _, stage := range stages {
 		for _, role := range stage.Roles {
@@ -1710,9 +1728,11 @@ func findPlaybookRole(pb *playbook.Playbook, roleName string) (string, *playbook
 		name  string
 		stage playbook.Stage
 	}{
+		{name: "brainstorm", stage: pb.Workflow.Brainstorm},
 		{name: "plan", stage: pb.Workflow.Plan},
 		{name: "build", stage: pb.Workflow.Build},
 		{name: "test", stage: pb.Workflow.Test},
+		{name: "summarize", stage: pb.Workflow.Summarize},
 	}
 	for _, s := range stages {
 		for i := range s.stage.Roles {
@@ -1740,12 +1760,16 @@ func deriveExecutionStage(state *ProjectState, pb *Playbook) string {
 	}
 	status := strings.ToLower(strings.TrimSpace(state.Project.Status))
 	switch status {
+	case "brainstorm", "brainstorming", "ideating":
+		return stageBrainstorm
 	case "plan", "planning":
 		return stagePlan
 	case "test", "testing", "qa", "verifying":
 		return stageTest
 	case "build", "building", "developing":
 		return stageBuild
+	case "summarize", "summarizing", "wrapping":
+		return stageSummarize
 	}
 
 	if hasOpenExecutionTasks(state.Tasks) || hasActiveWorktrees(state.Worktrees) {
@@ -1758,6 +1782,9 @@ func deriveExecutionStage(state *ProjectState, pb *Playbook) string {
 		return stageBuild
 	}
 	if len(state.Tasks) == 0 && len(state.Worktrees) == 0 {
+		if pb != nil && pb.Workflow.Brainstorm.Enabled {
+			return stageBrainstorm
+		}
 		if pb != nil && pb.Workflow.Plan.Enabled {
 			return stagePlan
 		}
@@ -1770,7 +1797,7 @@ func (o *Orchestrator) resolveExecutionStage(ctx context.Context, projectID stri
 		run, err := o.runRepo.GetActiveByProject(ctx, strings.TrimSpace(projectID))
 		if err == nil && run != nil {
 			stage := strings.ToLower(strings.TrimSpace(run.CurrentStage))
-			if stage == stagePlan || stage == stageBuild || stage == stageTest {
+			if stage == stageBrainstorm || stage == stagePlan || stage == stageBuild || stage == stageTest || stage == stageSummarize {
 				return stage
 			}
 		}
@@ -1780,6 +1807,9 @@ func (o *Orchestrator) resolveExecutionStage(ctx context.Context, projectID stri
 
 func firstEnabledStage(pb *Playbook) string {
 	if pb != nil {
+		if pb.Workflow.Brainstorm.Enabled {
+			return stageBrainstorm
+		}
 		if pb.Workflow.Plan.Enabled {
 			return stagePlan
 		}
@@ -1788,6 +1818,9 @@ func firstEnabledStage(pb *Playbook) string {
 		}
 		if pb.Workflow.Test.Enabled {
 			return stageTest
+		}
+		if pb.Workflow.Summarize.Enabled {
+			return stageSummarize
 		}
 	}
 	return stageBuild
