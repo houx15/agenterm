@@ -18,7 +18,7 @@ Strengthen orchestrator governance APIs so stage/role execution is constrained b
 - [x] Fix governance handler issues uncovered during implementation.
 - [x] Add/adjust API tests for assignment validation behavior.
 - [x] Run focused backend tests for orchestrator governance paths.
-- [ ] Self-review changes for policy and edge-case regressions.
+- [x] Self-review changes for policy and edge-case regressions.
 
 # Notes
 
