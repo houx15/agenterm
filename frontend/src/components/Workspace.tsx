@@ -4,9 +4,6 @@ import {
   listProjects,
   listSessions,
   listProjectTasks,
-  getOrchestratorReport,
-  listOrchestratorExceptions,
-  resolveOrchestratorException,
   getSessionOutput,
   deleteProject,
 } from '../api/client'
@@ -14,12 +11,8 @@ import type {
   Project,
   Session,
   Task,
-  OrchestratorProgressReport,
-  OrchestratorExceptionItem,
-  OrchestratorExceptionListResponse,
   ServerMessage,
 } from '../api/types'
-import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
 import { PanelRight, PanelLeft, Moon, Sun } from './Lucide'
 import ProjectSidebar from './ProjectSidebar'
 import TerminalGrid from './TerminalGrid'
@@ -41,13 +34,6 @@ function isOrchestratorSession(session: Session): boolean {
   const role = (session.role || '').toLowerCase()
   const agent = (session.agent_type || '').toLowerCase()
   return role.includes('orchestrator') || role.includes('pm') || agent.includes('orchestrator')
-}
-
-function shouldRefreshFromOrchestratorEvent(
-  event: { type: string } | null,
-): boolean {
-  if (!event) return false
-  return event.type === 'tool_result' || event.type === 'done'
 }
 
 function loadTerminalReplay(): Record<string, string> {
@@ -105,13 +91,6 @@ export default function Workspace() {
   const [rawBuffers, setRawBuffers] = useState<Record<string, string>>(() => loadTerminalReplay())
   const [activeWindowID, setActiveWindowID] = useState<string | null>(null)
 
-  // ---- Orchestrator state (from PMChat.tsx) --------------------------------
-  const [progressReport, setProgressReport] = useState<OrchestratorProgressReport | null>(null)
-  const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
-  const [reportLoading, setReportLoading] = useState(false)
-  const [exceptions, setExceptions] = useState<OrchestratorExceptionItem[]>([])
-  const [exceptionCounts, setExceptionCounts] = useState({ total: 0, open: 0, resolved: 0 })
-
   // ---- Modal state --------------------------------------------------------
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [homeOpen, setHomeOpen] = useState(false)
@@ -120,9 +99,6 @@ export default function Workspace() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
   const [deleteError, setDeleteError] = useState('')
-
-  // ---- Orchestrator WS ----------------------------------------------------
-  const orchestrator = useOrchestratorWS(activeProjectID)
 
   // ---- Project session windows (for unread counts) ------------------------
   const [projectSessionWindows, setProjectSessionWindows] = useState<Record<string, string[]>>({})
@@ -204,57 +180,6 @@ export default function Workspace() {
   }, [activeProjectID])
 
   // =========================================================================
-  // Data fetching - refreshExceptions (from PMChat.tsx)
-  // =========================================================================
-  const refreshExceptions = useCallback(async () => {
-    if (!activeProjectID) {
-      setExceptions([])
-      setExceptionCounts({ total: 0, open: 0, resolved: 0 })
-      return
-    }
-    try {
-      const response = await listOrchestratorExceptions<OrchestratorExceptionListResponse>(activeProjectID, 'open')
-      setExceptions(response.items ?? [])
-      setExceptionCounts(response.counts ?? { total: 0, open: 0, resolved: 0 })
-    } catch {
-      // keep workspace usable
-    }
-  }, [activeProjectID])
-
-  // =========================================================================
-  // Request orchestrator progress report (from PMChat.tsx)
-  // =========================================================================
-  const requestProgressReport = useCallback(async () => {
-    if (!activeProjectID) return
-    setReportLoading(true)
-    try {
-      const report = await getOrchestratorReport<OrchestratorProgressReport>(activeProjectID)
-      setProgressReport(report)
-      setReportUpdatedAt(Date.now())
-    } catch {
-      // keep workspace usable
-    } finally {
-      setReportLoading(false)
-    }
-  }, [activeProjectID])
-
-  // =========================================================================
-  // Resolve exception (from PMChat.tsx)
-  // =========================================================================
-  const resolveException = useCallback(
-    async (exceptionID: string) => {
-      if (!activeProjectID || !exceptionID) return
-      try {
-        await resolveOrchestratorException(activeProjectID, exceptionID, 'resolved')
-        await refreshExceptions()
-      } catch {
-        // no-op
-      }
-    },
-    [activeProjectID, refreshExceptions],
-  )
-
-  // =========================================================================
   // Delete project (from PMChat.tsx)
   // =========================================================================
   const confirmDeleteProject = useCallback(async () => {
@@ -325,28 +250,6 @@ export default function Workspace() {
     void loadProjectData()
   }, [loadProjectData])
 
-  // Load exceptions when active project changes
-  useEffect(() => {
-    void refreshExceptions()
-  }, [refreshExceptions])
-
-  // Reset orchestrator state on project change
-  useEffect(() => {
-    setProgressReport(null)
-    setReportUpdatedAt(null)
-    setReportLoading(false)
-    setExceptions([])
-    setExceptionCounts({ total: 0, open: 0, resolved: 0 })
-  }, [activeProjectID])
-
-  // Refresh on orchestrator events
-  useEffect(() => {
-    if (shouldRefreshFromOrchestratorEvent(orchestrator.lastEvent)) {
-      void loadProjectData()
-      void refreshExceptions()
-    }
-  }, [orchestrator.lastEvent, loadProjectData, refreshExceptions])
-
   // Refresh on project_event WebSocket messages
   useEffect(() => {
     if (
@@ -399,10 +302,6 @@ export default function Workspace() {
 
   const agentSessions = useMemo(() => {
     return sessions.filter((s) => !isOrchestratorSession(s))
-  }, [sessions])
-
-  const orchestratorSession = useMemo(() => {
-    return sessions.find((s) => isOrchestratorSession(s)) ?? null
   }, [sessions])
 
   const projectUnreadCounts = useMemo<Record<string, number>>(() => {
