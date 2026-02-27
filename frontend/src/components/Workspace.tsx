@@ -32,6 +32,19 @@ import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 const terminalReplayStorageKey = 'agenterm:terminal:replay:v1'
 const terminalReplayMaxChars = 120000
 
+// ---------------------------------------------------------------------------
+// Pane resize constants
+// ---------------------------------------------------------------------------
+
+const SIDEBAR_WIDTH_KEY = 'agenterm:sidebar-width'
+const PANEL_WIDTH_KEY = 'agenterm:panel-width'
+const DEFAULT_SIDEBAR_WIDTH = 220
+const DEFAULT_PANEL_WIDTH = 340
+const MIN_SIDEBAR_WIDTH = 160
+const MAX_SIDEBAR_WIDTH = 400
+const MIN_PANEL_WIDTH = 280
+const MAX_PANEL_WIDTH = 600
+
 function isOrchestratorSession(session: Session): boolean {
   const role = (session.role || '').toLowerCase()
   const agent = (session.agent_type || '').toLowerCase()
@@ -82,6 +95,21 @@ export default function Workspace() {
     return 'dark'
   })
 
+  // ---- Pane resize state --------------------------------------------------
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    return stored
+      ? Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Number(stored) || DEFAULT_SIDEBAR_WIDTH))
+      : DEFAULT_SIDEBAR_WIDTH
+  })
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const stored = localStorage.getItem(PANEL_WIDTH_KEY)
+    return stored
+      ? Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, Number(stored) || DEFAULT_PANEL_WIDTH))
+      : DEFAULT_PANEL_WIDTH
+  })
+  const [resizing, setResizing] = useState<'sidebar' | 'panel' | null>(null)
+
   // ---- Project state ------------------------------------------------------
   const [projects, setProjects] = useState<Project[]>([])
   const [activeProjectID, setActiveProjectID] = useState('')
@@ -112,6 +140,50 @@ export default function Workspace() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('agenterm:theme', theme)
   }, [theme])
+
+  // =========================================================================
+  // Pane width persistence
+  // =========================================================================
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth))
+  }, [panelWidth])
+
+  // =========================================================================
+  // Resize drag handler
+  // =========================================================================
+  useEffect(() => {
+    if (!resizing) return
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (resizing === 'sidebar') {
+        const width = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, e.clientX))
+        setSidebarWidth(width)
+      } else if (resizing === 'panel') {
+        const width = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, window.innerWidth - e.clientX))
+        setPanelWidth(width)
+      }
+    }
+
+    const onMouseUp = () => {
+      setResizing(null)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+  }, [resizing])
 
   // =========================================================================
   // Data fetching - refreshAll (from PMChat.tsx)
@@ -350,10 +422,22 @@ export default function Workspace() {
   // Render
   // =========================================================================
 
+  const showPanel = panelOpen && !!selectedProject
+  const gridColumns = [
+    sidebarCollapsed ? '0px' : `${sidebarWidth}px`,
+    !sidebarCollapsed ? '4px' : '',
+    '1fr',
+    showPanel ? '4px' : '',
+    showPanel ? `${panelWidth}px` : '0px',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   return (
     <>
       <div
-        className={`workspace ${panelOpen && selectedProject ? 'panel-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`.trim()}
+        className={`workspace${resizing ? ' resizing' : ''}`}
+        style={{ gridTemplateColumns: gridColumns }}
       >
         {/* Left sidebar */}
         <ProjectSidebar
@@ -375,6 +459,17 @@ export default function Workspace() {
           onOpenSettings={() => setSettingsOpen(true)}
           collapsed={sidebarCollapsed}
         />
+
+        {/* Sidebar resize handle */}
+        {!sidebarCollapsed && (
+          <div
+            className={`resize-handle${resizing === 'sidebar' ? ' active' : ''}`}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setResizing('sidebar')
+            }}
+          />
+        )}
 
         {/* Center: terminals or home */}
         <main
@@ -474,6 +569,17 @@ export default function Workspace() {
             />
           )}
         </main>
+
+        {/* Panel resize handle */}
+        {showPanel && (
+          <div
+            className={`resize-handle${resizing === 'panel' ? ' active' : ''}`}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              setResizing('panel')
+            }}
+          />
+        )}
 
         {/* Right panel: orchestrator */}
         {panelOpen && selectedProject && (
