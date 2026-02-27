@@ -20,7 +20,7 @@ Deliver Slice 2 acceptance:
 - [x] Add/adjust tests for monitor bootstrap and exclusive replay semantics.
 - [x] Run focused backend tests for session/api runtime paths.
 - [x] Run full package tests for touched modules.
-- [ ] Self-review changes for race/safety regressions and patch if needed.
+- [x] Self-review changes for race/safety regressions and patch if needed.
 
 # Notes
 

@@ -179,7 +179,11 @@ func (m *Monitor) tryBootstrapOutput() {
 		if strings.TrimSpace(trimmed) == "" {
 			continue
 		}
-		m.IngestParsed(trimmed, "normal", base.Add(time.Duration(idx)*time.Microsecond))
+		class := "normal"
+		if parser.PromptShellPattern.MatchString(strings.TrimSpace(trimmed)) {
+			class = string(parser.ClassPrompt)
+		}
+		m.IngestParsed(trimmed, class, base.Add(time.Duration(idx)*time.Microsecond))
 	}
 }
 

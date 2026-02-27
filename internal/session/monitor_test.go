@@ -238,3 +238,24 @@ func TestRingBufferSinceIsExclusive(t *testing.T) {
 		t.Fatalf("got=%+v want line-2 only", got)
 	}
 }
+
+func TestMonitorReadyStateUsesPromptFromBootstrapSnapshot(t *testing.T) {
+	origCapture := capturePaneOutputFn
+	t.Cleanup(func() { capturePaneOutputFn = origCapture })
+	capturePaneOutputFn = func(windowID string, lines int) ([]string, error) {
+		return []string{"$ "}, nil
+	}
+
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-ready",
+		TmuxSession:  "tmux-ready",
+		WindowID:     "@10",
+		IdleTimeout:  30 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	ready := m.ReadyState()
+	if !ready.PromptDetected {
+		t.Fatalf("PromptDetected=%v want true", ready.PromptDetected)
+	}
+}
