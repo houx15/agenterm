@@ -1,22 +1,74 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getSessionOutput, listProjects, listProjectTasks, listSessions } from '../api/client'
-import type { Project, ServerMessage, Session, Task } from '../api/types'
+import {
+  enqueueSessionCommand,
+  getSessionCommand,
+  getSessionOutput,
+  getSessionReady,
+  listProjects,
+  listProjectTasks,
+  listSessionCommands,
+  listSessions,
+} from '../api/client'
+import type { Project, ServerMessage, Session, SessionCommand, SessionReadyState, Task } from '../api/types'
 import { ChevronLeft, Plus, Square } from '../components/Lucide'
 import Terminal from '../components/Terminal'
 import { useAppContext } from '../App'
 
 type GroupMode = 'project' | 'status'
 
+const terminalReplayStorageKey = 'agenterm:terminal:replay:v1'
+const terminalReplayMaxChars = 120000
+
 function normalizeStatus(status: string): string {
   return (status || 'unknown').trim().toLowerCase()
+}
+
+function loadTerminalReplay(): Record<string, string> {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+  try {
+    const raw = window.localStorage.getItem(terminalReplayStorageKey)
+    if (!raw) {
+      return {}
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== 'string' || !key.trim()) {
+        continue
+      }
+      out[key] = value.slice(-terminalReplayMaxChars)
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveTerminalReplay(buffers: Record<string, string>): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  const compacted: Record<string, string> = {}
+  for (const [key, value] of Object.entries(buffers)) {
+    if (!key.trim() || !value) {
+      continue
+    }
+    compacted[key] = value.slice(-terminalReplayMaxChars)
+  }
+  window.localStorage.setItem(terminalReplayStorageKey, JSON.stringify(compacted))
 }
 
 export default function Sessions() {
   const navigate = useNavigate()
   const { windowId } = useParams<{ windowId?: string }>()
   const app = useAppContext()
-  const [rawBuffers, setRawBuffers] = useState<Record<string, string>>({})
+  const [rawBuffers, setRawBuffers] = useState<Record<string, string>>(() => loadTerminalReplay())
   const [inputValue, setInputValue] = useState('')
   const [searchValue, setSearchValue] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -24,6 +76,7 @@ export default function Sessions() {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasksByProject, setTasksByProject] = useState<Record<string, Task[]>>({})
   const [dbSessions, setDbSessions] = useState<Session[]>([])
+  const [commandStatuses, setCommandStatuses] = useState<Record<string, SessionCommand[]>>({})
   const [sendError, setSendError] = useState('')
   const [isMobile, setIsMobile] = useState<boolean>(() => (typeof window !== 'undefined' ? window.innerWidth <= 900 : false))
   const selectedWindowID = useMemo(() => {
@@ -34,7 +87,13 @@ export default function Sessions() {
   }, [app.activeWindow, isMobile, windowId])
   const rawHistory = selectedWindowID ? (rawBuffers[selectedWindowID] ?? '') : ''
   const activeWindowInfo = useMemo(() => app.windows.find((win) => win.id === selectedWindowID) ?? null, [selectedWindowID, app.windows])
-  const maxBufferChars = 120000
+  const activeSessionCommands = useMemo(() => {
+    const sessionID = activeWindowInfo?.session_id ?? ''
+    if (!sessionID) {
+      return []
+    }
+    return commandStatuses[sessionID] ?? []
+  }, [activeWindowInfo?.session_id, commandStatuses])
 
   useEffect(() => {
     const onResize = () => {
@@ -80,38 +139,51 @@ export default function Sessions() {
   }, [app.lastMessage])
 
   useEffect(() => {
-    let cancelled = false
+    saveTerminalReplay(rawBuffers)
+  }, [rawBuffers])
+
+  const refreshWindowSnapshot = useCallback(async () => {
     const sessionID = activeWindowInfo?.session_id?.trim()
     const windowID = selectedWindowID?.trim()
     if (!sessionID || !windowID) {
-      return () => {
-        cancelled = true
-      }
+      return
     }
+    try {
+      const lines = await getSessionOutput<Array<{ text: string }>>(sessionID, 1200)
+      const snapshot = lines.map((line) => line.text ?? '').join('\n')
+      setRawBuffers((prev) => {
+        const existing = prev[windowID] ?? ''
+        if (existing.length >= snapshot.length && existing.startsWith(snapshot)) {
+          return prev
+        }
+        return { ...prev, [windowID]: snapshot.slice(-terminalReplayMaxChars) }
+      })
+    } catch {
+      // keep terminal usable even if snapshot bootstrap fails
+    }
+  }, [activeWindowInfo?.session_id, selectedWindowID])
+
+  useEffect(() => {
+    let cancelled = false
 
     void (async () => {
-      try {
-        const lines = await getSessionOutput<Array<{ text: string }>>(sessionID, 500)
-        if (cancelled) {
-          return
-        }
-        const snapshot = lines.map((line) => line.text ?? '').join('\n')
-        setRawBuffers((prev) => {
-          const existing = prev[windowID] ?? ''
-          if (existing.length >= snapshot.length && existing.startsWith(snapshot)) {
-            return prev
-          }
-          return { ...prev, [windowID]: snapshot }
-        })
-      } catch {
-        // keep terminal usable even if snapshot bootstrap fails
+      await refreshWindowSnapshot()
+      if (cancelled) {
+        return
       }
     })()
 
     return () => {
       cancelled = true
     }
-  }, [activeWindowInfo?.session_id, selectedWindowID])
+  }, [refreshWindowSnapshot])
+
+  useEffect(() => {
+    if (app.connectionStatus !== 'connected') {
+      return
+    }
+    void refreshWindowSnapshot()
+  }, [app.connectionStatus, refreshWindowSnapshot])
 
   useEffect(() => {
     let cancelled = false
@@ -151,22 +223,117 @@ export default function Sessions() {
     }
   }, [])
 
-  const sendInput = (text: string) => {
-    if (!app.activeWindow || !text) {
+  const refreshCommandStatuses = useCallback(async () => {
+    const sessionID = activeWindowInfo?.session_id?.trim()
+    if (!sessionID) {
       return
     }
-    const ok = app.send({
-      type: 'terminal_input',
-      session_id: activeWindowInfo?.session_id,
-      window: app.activeWindow,
-      keys: text,
-    })
-    if (!ok) {
-      setSendError('Socket disconnected. Reconnect and try again.')
-      return
+    try {
+      const items = await listSessionCommands<SessionCommand[]>(sessionID, 20)
+      setCommandStatuses((prev) => ({ ...prev, [sessionID]: items }))
+    } catch {
+      // no-op
     }
-    setSendError('')
-  }
+  }, [activeWindowInfo?.session_id])
+
+  useEffect(() => {
+    void refreshCommandStatuses()
+    const intervalID = window.setInterval(() => {
+      void refreshCommandStatuses()
+    }, 3000)
+    return () => {
+      window.clearInterval(intervalID)
+    }
+  }, [refreshCommandStatuses])
+
+  const waitForCommandCompletion = useCallback(
+    async (sessionID: string, commandID: string) => {
+      const startedAt = Date.now()
+      const timeoutMs = 10000
+      while (Date.now()-startedAt < timeoutMs) {
+        const cmd = await getSessionCommand<SessionCommand>(sessionID, commandID)
+        if (cmd.status === 'completed' || cmd.status === 'failed' || cmd.status === 'timeout') {
+          return cmd
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 180))
+      }
+      return null
+    },
+    [],
+  )
+
+  const sendInput = useCallback(
+    async (text: string) => {
+      const sessionID = activeWindowInfo?.session_id?.trim()
+      if (!sessionID || !text) {
+        return
+      }
+
+      try {
+        let readyState: SessionReadyState | null = null
+        try {
+          readyState = await getSessionReady<SessionReadyState>(sessionID)
+        } catch {
+          readyState = null
+        }
+        if (readyState && !readyState.ready) {
+          setSendError(`Session not ready: ${readyState.reason}`)
+          return
+        }
+
+        const command = await enqueueSessionCommand<SessionCommand>(sessionID, {
+          op: 'send_text',
+          text,
+        })
+
+        setCommandStatuses((prev) => ({
+          ...prev,
+          [sessionID]: [command, ...(prev[sessionID] ?? []).filter((item) => item.id !== command.id)].slice(0, 20),
+        }))
+
+        const finished = await waitForCommandCompletion(sessionID, command.id)
+        if (!finished) {
+          setSendError('Command ack timeout. Check session status and retry.')
+          return
+        }
+        setCommandStatuses((prev) => ({
+          ...prev,
+          [sessionID]: [finished, ...(prev[sessionID] ?? []).filter((item) => item.id !== finished.id)].slice(0, 20),
+        }))
+        if (finished.status === 'failed' || finished.status === 'timeout') {
+          setSendError(finished.error || `Command ${finished.status}`)
+          return
+        }
+        setSendError('')
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : 'Failed to send command')
+      }
+    },
+    [activeWindowInfo?.session_id, waitForCommandCompletion],
+  )
+
+  const sendControlKey = useCallback(
+    async (key: string) => {
+      const sessionID = activeWindowInfo?.session_id?.trim()
+      if (!sessionID || !key.trim()) {
+        return
+      }
+      try {
+        const command = await enqueueSessionCommand<SessionCommand>(sessionID, {
+          op: 'send_key',
+          key,
+        })
+        setCommandStatuses((prev) => ({
+          ...prev,
+          [sessionID]: [command, ...(prev[sessionID] ?? []).filter((item) => item.id !== command.id)].slice(0, 20),
+        }))
+        setSendError('')
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : 'Failed to send key')
+      }
+    },
+    [activeWindowInfo?.session_id],
+  )
 
   function handleServerMessage(message: ServerMessage) {
     if (message.type === 'error') {
@@ -180,7 +347,7 @@ export default function Sessions() {
           const next = current + (message.text ?? '')
           return {
             ...prev,
-            [message.window]: next.length > maxBufferChars ? next.slice(next.length - maxBufferChars) : next,
+            [message.window]: next.length > terminalReplayMaxChars ? next.slice(next.length - terminalReplayMaxChars) : next,
           }
         })
         return
@@ -268,6 +435,15 @@ export default function Sessions() {
         <strong>{activeWindowInfo ? `${activeWindowInfo.name} (${activeWindowInfo.session_id || 'default'})` : 'Select a session'}</strong>
         <small className="empty-text">xterm.js</small>
       </div>
+      {activeSessionCommands.length > 0 && (
+        <div className="session-command-strip">
+          {activeSessionCommands.slice(0, 3).map((item) => (
+            <span key={item.id} className={`session-command-chip ${normalizeStatus(item.status)}`.trim()}>
+              {item.op}: {item.status}
+            </span>
+          ))}
+        </div>
+      )}
 
       {!selectedWindowID && <div className="empty-view">Select a session to start</div>}
 
@@ -302,12 +478,12 @@ export default function Sessions() {
           onKeyDown={(event) => {
             if (event.key === 'Tab') {
               event.preventDefault()
-              sendInput('\t')
+              void sendControlKey('tab')
             }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
               if (inputValue.trim()) {
-                sendInput(`${inputValue}\n`)
+                void sendInput(`${inputValue}\n`)
                 setInputValue('')
               }
             }
@@ -320,7 +496,7 @@ export default function Sessions() {
             if (!inputValue.trim()) {
               return
             }
-            sendInput(`${inputValue}\n`)
+            void sendInput(`${inputValue}\n`)
             setInputValue('')
           }}
           type="button"

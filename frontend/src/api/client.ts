@@ -224,6 +224,35 @@ export function getSessionOutput<T = SessionOutputLine[]>(sessionID: string, lin
   return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/output?${params.toString()}`)
 }
 
+export interface EnqueueSessionCommandInput {
+  op: 'send_text' | 'send_key' | 'interrupt' | 'resize' | 'close'
+  text?: string
+  key?: string
+  cols?: number
+  rows?: number
+}
+
+export function enqueueSessionCommand<T>(sessionID: string, input: EnqueueSessionCommandInput) {
+  return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/commands`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export function getSessionCommand<T>(sessionID: string, commandID: string) {
+  return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/commands/${encodeURIComponent(commandID)}`)
+}
+
+export function listSessionCommands<T>(sessionID: string, limit = 20) {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/commands?${params.toString()}`)
+}
+
+export function getSessionReady<T>(sessionID: string) {
+  return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/ready`)
+}
+
 interface ListDemandPoolParams {
   status?: string
   tag?: string

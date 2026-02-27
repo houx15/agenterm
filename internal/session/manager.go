@@ -21,8 +21,12 @@ import (
 const (
 	defaultIdleTimeout   = 30 * time.Second
 	defaultPollInterval  = time.Second
-	defaultRingBufferLen = 500
-	defaultCaptureLines  = 800
+	defaultRingBufferLen = 2000
+	defaultCaptureLines  = 2000
+
+	commandDispatchTimeout = 8 * time.Second
+	commandMaxRetries      = 2
+	commandRetryBaseDelay  = 200 * time.Millisecond
 )
 
 type TmuxManager interface {
@@ -361,29 +365,85 @@ func (sm *Manager) ensureSessionCommandQueue(sessionID string) chan queuedComman
 func (sm *Manager) runSessionCommandQueue(sessionID string, q chan queuedCommand) {
 	for item := range q {
 		cmd := item.cmd
-		cmd.Status = "sent"
-		cmd.SentAt = time.Now().UTC()
-		_ = sm.commandRepo.Update(context.Background(), cmd)
-		err := sm.dispatchCommand(context.Background(), sessionID, item.req)
-		if err != nil {
-			cmd.Status = "failed"
-			cmd.Error = err.Error()
-			cmd.CompletedAt = time.Now().UTC()
-			_ = sm.commandRepo.Update(context.Background(), cmd)
-			item.done <- commandResult{cmd: cmd, err: err}
+		err := sm.dispatchCommandWithRetry(sessionID, cmd, item.req)
+		if err == nil {
+			item.done <- commandResult{cmd: cmd, err: nil}
 			close(item.done)
 			continue
 		}
-		cmd.Status = "acked"
-		cmd.AckedAt = time.Now().UTC()
-		_ = sm.commandRepo.Update(context.Background(), cmd)
-		cmd.Status = "completed"
-		cmd.CompletedAt = time.Now().UTC()
-		cmd.ResultJSON = `{"status":"ok"}`
-		_ = sm.commandRepo.Update(context.Background(), cmd)
-		item.done <- commandResult{cmd: cmd, err: nil}
+		item.done <- commandResult{cmd: cmd, err: err}
 		close(item.done)
 	}
+}
+
+func (sm *Manager) dispatchCommandWithRetry(sessionID string, cmd *db.SessionCommand, req CommandRequest) error {
+	var lastErr error
+	for attempt := 0; attempt <= commandMaxRetries; attempt++ {
+		now := time.Now().UTC()
+		cmd.Status = "sent"
+		cmd.SentAt = now
+		cmd.Error = ""
+		cmd.ResultJSON = fmt.Sprintf(`{"attempt":%d}`, attempt+1)
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+
+		ctx, cancel := context.WithTimeout(context.Background(), commandDispatchTimeout)
+		err := sm.dispatchCommand(ctx, sessionID, req)
+		cancel()
+		if err == nil {
+			cmd.Status = "acked"
+			cmd.AckedAt = time.Now().UTC()
+			cmd.ResultJSON = fmt.Sprintf(`{"status":"acked","attempt":%d}`, attempt+1)
+			_ = sm.commandRepo.Update(context.Background(), cmd)
+
+			cmd.Status = "completed"
+			cmd.CompletedAt = time.Now().UTC()
+			cmd.ResultJSON = fmt.Sprintf(`{"status":"ok","attempt":%d}`, attempt+1)
+			_ = sm.commandRepo.Update(context.Background(), cmd)
+			return nil
+		}
+
+		lastErr = err
+		if attempt < commandMaxRetries && isRetryableDispatchError(err) {
+			time.Sleep(commandRetryBaseDelay * time.Duration(1<<attempt))
+			continue
+		}
+
+		if errors.Is(err, context.DeadlineExceeded) {
+			cmd.Status = "timeout"
+		} else {
+			cmd.Status = "failed"
+		}
+		cmd.Error = err.Error()
+		cmd.CompletedAt = time.Now().UTC()
+		cmd.ResultJSON = fmt.Sprintf(`{"status":"%s","attempt":%d}`, cmd.Status, attempt+1)
+		_ = sm.commandRepo.Update(context.Background(), cmd)
+		return err
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("command dispatch failed")
+	}
+	cmd.Status = "failed"
+	cmd.Error = lastErr.Error()
+	cmd.CompletedAt = time.Now().UTC()
+	_ = sm.commandRepo.Update(context.Background(), cmd)
+	return lastErr
+}
+
+func isRetryableDispatchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "broken pipe") ||
+		strings.Contains(text, "i/o timeout") ||
+		strings.Contains(text, "resource temporarily unavailable")
 }
 
 func (sm *Manager) dispatchCommand(ctx context.Context, sessionID string, req CommandRequest) error {

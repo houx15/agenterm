@@ -61,13 +61,38 @@ export type ServerMessage =
   | ErrorMessage
 
 export interface ClientMessage {
-  type: 'input' | 'terminal_input' | 'terminal_resize' | 'new_session' | 'new_window' | 'kill_window'
+  type: 'input' | 'terminal_input' | 'terminal_resize' | 'new_session' | 'new_window' | 'kill_window' | 'subscribe'
   session_id?: string
   window?: string
   keys?: string
   cols?: number
   rows?: number
   name?: string
+}
+
+export interface SessionCommand {
+  id: string
+  session_id: string
+  op: string
+  payload_json?: string
+  status: 'queued' | 'sent' | 'acked' | 'completed' | 'failed' | 'timeout' | string
+  result_json?: string
+  error?: string
+  created_at: string
+  sent_at?: string
+  acked_at?: string
+  completed_at?: string
+}
+
+export interface SessionReadyState {
+  ready: boolean
+  reason: string
+  status: string
+  last_activity_at: string
+  prompt_detected: boolean
+  observed_output: boolean
+  last_class: string
+  last_text: string
 }
 
 export interface OrchestratorClientMessage {

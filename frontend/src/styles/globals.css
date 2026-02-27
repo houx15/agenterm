@@ -691,6 +691,45 @@ textarea {
   align-items: center;
 }
 
+.session-command-strip {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(245, 249, 255, 0.9);
+}
+
+.session-command-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  background: #fff;
+}
+
+.session-command-chip.completed {
+  color: #155e3a;
+  border-color: #b8e5c8;
+  background: #eafbf1;
+}
+
+.session-command-chip.acked,
+.session-command-chip.sent,
+.session-command-chip.queued {
+  color: #194472;
+  border-color: #cde0ff;
+  background: #eef5ff;
+}
+
+.session-command-chip.failed,
+.session-command-chip.timeout {
+  color: #8a1c2b;
+  border-color: #f3c5cc;
+  background: #fff0f2;
+}
+
 .messages-wrap {
   flex: 1;
   overflow: auto;

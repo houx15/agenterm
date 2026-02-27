@@ -1,6 +1,8 @@
 package session
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -110,6 +112,27 @@ func TestValidateControlKey(t *testing.T) {
 		got := ValidateControlKey(tc.in)
 		if got != tc.want {
 			t.Fatalf("ValidateControlKey(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestIsRetryableDispatchError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "deadline", err: context.DeadlineExceeded, want: true},
+		{name: "canceled", err: context.Canceled, want: true},
+		{name: "broken pipe", err: errors.New("write: broken pipe"), want: true},
+		{name: "resource unavailable", err: errors.New("resource temporarily unavailable"), want: true},
+		{name: "validation", err: errors.New("text is required"), want: false},
+	}
+	for _, tc := range cases {
+		got := isRetryableDispatchError(tc.err)
+		if got != tc.want {
+			t.Fatalf("%s: isRetryableDispatchError(%v)=%v want %v", tc.name, tc.err, got, tc.want)
 		}
 	}
 }
