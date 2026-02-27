@@ -339,16 +339,68 @@ export default function OrchestratorPanel({
         {/* Demand Pool */}
         <div className="orchestrator-section-header" onClick={() => setDemandOpen((prev) => !prev)}>
           <span>{demandOpen ? '\u25be' : '\u25b8'} Demand Pool ({demandItems.length})</span>
+          {demandOpen && (
+            <button
+              className="btn btn-ghost"
+              onClick={(e) => { e.stopPropagation(); startNewDemand() }}
+              style={{ fontSize: '11px', marginLeft: 'auto' }}
+              type="button"
+            >
+              + Add
+            </button>
+          )}
         </div>
         {demandOpen && (
           <div className="orchestrator-section-content">
+            {demandFormOpen && (
+              <div className="demand-form" style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px', padding: '8px', background: 'var(--bg-surface-hover)', borderRadius: '6px' }}>
+                <input
+                  value={demandTitle}
+                  onChange={(e) => setDemandTitle(e.target.value)}
+                  placeholder="Title"
+                  style={{ fontSize: '12px' }}
+                />
+                <textarea
+                  value={demandDesc}
+                  onChange={(e) => setDemandDesc(e.target.value)}
+                  placeholder="Description (optional)"
+                  rows={2}
+                  style={{ fontSize: '12px' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Priority</label>
+                  <select
+                    value={demandPriority}
+                    onChange={(e) => setDemandPriority(Number(e.target.value))}
+                    style={{ fontSize: '12px', flex: 1 }}
+                  >
+                    <option value={1}>1 — Critical</option>
+                    <option value={2}>2 — High</option>
+                    <option value={3}>3 — Medium</option>
+                    <option value={4}>4 — Low</option>
+                    <option value={5}>5 — Nice-to-have</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button className="btn btn-primary" onClick={() => void saveDemandItem()} style={{ fontSize: '11px' }} type="button">
+                    {editingItemID ? 'Update' : 'Create'}
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => { setDemandFormOpen(false); setEditingItemID(null) }} style={{ fontSize: '11px' }} type="button">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             {demandItems.map((item) => (
               <div className="demand-item" key={item.id}>
                 <span className={`demand-status-badge ${item.status}`}>{item.status}</span>
-                <span style={{ flex: 1 }}>{item.title || item.description?.slice(0, 60)}</span>
+                <span style={{ flex: 1, fontSize: '12px' }}>{item.title || item.description?.slice(0, 60)}</span>
+                <button className="btn btn-ghost" onClick={() => startEditDemand(item)} style={{ fontSize: '10px', padding: '2px 4px' }} type="button">Edit</button>
+                <button className="btn btn-ghost" onClick={() => void promoteDemand(item.id)} style={{ fontSize: '10px', padding: '2px 4px' }} type="button">Promote</button>
+                <button className="btn btn-ghost" onClick={() => void removeDemandItem(item.id)} style={{ fontSize: '10px', padding: '2px 4px', color: 'var(--status-red)' }} type="button">Del</button>
               </div>
             ))}
-            {demandItems.length === 0 && (
+            {demandItems.length === 0 && !demandFormOpen && (
               <p style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>No items</p>
             )}
           </div>
