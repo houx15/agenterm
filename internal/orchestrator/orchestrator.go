@@ -619,7 +619,7 @@ func isExecutionOperationalTool(name string) bool {
 		"create_session", "wait_for_session_ready", "send_command", "send_key",
 		"read_session_output", "is_session_idle", "close_session", "can_close_session",
 		"merge_worktree", "resolve_merge_conflict", "update_task",
-		"list_task_review_cycles", "create_review_cycle", "update_review_cycle",
+		"list_task_review_cycles", "get_review_loop_status", "create_review_cycle", "update_review_cycle",
 		"list_review_issues", "create_review_issue", "update_review_issue",
 		"list_project_knowledge", "create_project_knowledge",
 		"preview_assignments", "confirm_assignments", "list_assignments",
@@ -1850,6 +1850,7 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"confirm_assignments":      {},
 			"list_assignments":         {},
 			"create_task":              {},
+			"get_review_loop_status":   {},
 			"write_task_spec":          {},
 			"create_session":           {},
 			"wait_for_session_ready":   {},
@@ -1877,6 +1878,7 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"merge_worktree":           {},
 			"resolve_merge_conflict":   {},
 			"list_task_review_cycles":  {},
+			"get_review_loop_status":   {},
 			"create_review_cycle":      {},
 			"update_review_cycle":      {},
 			"list_review_issues":       {},
@@ -1901,6 +1903,7 @@ func stageToolAllowed(stage string, toolName string) bool {
 			"preview_assignments":      {},
 			"list_assignments":         {},
 			"list_task_review_cycles":  {},
+			"get_review_loop_status":   {},
 			"list_review_issues":       {},
 			"write_task_spec":          {},
 			"update_task":              {},
@@ -1967,7 +1970,7 @@ func (o *Orchestrator) projectIDForTool(ctx context.Context, toolName string, ar
 		return optionalString(args, "project_id")
 	case "get_current_run", "transition_run_stage":
 		return optionalString(args, "project_id")
-	case "update_task", "list_task_review_cycles", "create_review_cycle":
+	case "update_task", "list_task_review_cycles", "get_review_loop_status", "create_review_cycle":
 		taskID, err := optionalString(args, "task_id")
 		if err != nil || strings.TrimSpace(taskID) == "" || o.taskRepo == nil {
 			return "", err
@@ -2062,7 +2065,7 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 		return containsFold([]string{
 			"create_task", "create_worktree", "write_task_spec", "create_session",
 			"read_session_output", "is_session_idle", "get_project_status",
-			"update_task", "list_task_review_cycles", "list_review_issues",
+			"update_task", "list_task_review_cycles", "get_review_loop_status", "list_review_issues",
 			"list_project_knowledge", "create_project_knowledge",
 			"preview_assignments", "confirm_assignments", "list_assignments",
 			"get_current_run", "transition_run_stage",
@@ -2071,20 +2074,20 @@ func toolAllowedByRole(toolName string, role playbook.StageRole) bool {
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
 			"can_close_session", "list_task_review_cycles", "create_review_cycle",
-			"update_review_cycle", "list_review_issues", "create_review_issue",
+			"get_review_loop_status", "update_review_cycle", "list_review_issues", "create_review_issue",
 			"update_review_issue", "update_task", "list_project_knowledge", "create_project_knowledge",
 		}, toolName)
 	case "tester":
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
-			"can_close_session", "close_session", "list_task_review_cycles",
+			"can_close_session", "close_session", "list_task_review_cycles", "get_review_loop_status",
 			"list_review_issues", "update_task", "list_project_knowledge", "create_project_knowledge",
 		}, toolName)
 	default:
 		return containsFold([]string{
 			"create_session", "send_command", "read_session_output", "is_session_idle",
 			"write_task_spec", "update_task", "can_close_session", "close_session", "resolve_merge_conflict",
-			"list_task_review_cycles", "create_review_cycle", "update_review_cycle",
+			"list_task_review_cycles", "get_review_loop_status", "create_review_cycle", "update_review_cycle",
 			"list_review_issues", "create_review_issue", "update_review_issue",
 			"list_project_knowledge", "create_project_knowledge",
 			"preview_assignments", "list_assignments", "get_current_run",

@@ -427,6 +427,47 @@ func (h *handler) listTaskReviewCycles(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, items)
 }
 
+func (h *handler) getTaskReviewLoopStatus(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("id")
+	if _, ok := h.mustGetTask(w, r, taskID); !ok {
+		return
+	}
+	if h.reviewRepo == nil {
+		jsonError(w, http.StatusServiceUnavailable, "review repo unavailable")
+		return
+	}
+	cycles, err := h.reviewRepo.ListCyclesByTask(r.Context(), taskID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	openIssues, err := h.reviewRepo.CountOpenIssuesByTask(r.Context(), taskID)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	latestStatus := "not_started"
+	latestIteration := 0
+	latestCycleID := ""
+	if len(cycles) > 0 {
+		latest := cycles[len(cycles)-1]
+		latestStatus = strings.ToLower(strings.TrimSpace(latest.Status))
+		latestIteration = latest.Iteration
+		latestCycleID = latest.ID
+	}
+	passed := latestStatus == "review_passed" && openIssues == 0
+	needsFix := latestStatus == "review_changes_requested" || openIssues > 0
+	jsonResponse(w, http.StatusOK, map[string]any{
+		"task_id":           taskID,
+		"latest_cycle_id":   latestCycleID,
+		"latest_iteration":  latestIteration,
+		"latest_status":     latestStatus,
+		"open_issues_total": openIssues,
+		"passed":            passed,
+		"needs_fix":         needsFix,
+	})
+}
+
 func (h *handler) createTaskReviewCycle(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
 	if _, ok := h.mustGetTask(w, r, taskID); !ok {

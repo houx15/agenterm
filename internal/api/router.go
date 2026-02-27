@@ -176,6 +176,7 @@ func NewRouter(conn *sql.DB, gw gateway, manager sessionManager, lifecycle *sess
 	mux.HandleFunc("GET /api/projects/{id}/role-bindings", handler.listProjectRoleBindings)
 	mux.HandleFunc("PUT /api/projects/{id}/role-bindings", handler.replaceProjectRoleBindings)
 	mux.HandleFunc("GET /api/tasks/{id}/review-cycles", handler.listTaskReviewCycles)
+	mux.HandleFunc("GET /api/tasks/{id}/review-loop/status", handler.getTaskReviewLoopStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/review-cycles", handler.createTaskReviewCycle)
 	mux.HandleFunc("PATCH /api/review-cycles/{id}", handler.updateReviewCycle)
 	mux.HandleFunc("GET /api/review-cycles/{id}/issues", handler.listReviewCycleIssues)

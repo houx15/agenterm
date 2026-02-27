@@ -705,6 +705,25 @@ func defaultTools(client *RESTToolClient) []Tool {
 			},
 		},
 		{
+			Name:        "get_review_loop_status",
+			Description: "Get compact review-loop status for one task (latest cycle + open issue count + pass/fix flags)",
+			Parameters: map[string]Param{
+				"task_id": {Type: "string", Description: "Task id", Required: true},
+			},
+			Execute: func(ctx context.Context, args map[string]any) (any, error) {
+				taskID, err := requiredString(args, "task_id")
+				if err != nil {
+					return nil, err
+				}
+				var out map[string]any
+				err = client.doJSON(ctx, http.MethodGet, "/api/tasks/"+taskID+"/review-loop/status", nil, nil, &out)
+				if err != nil {
+					return nil, err
+				}
+				return out, nil
+			},
+		},
+		{
 			Name:        "create_review_cycle",
 			Description: "Create a review cycle for one task",
 			Parameters: map[string]Param{

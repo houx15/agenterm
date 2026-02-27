@@ -133,6 +133,11 @@ func TestQualityLoopAndKnowledgeToolsCallExpectedEndpoints(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("list_task_review_cycles failed: %v", err)
 	}
+	if _, err := ts.Execute(context.Background(), "get_review_loop_status", map[string]any{
+		"task_id": "task-1",
+	}); err != nil {
+		t.Fatalf("get_review_loop_status failed: %v", err)
+	}
 	if _, err := ts.Execute(context.Background(), "create_review_cycle", map[string]any{
 		"task_id":     "task-1",
 		"commit_hash": "abc123",
@@ -178,8 +183,8 @@ func TestQualityLoopAndKnowledgeToolsCallExpectedEndpoints(t *testing.T) {
 		t.Fatalf("create_project_knowledge failed: %v", err)
 	}
 
-	if len(calls) != 9 {
-		t.Fatalf("calls=%d want 9", len(calls))
+	if len(calls) != 10 {
+		t.Fatalf("calls=%d want 10", len(calls))
 	}
 	if !strings.HasPrefix(calls[0], "PATCH /api/tasks/task-1 ") {
 		t.Fatalf("unexpected call 0: %q", calls[0])
@@ -187,26 +192,29 @@ func TestQualityLoopAndKnowledgeToolsCallExpectedEndpoints(t *testing.T) {
 	if !strings.HasPrefix(calls[1], "GET /api/tasks/task-1/review-cycles ") {
 		t.Fatalf("unexpected call 1: %q", calls[1])
 	}
-	if !strings.HasPrefix(calls[2], "POST /api/tasks/task-1/review-cycles ") {
+	if !strings.HasPrefix(calls[2], "GET /api/tasks/task-1/review-loop/status ") {
 		t.Fatalf("unexpected call 2: %q", calls[2])
 	}
-	if !strings.HasPrefix(calls[3], "PATCH /api/review-cycles/cycle-1 ") {
+	if !strings.HasPrefix(calls[3], "POST /api/tasks/task-1/review-cycles ") {
 		t.Fatalf("unexpected call 3: %q", calls[3])
 	}
-	if !strings.HasPrefix(calls[4], "GET /api/review-cycles/cycle-1/issues ") {
+	if !strings.HasPrefix(calls[4], "PATCH /api/review-cycles/cycle-1 ") {
 		t.Fatalf("unexpected call 4: %q", calls[4])
 	}
-	if !strings.HasPrefix(calls[5], "POST /api/review-cycles/cycle-1/issues ") {
+	if !strings.HasPrefix(calls[5], "GET /api/review-cycles/cycle-1/issues ") {
 		t.Fatalf("unexpected call 5: %q", calls[5])
 	}
-	if !strings.HasPrefix(calls[6], "PATCH /api/review-issues/issue-1 ") {
+	if !strings.HasPrefix(calls[6], "POST /api/review-cycles/cycle-1/issues ") {
 		t.Fatalf("unexpected call 6: %q", calls[6])
 	}
-	if !strings.HasPrefix(calls[7], "GET /api/projects/project-1/knowledge ") {
+	if !strings.HasPrefix(calls[7], "PATCH /api/review-issues/issue-1 ") {
 		t.Fatalf("unexpected call 7: %q", calls[7])
 	}
-	if !strings.HasPrefix(calls[8], "POST /api/projects/project-1/knowledge ") {
+	if !strings.HasPrefix(calls[8], "GET /api/projects/project-1/knowledge ") {
 		t.Fatalf("unexpected call 8: %q", calls[8])
+	}
+	if !strings.HasPrefix(calls[9], "POST /api/projects/project-1/knowledge ") {
+		t.Fatalf("unexpected call 9: %q", calls[9])
 	}
 }
 

@@ -1533,6 +1533,15 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	if listedCycles[len(listedCycles)-1]["status"] != "review_changes_requested" {
 		t.Fatalf("cycle status after issue create=%v want review_changes_requested", listedCycles[len(listedCycles)-1]["status"])
 	}
+	loopStatusWithOpenIssues := apiRequest(t, h, http.MethodGet, "/api/tasks/"+taskID+"/review-loop/status", nil, true)
+	if loopStatusWithOpenIssues.Code != http.StatusOK {
+		t.Fatalf("review loop status(open issues) status=%d body=%s", loopStatusWithOpenIssues.Code, loopStatusWithOpenIssues.Body.String())
+	}
+	var loopOpenBody map[string]any
+	decodeBody(t, loopStatusWithOpenIssues, &loopOpenBody)
+	if loopOpenBody["needs_fix"] != true {
+		t.Fatalf("needs_fix=%v want true", loopOpenBody["needs_fix"])
+	}
 
 	passWithOpenIssues := apiRequest(t, h, http.MethodPatch, "/api/review-cycles/"+cycleID, map[string]any{
 		"status": "review_passed",
@@ -1554,6 +1563,21 @@ func TestOrchestratorGovernanceEndpoints(t *testing.T) {
 	}, true)
 	if resolveIssue.Code != http.StatusOK {
 		t.Fatalf("resolve review issue status=%d body=%s", resolveIssue.Code, resolveIssue.Body.String())
+	}
+	passCycle := apiRequest(t, h, http.MethodPatch, "/api/review-cycles/"+cycleID, map[string]any{
+		"status": "review_passed",
+	}, true)
+	if passCycle.Code != http.StatusOK {
+		t.Fatalf("set review_passed status=%d body=%s", passCycle.Code, passCycle.Body.String())
+	}
+	loopStatusPassed := apiRequest(t, h, http.MethodGet, "/api/tasks/"+taskID+"/review-loop/status", nil, true)
+	if loopStatusPassed.Code != http.StatusOK {
+		t.Fatalf("review loop status(passed) status=%d body=%s", loopStatusPassed.Code, loopStatusPassed.Body.String())
+	}
+	var loopPassedBody map[string]any
+	decodeBody(t, loopStatusPassed, &loopPassedBody)
+	if loopPassedBody["passed"] != true {
+		t.Fatalf("passed=%v want true", loopPassedBody["passed"])
 	}
 
 	completeTask := apiRequest(t, h, http.MethodPatch, "/api/tasks/"+taskID, map[string]any{
