@@ -818,7 +818,11 @@ function savePanePreference(preference: PanePreference): void {
   if (typeof window === 'undefined') {
     return
   }
-  window.localStorage.setItem(panePreferenceStorageKey, JSON.stringify(preference))
+  try {
+    window.localStorage.setItem(panePreferenceStorageKey, JSON.stringify(preference))
+  } catch {
+    // Ignore storage failures so workspace remains usable in restrictive browser modes.
+  }
 }
 
 function readAsString(value: unknown): string {
