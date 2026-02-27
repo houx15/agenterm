@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Project, Session } from '../api/types'
+import { getWindowID } from '../api/types'
 import { House, Settings, QrCode, Bot, TerminalIcon, ChevronDown, ChevronRight } from './Lucide'
 
 interface ProjectSidebarProps {
@@ -113,7 +114,8 @@ export default function ProjectSidebar({
 
               {isExpanded &&
                 projectSessions.map((session) => {
-                  const unread = session.tmux_window_id ? (unreadByWindow[session.tmux_window_id] || 0) : 0
+                  const wid = getWindowID(session)
+                  const unread = wid ? (unreadByWindow[wid] || 0) : 0
                   const agentName = session.role || session.agent_type
                   const orch = isOrchestrator(session)
 

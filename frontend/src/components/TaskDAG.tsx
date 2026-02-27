@@ -1,4 +1,5 @@
 import type { Session, Task } from '../api/types'
+import { getWindowID } from '../api/types'
 
 interface TaskDAGProps {
   tasks: Task[]
@@ -39,7 +40,7 @@ export default function TaskDAG({ tasks, sessionsByTask, onOpenTask }: TaskDAGPr
           {tasks.map((task) => {
             const depNames = task.depends_on.map((depID) => taskNameByID.get(depID) ?? depID)
             const session = sessionsByTask[task.id]
-            const clickable = Boolean(session?.tmux_window_id)
+            const clickable = Boolean(session && getWindowID(session))
 
             return (
               <article

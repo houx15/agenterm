@@ -1,6 +1,7 @@
 import Terminal from './Terminal'
 import { X } from './Lucide'
 import type { Session } from '../api/types'
+import { getWindowID } from '../api/types'
 import { getStatusClass } from '../utils/getStatusClass'
 
 interface TerminalGridProps {
@@ -23,7 +24,7 @@ export default function TerminalGrid({
   onFocusPane,
 }: TerminalGridProps) {
   const terminalSessions = sessions.filter(
-    (s) => s.tmux_window_id && s.agent_type !== 'orchestrator',
+    (s) => getWindowID(s) && s.agent_type !== 'orchestrator',
   )
 
   if (terminalSessions.length === 0) {
@@ -37,7 +38,7 @@ export default function TerminalGrid({
   return (
     <div className="terminal-grid">
       {terminalSessions.map((session) => {
-        const windowID = session.tmux_window_id!
+        const windowID = getWindowID(session)
         const statusClass = getStatusClass(session.status)
 
         return (

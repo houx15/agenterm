@@ -13,6 +13,7 @@ import type {
   Task,
   ServerMessage,
 } from '../api/types'
+import { getWindowID } from '../api/types'
 import { PanelRight, PanelLeft, Moon, Sun } from './Lucide'
 import ProjectSidebar from './ProjectSidebar'
 import TerminalGrid from './TerminalGrid'
@@ -144,8 +145,9 @@ export default function Workspace() {
       }
       for (const pair of projectSessions) {
         for (const session of pair.sessions ?? []) {
-          if (session.tmux_window_id) {
-            windowsByProject[pair.projectID].push(session.tmux_window_id)
+          const wid = getWindowID(session)
+          if (wid) {
+            windowsByProject[pair.projectID].push(wid)
           }
         }
       }
@@ -223,10 +225,11 @@ export default function Workspace() {
     if (!sessionID?.trim() || !windowID?.trim()) return
     try {
       const lines = await getSessionOutput<Array<{ text: string }>>(sessionID, 1200)
-      const snapshot = lines.map((line) => line.text ?? '').join('\n')
+      const snapshot = lines.map((line) => line.text ?? '').join('\r\n')
       setRawBuffers((prev) => {
         const existing = prev[windowID] ?? ''
-        if (existing.length >= snapshot.length && existing.startsWith(snapshot)) {
+        // Skip if we already have live data that's longer (i.e., from WS stream)
+        if (existing.length > snapshot.length) {
           return prev
         }
         return { ...prev, [windowID]: snapshot.slice(-terminalReplayMaxChars) }
@@ -285,8 +288,9 @@ export default function Workspace() {
     if (app.connectionStatus !== 'connected') return
     // Snapshot all sessions with window IDs
     for (const session of sessions) {
-      if (session.tmux_window_id && session.id) {
-        void refreshWindowSnapshot(session.id, session.tmux_window_id)
+      const wid = getWindowID(session)
+      if (wid && session.id) {
+        void refreshWindowSnapshot(session.id, wid)
       }
     }
   }, [app.connectionStatus, sessions, refreshWindowSnapshot])
@@ -332,9 +336,10 @@ export default function Workspace() {
           sessions={sessions}
           unreadByWindow={app.unreadByWindow}
           onSelectAgent={(session: Session) => {
-            if (session.tmux_window_id) {
-              setActiveWindowID(session.tmux_window_id)
-              app.setActiveWindow(session.tmux_window_id)
+            const wid = getWindowID(session)
+            if (wid) {
+              setActiveWindowID(wid)
+              app.setActiveWindow(wid)
             }
           }}
           onNewProject={() => setCreateProjectOpen(true)}
@@ -454,9 +459,12 @@ export default function Workspace() {
             onClose={() => setPanelOpen(false)}
             onOpenTaskSession={(taskID: string) => {
               const session = sessions.find((s) => s.task_id === taskID)
-              if (session?.tmux_window_id) {
-                setActiveWindowID(session.tmux_window_id)
-                app.setActiveWindow(session.tmux_window_id)
+              if (session) {
+                const wid = getWindowID(session)
+                if (wid) {
+                  setActiveWindowID(wid)
+                  app.setActiveWindow(wid)
+                }
               }
             }}
             onOpenDemandPool={() => {

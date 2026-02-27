@@ -216,14 +216,20 @@ export interface Task {
 export interface Session {
   id: string
   task_id?: string
-  tmux_session_name: string
-  tmux_window_id?: string
+  terminal_id?: string          // PTY session ID (new)
+  tmux_session_name?: string    // kept for backward compat
+  tmux_window_id?: string       // kept for backward compat
   agent_type: string
   role: string
   status: string
   human_attached: boolean
   created_at: string
   last_activity_at: string
+}
+
+/** Get the terminal window ID for a session. Prefers terminal_id, falls back to tmux_window_id. */
+export function getWindowID(session: Session): string {
+  return session.terminal_id || session.tmux_window_id || ''
 }
 
 export interface AgentConfig {
