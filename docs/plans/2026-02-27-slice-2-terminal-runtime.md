@@ -1,6 +1,6 @@
 ---
 title: "Slice 2: Terminal Runtime Hardening"
-status: active
+status: completed
 date: 2026-02-27
 owner: platform
 ---
