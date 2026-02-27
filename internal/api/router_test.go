@@ -905,6 +905,46 @@ func TestSessionAndAgentNotFoundErrors(t *testing.T) {
 	}
 }
 
+func TestConfirmAssignmentsValidatesPlaybookRoleStageContracts(t *testing.T) {
+	h, _ := openAPI(t, &fakeGateway{})
+
+	createProject := apiRequest(t, h, http.MethodPost, "/api/projects", map[string]any{
+		"name":      "governance-check",
+		"repo_path": t.TempDir(),
+		"playbook":  "pairing-coding",
+	}, true)
+	if createProject.Code != http.StatusCreated {
+		t.Fatalf("create project status=%d body=%s", createProject.Code, createProject.Body.String())
+	}
+	var project map[string]any
+	decodeBody(t, createProject, &project)
+	projectID := project["id"].(string)
+
+	invalidRole := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/confirm", map[string]any{
+		"assignments": []map[string]any{
+			{"stage": "plan", "role": "requirements-analyst", "agent_type": "claude-code", "max_parallel": 1},
+		},
+	}, true)
+	if invalidRole.Code != http.StatusBadRequest {
+		t.Fatalf("invalid role status=%d body=%s", invalidRole.Code, invalidRole.Body.String())
+	}
+	if !strings.Contains(invalidRole.Body.String(), "not defined in playbook") {
+		t.Fatalf("invalid role body=%s", invalidRole.Body.String())
+	}
+
+	stageMismatch := apiRequest(t, h, http.MethodPost, "/api/projects/"+projectID+"/orchestrator/assignments/confirm", map[string]any{
+		"assignments": []map[string]any{
+			{"stage": "build", "role": "planner", "agent_type": "claude-code", "max_parallel": 1},
+		},
+	}, true)
+	if stageMismatch.Code != http.StatusBadRequest {
+		t.Fatalf("stage mismatch status=%d body=%s", stageMismatch.Code, stageMismatch.Body.String())
+	}
+	if !strings.Contains(stageMismatch.Body.String(), "not defined for stage") {
+		t.Fatalf("stage mismatch body=%s", stageMismatch.Body.String())
+	}
+}
+
 func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	h, _ := openAPI(t, &fakeGateway{})
 

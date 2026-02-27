@@ -955,7 +955,8 @@ func (h *handler) previewProjectAssignments(w http.ResponseWriter, r *http.Reque
 
 func (h *handler) confirmProjectAssignments(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	if _, ok := h.mustGetProject(w, r, projectID); !ok {
+	project, ok := h.mustGetProject(w, r, projectID)
+	if !ok {
 		return
 	}
 	if h.roleAgentAssignRepo == nil || h.registry == nil || h.roleBindingRepo == nil || h.projectOrchestratorRepo == nil {
@@ -975,6 +976,17 @@ func (h *handler) confirmProjectAssignments(w http.ResponseWriter, r *http.Reque
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	enforceRoleContract := strings.TrimSpace(project.Playbook) != ""
+	roleStageIndex := map[string]map[string]struct{}{}
+	if enforceRoleContract {
+		pb := h.resolveProjectPlaybook(project)
+		if pb == nil {
+			jsonError(w, http.StatusBadRequest, "project playbook not found")
+			return
+		}
+		roleStageIndex = buildRoleStageIndex(collectPlaybookRoleDefs(pb, ""))
+	}
+
 	profile, err := h.projectOrchestratorRepo.Get(r.Context(), projectID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -1001,6 +1013,24 @@ func (h *handler) confirmProjectAssignments(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		roleKey := strings.ToLower(role)
+		if enforceRoleContract {
+			stagesForRole := roleStageIndex[roleKey]
+			if len(stagesForRole) == 0 {
+				jsonError(w, http.StatusBadRequest, fmt.Sprintf("role %q is not defined in playbook %q", role, project.Playbook))
+				return
+			}
+			if stage == "" {
+				if len(stagesForRole) != 1 {
+					jsonError(w, http.StatusBadRequest, fmt.Sprintf("stage is required for role %q", role))
+					return
+				}
+				stage = onlyStage(stagesForRole)
+			}
+			if _, ok := stagesForRole[stage]; !ok {
+				jsonError(w, http.StatusBadRequest, fmt.Sprintf("role %q is not defined for stage %q in playbook %q", role, stage, project.Playbook))
+				return
+			}
+		}
 		if _, dup := seenRole[roleKey]; dup {
 			jsonError(w, http.StatusBadRequest, fmt.Sprintf("duplicate role assignment: %s", role))
 			return
@@ -1114,6 +1144,29 @@ func collectPlaybookRoleDefs(pb *playbook.Playbook, stageFilter string) []stageR
 	appendStage("build", pb.Workflow.Build)
 	appendStage("test", pb.Workflow.Test)
 	return defs
+}
+
+func buildRoleStageIndex(defs []stageRoleDef) map[string]map[string]struct{} {
+	out := make(map[string]map[string]struct{}, len(defs))
+	for _, def := range defs {
+		role := strings.ToLower(strings.TrimSpace(def.Role.Name))
+		stage := strings.ToLower(strings.TrimSpace(def.Stage))
+		if role == "" || stage == "" {
+			continue
+		}
+		if _, ok := out[role]; !ok {
+			out[role] = make(map[string]struct{}, 1)
+		}
+		out[role][stage] = struct{}{}
+	}
+	return out
+}
+
+func onlyStage(stages map[string]struct{}) string {
+	for stage := range stages {
+		return stage
+	}
+	return ""
 }
 
 func containsFold(values []string, target string) bool {
