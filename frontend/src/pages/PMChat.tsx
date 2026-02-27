@@ -27,6 +27,12 @@ import TaskDAG from '../components/TaskDAG'
 import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
 import DemandPool from './DemandPool'
 
+interface ProjectSessionStats {
+  total: number
+  working: number
+  needsResponse: number
+}
+
 function shouldRefreshFromOrchestratorEvent(event: OrchestratorServerMessage | null): boolean {
   if (!event) {
     return false
@@ -34,37 +40,66 @@ function shouldRefreshFromOrchestratorEvent(event: OrchestratorServerMessage | n
   return event.type === 'tool_result' || event.type === 'done'
 }
 
+function isWorkingSessionStatus(status: string): boolean {
+  const normalized = (status || '').trim().toLowerCase()
+  return ['working', 'running', 'executing', 'busy', 'active'].includes(normalized)
+}
+
+function needsResponseStatus(status: string): boolean {
+  const normalized = (status || '').trim().toLowerCase()
+  return ['waiting', 'waiting_review', 'human_takeover', 'blocked', 'needs_input', 'reviewing'].includes(normalized)
+}
+
+function isOrchestratorSession(session: Session): boolean {
+  const role = (session.role || '').toLowerCase()
+  const agent = (session.agent_type || '').toLowerCase()
+  return role.includes('orchestrator') || role.includes('pm') || agent.includes('orchestrator')
+}
+
 export default function PMChat() {
   const navigate = useNavigate()
   const app = useAppContext()
   const [, setSearchParams] = useSearchParams()
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 900)
 
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
   const [projectInfoCollapsed, setProjectInfoCollapsed] = useState(false)
   const [progressCollapsed, setProgressCollapsed] = useState(false)
   const [taskGroupCollapsed, setTaskGroupCollapsed] = useState(false)
-  const [showMobileInfo, setShowMobileInfo] = useState(false)
-  const [progressReport, setProgressReport] = useState<OrchestratorProgressReport | null>(null)
-  const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
-  const [reportLoading, setReportLoading] = useState(false)
-  const [reportError, setReportError] = useState('')
-  const [exceptions, setExceptions] = useState<OrchestratorExceptionItem[]>([])
-  const [exceptionCounts, setExceptionCounts] = useState<{ total: number; open: number; resolved: number }>({ total: 0, open: 0, resolved: 0 })
-  const [exceptionsLoading, setExceptionsLoading] = useState(false)
-  const [exceptionsError, setExceptionsError] = useState('')
   const [exceptionsCollapsed, setExceptionsCollapsed] = useState(false)
-  const [activePane, setActivePane] = useState<'execution' | 'demand'>('execution')
+
+  const [showMobileInfo, setShowMobileInfo] = useState(false)
+  const [demandPoolOpen, setDemandPoolOpen] = useState(false)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
+  const [progressReport, setProgressReport] = useState<OrchestratorProgressReport | null>(null)
+  const [reportUpdatedAt, setReportUpdatedAt] = useState<number | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState('')
+
+  const [exceptions, setExceptions] = useState<OrchestratorExceptionItem[]>([])
+  const [exceptionCounts, setExceptionCounts] = useState<{ total: number; open: number; resolved: number }>({ total: 0, open: 0, resolved: 0 })
+  const [exceptionsLoading, setExceptionsLoading] = useState(false)
+  const [exceptionsError, setExceptionsError] = useState('')
+
+  const [projectSessionWindows, setProjectSessionWindows] = useState<Record<string, string[]>>({})
+  const [projectSessionStats, setProjectSessionStats] = useState<Record<string, ProjectSessionStats>>({})
   const [projectID, setProjectID] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '')
 
   const orchestrator = useOrchestratorWS(projectID)
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 900)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const loadProjectData = useCallback(async () => {
     if (!projectID) {
@@ -73,9 +108,7 @@ export default function PMChat() {
       setLoading(false)
       return
     }
-
     const [taskList, sessionList] = await Promise.all([listProjectTasks<Task[]>(projectID), listSessions<Session[]>({ projectID })])
-
     setTasks(taskList)
     setSessions(sessionList)
     setLoading(false)
@@ -88,14 +121,48 @@ export default function PMChat() {
       setProjects(projectList)
       if (projectList.length === 0) {
         setProjectID('')
+        setLoading(false)
         return
       }
+
       const hasCurrent = Boolean(projectID && projectList.some((project) => project.id === projectID))
       const nextID = hasCurrent ? projectID : projectList[0].id
       if (nextID !== projectID) {
         setProjectID(nextID)
         setSearchParams({ project: nextID }, { replace: true })
       }
+
+      const projectSessions = await Promise.all(
+        projectList.map(async (project) => ({
+          projectID: project.id,
+          sessions: await listSessions<Session[]>({ projectID: project.id }),
+        })),
+      )
+
+      const windowsByProject: Record<string, string[]> = {}
+      const statsByProject: Record<string, ProjectSessionStats> = {}
+      for (const project of projectList) {
+        windowsByProject[project.id] = []
+        statsByProject[project.id] = { total: 0, working: 0, needsResponse: 0 }
+      }
+
+      for (const pair of projectSessions) {
+        for (const session of pair.sessions ?? []) {
+          statsByProject[pair.projectID].total += 1
+          if (isWorkingSessionStatus(session.status)) {
+            statsByProject[pair.projectID].working += 1
+          }
+          if (needsResponseStatus(session.status)) {
+            statsByProject[pair.projectID].needsResponse += 1
+          }
+          if (session.tmux_window_id) {
+            windowsByProject[pair.projectID].push(session.tmux_window_id)
+          }
+        }
+      }
+
+      setProjectSessionWindows(windowsByProject)
+      setProjectSessionStats(statsByProject)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects')
       setLoading(false)
@@ -111,6 +178,25 @@ export default function PMChat() {
     }
   }, [loadProjectData])
 
+  const refreshExceptions = useCallback(async () => {
+    if (!projectID) {
+      setExceptions([])
+      setExceptionCounts({ total: 0, open: 0, resolved: 0 })
+      return
+    }
+    setExceptionsLoading(true)
+    setExceptionsError('')
+    try {
+      const response = await listOrchestratorExceptions<OrchestratorExceptionListResponse>(projectID, 'open')
+      setExceptions(response.items ?? [])
+      setExceptionCounts(response.counts ?? { total: 0, open: 0, resolved: 0 })
+    } catch (err) {
+      setExceptionsError(err instanceof Error ? err.message : 'Failed to load exceptions')
+    } finally {
+      setExceptionsLoading(false)
+    }
+  }, [projectID])
+
   useEffect(() => {
     void refreshAll()
   }, [refreshAll])
@@ -118,6 +204,10 @@ export default function PMChat() {
   useEffect(() => {
     void refreshProjectData()
   }, [refreshProjectData])
+
+  useEffect(() => {
+    void refreshExceptions()
+  }, [refreshExceptions])
 
   useEffect(() => {
     if (shouldRefreshFromOrchestratorEvent(orchestrator.lastEvent)) {
@@ -144,28 +234,90 @@ export default function PMChat() {
     setExceptionsLoading(false)
   }, [projectID])
 
+  const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projectID, projects])
+
   const sessionsByTask = useMemo(() => {
     const mapping: Record<string, Session> = {}
-
     for (const session of sessions) {
-      if (!session.task_id) {
-        continue
+      if (session.task_id) {
+        mapping[session.task_id] = session
       }
-      mapping[session.task_id] = session
     }
-
     return mapping
   }, [sessions])
 
   const taskLinks = useMemo<MessageTaskLink[]>(() => {
     const links: MessageTaskLink[] = []
-
     for (const task of tasks) {
       links.push({ id: task.id, label: task.id })
       links.push({ id: task.id, label: task.title })
     }
-
     return links
+  }, [tasks])
+
+  const taskByID = useMemo(() => {
+    const mapping: Record<string, Task> = {}
+    for (const task of tasks) {
+      mapping[task.id] = task
+    }
+    return mapping
+  }, [tasks])
+
+  const projectUnreadCounts = useMemo<Record<string, number>>(() => {
+    const unread: Record<string, number> = {}
+    for (const [project, windows] of Object.entries(projectSessionWindows)) {
+      unread[project] = windows.reduce((sum, windowID) => sum + (app.unreadByWindow[windowID] ?? 0), 0)
+    }
+    return unread
+  }, [app.unreadByWindow, projectSessionWindows])
+
+  const roadmapStages = useMemo(() => {
+    const order = ['brainstorm', 'plan', 'build', 'test', 'summarize']
+    const phase = (readAsString(progressReport?.phase) || 'plan').toLowerCase()
+    const activeIndex = Math.max(order.indexOf(phase), 0)
+    return order.map((stage, idx) => {
+      const state = idx < activeIndex ? 'done' : idx === activeIndex ? 'active' : 'pending'
+      return { stage, state }
+    })
+  }, [progressReport])
+
+  const agentSessions = useMemo(() => {
+    const list = [...sessions]
+    list.sort((left, right) => {
+      const leftOrchestrator = isOrchestratorSession(left) ? 1 : 0
+      const rightOrchestrator = isOrchestratorSession(right) ? 1 : 0
+      if (leftOrchestrator !== rightOrchestrator) {
+        return rightOrchestrator - leftOrchestrator
+      }
+      return left.role.localeCompare(right.role)
+    })
+    return list
+  }, [sessions])
+
+  const chatMessages = useMemo<SessionMessage[]>(() => {
+    if (!progressReport || !reportUpdatedAt) {
+      return orchestrator.messages
+    }
+    return [
+      ...orchestrator.messages,
+      {
+        id: `progress-report-${reportUpdatedAt}`,
+        text: `Progress report (${new Date(reportUpdatedAt).toLocaleTimeString()}):\n${buildReportSummaryText(progressReport)}`,
+        className: 'prompt',
+        role: 'system',
+        kind: 'text',
+        timestamp: reportUpdatedAt,
+      },
+    ]
+  }, [orchestrator.messages, progressReport, reportUpdatedAt])
+
+  const tasksByStatus = useMemo(() => {
+    const grouped: Record<string, number> = {}
+    for (const task of tasks) {
+      const key = (task.status || 'pending').toLowerCase()
+      grouped[key] = (grouped[key] ?? 0) + 1
+    }
+    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b))
   }, [tasks])
 
   const onSelectProject = (nextProjectID: string) => {
@@ -186,35 +338,12 @@ export default function PMChat() {
     navigate('/sessions')
   }
 
-  const selectedProject = useMemo(() => projects.find((project) => project.id === projectID) ?? null, [projectID, projects])
-  const chatMessages = useMemo<SessionMessage[]>(() => {
-    if (!progressReport || !reportUpdatedAt) {
-      return orchestrator.messages
+  const openSession = (session: Session) => {
+    if (session.tmux_window_id) {
+      app.setActiveWindow(session.tmux_window_id)
     }
-    const summary = buildReportSummaryText(progressReport)
-    return [
-      ...orchestrator.messages,
-      {
-        id: `progress-report-${reportUpdatedAt}`,
-        text: `Progress report (${new Date(reportUpdatedAt).toLocaleTimeString()}):\n${summary}`,
-        className: 'prompt',
-        role: 'system',
-        kind: 'text',
-        timestamp: reportUpdatedAt,
-      },
-    ]
-  }, [orchestrator.messages, progressReport, reportUpdatedAt])
-
-  const tasksByStatus = useMemo(() => {
-    const grouped: Record<string, number> = {}
-    for (const task of tasks) {
-      const key = (task.status || 'pending').toLowerCase()
-      grouped[key] = (grouped[key] ?? 0) + 1
-    }
-    return Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b))
-  }, [tasks])
-
-  const isMobile = window.innerWidth < 900
+    navigate('/sessions')
+  }
 
   const requestProgressReport = useCallback(async () => {
     if (!projectID) {
@@ -232,29 +361,6 @@ export default function PMChat() {
       setReportLoading(false)
     }
   }, [projectID])
-
-  const refreshExceptions = useCallback(async () => {
-    if (!projectID) {
-      setExceptions([])
-      setExceptionCounts({ total: 0, open: 0, resolved: 0 })
-      return
-    }
-    setExceptionsLoading(true)
-    setExceptionsError('')
-    try {
-      const response = await listOrchestratorExceptions<OrchestratorExceptionListResponse>(projectID, 'open')
-      setExceptions(response.items ?? [])
-      setExceptionCounts(response.counts ?? { total: 0, open: 0, resolved: 0 })
-    } catch (err) {
-      setExceptionsError(err instanceof Error ? err.message : 'Failed to load exceptions')
-    } finally {
-      setExceptionsLoading(false)
-    }
-  }, [projectID])
-
-  useEffect(() => {
-    void refreshExceptions()
-  }, [refreshExceptions])
 
   const confirmDeleteProject = useCallback(async () => {
     if (!selectedProject) {
@@ -294,7 +400,24 @@ export default function PMChat() {
       <section className="pm-project-detail">
         <div className="pm-panel-header">
           <h3>
-            <FolderOpen size={14} /> Project Detail
+            <MessageSquareText size={14} /> Project Roadmap
+          </h3>
+        </div>
+        <div className="pm-project-detail-body">
+          <div className="pm-roadmap">
+            {roadmapStages.map((item) => (
+              <div className={`pm-roadmap-stage ${item.state}`.trim()} key={item.stage}>
+                <span>{item.stage}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="pm-project-detail">
+        <div className="pm-panel-header">
+          <h3>
+            <FolderOpen size={14} /> Project Details
           </h3>
           <button className="secondary-btn" onClick={() => setProjectInfoCollapsed((prev) => !prev)} type="button">
             {projectInfoCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
@@ -303,6 +426,7 @@ export default function PMChat() {
         {!projectInfoCollapsed && selectedProject && (
           <div className="pm-project-detail-body">
             <div className="pm-project-detail-meta">
+              <p>Name: {selectedProject.name}</p>
               <p>Repository: {selectedProject.repo_path}</p>
               <p>Status: {selectedProject.status}</p>
               <p>Playbook: {selectedProject.playbook || 'auto'}</p>
@@ -397,34 +521,70 @@ export default function PMChat() {
 
   return (
     <section className="pm-chat-page">
-      <div className="pm-chat-layout-v2 pm-chat-layout-shell">
+      <div className="pm-workspace-layout">
         {!isMobile && (
-          <aside className="pm-chat-project-list">
-            <div className="pm-panel-header">
-              <h3>Projects</h3>
-              <small>{projects.length}</small>
-            </div>
-            <div className="pm-project-items">
-              {projects.map((project) => {
-                const active = project.id === projectID
-                return (
-                  <button
-                    className={`pm-project-item ${active ? 'active' : ''}`.trim()}
-                    key={project.id}
-                    onClick={() => onSelectProject(project.id)}
-                    type="button"
-                  >
-                    <span className="pm-project-item-name">{project.name}</span>
-                    <span className="pm-project-item-meta">{project.status}</span>
-                  </button>
-                )
-              })}
-              {projects.length === 0 && <p className="empty-view">No projects</p>}
-            </div>
+          <aside className="pm-workspace-left">
+            <section className="pm-chat-project-list">
+              <div className="pm-panel-header">
+                <h3>Projects</h3>
+                <small>{projects.length}</small>
+              </div>
+              <div className="pm-project-items">
+                {projects.map((project) => {
+                  const active = project.id === projectID
+                  const unread = projectUnreadCounts[project.id] ?? 0
+                  const stats = projectSessionStats[project.id] ?? { total: 0, working: 0, needsResponse: 0 }
+                  return (
+                    <button
+                      className={`pm-project-item ${active ? 'active' : ''}`.trim()}
+                      key={project.id}
+                      onClick={() => onSelectProject(project.id)}
+                      type="button"
+                    >
+                      <span className="pm-project-item-name">{project.name}</span>
+                      <span className="pm-project-item-meta">
+                        {project.status} · {stats.working}/{stats.total} working
+                      </span>
+                      {stats.needsResponse > 0 && <span className="pm-project-item-alert">needs {stats.needsResponse}</span>}
+                      {unread > 0 && <span className="pm-notification-badge">{unread}</span>}
+                    </button>
+                  )
+                })}
+                {projects.length === 0 && <p className="empty-view">No projects</p>}
+              </div>
+            </section>
+
+            <section className="pm-project-detail">
+              <div className="pm-panel-header">
+                <h3>Agents</h3>
+                <button className="secondary-btn" onClick={() => navigate('/sessions')} type="button">
+                  Open Sessions
+                </button>
+              </div>
+              <div className="pm-project-items">
+                {agentSessions.length === 0 && <p className="empty-view">No active agents.</p>}
+                {agentSessions.map((session) => {
+                  const task = session.task_id ? taskByID[session.task_id] : null
+                  const hasNeedsResponse = needsResponseStatus(session.status)
+                  return (
+                    <button className="pm-project-session-item" key={session.id} onClick={() => openSession(session)} type="button">
+                      <div className="pm-project-session-meta">
+                        <strong>{session.role || session.agent_type}</strong>
+                        <small>{task?.title || session.agent_type}</small>
+                      </div>
+                      <div className="pm-project-session-status">
+                        <small>{session.status}</small>
+                        {hasNeedsResponse ? <span className="pm-project-item-alert">needs reply</span> : null}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
           </aside>
         )}
 
-        <div className="pm-chat-content-area">
+        <section className="pm-workspace-center">
           <div className="pm-chat-header">
             {isMobile && (
               <div className="project-selector">
@@ -440,55 +600,35 @@ export default function PMChat() {
             )}
             {selectedProject && (
               <div className="pm-pane-toggle">
-                <button
-                  className={`secondary-btn ${activePane === 'execution' ? 'active' : ''}`.trim()}
-                  onClick={() => setActivePane('execution')}
-                  type="button"
-                >
-                  Execution
-                </button>
-                <button
-                  className={`secondary-btn ${activePane === 'demand' ? 'active' : ''}`.trim()}
-                  onClick={() => setActivePane('demand')}
-                  type="button"
-                >
+                <button className="secondary-btn" onClick={() => setDemandPoolOpen(true)} type="button">
                   Demand Pool
                 </button>
+                {isMobile && (
+                  <button className="secondary-btn" onClick={() => setShowMobileInfo(true)} type="button">
+                    Project Info
+                  </button>
+                )}
                 <button className="secondary-btn danger-btn" onClick={() => setDeleteModalOpen(true)} type="button">
                   Delete Project
                 </button>
               </div>
-            )}
-            {activePane === 'execution' && isMobile && selectedProject && (
-              <button className="secondary-btn" onClick={() => setShowMobileInfo(true)} type="button">
-                <span>Project Info</span>
-              </button>
             )}
           </div>
 
           {loading && <p className="empty-view">Loading PM chat context...</p>}
           {error && <p className="dashboard-error">{error}</p>}
 
-          {!loading && !error && selectedProject && activePane === 'execution' && (
-            <div className="pm-execution-layout">
-              {!isMobile && infoPanel}
-              <div className="pm-chat-only">
-                <ChatPanel
-                  messages={chatMessages}
-                  taskLinks={taskLinks}
-                  isStreaming={orchestrator.isStreaming}
-                  connectionStatus={orchestrator.connectionStatus}
-                  onSend={orchestrator.send}
-                  onTaskClick={openTaskSession}
-                  onReportProgress={requestProgressReport}
-                  isFetchingReport={reportLoading}
-                />
-              </div>
-            </div>
-          )}
-
-          {!loading && !error && selectedProject && activePane === 'demand' && (
-            <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
+          {!loading && !error && selectedProject && (
+            <ChatPanel
+              messages={chatMessages}
+              taskLinks={taskLinks}
+              isStreaming={orchestrator.isStreaming}
+              connectionStatus={orchestrator.connectionStatus}
+              onSend={orchestrator.send}
+              onTaskClick={openTaskSession}
+              onReportProgress={requestProgressReport}
+              isFetchingReport={reportLoading}
+            />
           )}
 
           {!loading && !error && !selectedProject && (
@@ -496,7 +636,9 @@ export default function PMChat() {
               <MessageSquareText size={16} /> Select a project to open PM Chat
             </div>
           )}
-        </div>
+        </section>
+
+        {!isMobile && <aside className="pm-workspace-right">{infoPanel}</aside>}
       </div>
 
       <Modal onClose={() => setShowMobileInfo(false)} open={showMobileInfo} title="Project Info">
@@ -504,9 +646,19 @@ export default function PMChat() {
           {selectedProject ? infoPanel : <p className="empty-text">No project selected.</p>}
           <div className="settings-actions">
             <button className="secondary-btn" onClick={() => setShowMobileInfo(false)} type="button">
-              <span>Close</span>
+              Close
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal onClose={() => setDemandPoolOpen(false)} open={demandPoolOpen} title="Demand Pool">
+        <div className="modal-form">
+          {selectedProject ? (
+            <DemandPool embedded projectID={selectedProject.id} projectName={selectedProject.name} />
+          ) : (
+            <p className="empty-text">Select a project first.</p>
+          )}
         </div>
       </Modal>
 

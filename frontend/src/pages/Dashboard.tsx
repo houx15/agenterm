@@ -176,8 +176,22 @@ export default function Dashboard() {
         listAgentStatuses<AgentStatusResponse>(),
       ])
 
+      const safeProjectsData = Array.isArray(projectsData) ? projectsData : []
+      const safeSessionsData = Array.isArray(sessionsData) ? sessionsData : []
+      const safeAgentStatusData = agentStatusData
+        ? {
+            ...agentStatusData,
+            items: Array.isArray(agentStatusData.items)
+              ? agentStatusData.items.map((item) => ({
+                  ...item,
+                  assignments: Array.isArray(item.assignments) ? item.assignments : [],
+                }))
+              : [],
+          }
+        : null
+
       const taskPairs = await Promise.all(
-        projectsData.map(async (project) => ({
+        safeProjectsData.map(async (project) => ({
           projectID: project.id,
           tasks: await listProjectTasks<Task[]>(project.id),
         })),
@@ -185,14 +199,14 @@ export default function Dashboard() {
 
       const nextTasksByProject: Record<string, Task[]> = {}
       for (const pair of taskPairs) {
-        nextTasksByProject[pair.projectID] = pair.tasks
+        nextTasksByProject[pair.projectID] = Array.isArray(pair.tasks) ? pair.tasks : []
       }
 
-      setProjects(projectsData)
-      setSessions(sessionsData)
-      setAgentStatus(agentStatusData)
+      setProjects(safeProjectsData)
+      setSessions(safeSessionsData)
+      setAgentStatus(safeAgentStatusData)
       setTasksByProject(nextTasksByProject)
-      setActivity(buildActivityFromData(projectsData, nextTasksByProject, sessionsData))
+      setActivity(buildActivityFromData(safeProjectsData, nextTasksByProject, safeSessionsData))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard data')
     } finally {
@@ -239,8 +253,8 @@ export default function Dashboard() {
         if (cancelled) {
           return
         }
-        setAgents(agentsData)
-        setPlaybooks(playbooksData)
+        setAgents(Array.isArray(agentsData) ? agentsData : [])
+        setPlaybooks(Array.isArray(playbooksData) ? playbooksData : [])
       } catch {
         // non-blocking for dashboard rendering
       }
@@ -284,8 +298,9 @@ export default function Dashboard() {
 
     if (app.lastMessage.type === 'windows') {
       const windowsMessage = app.lastMessage as WindowsMessage
+      const windowList = Array.isArray(windowsMessage.list) ? windowsMessage.list : []
       const statusByWindow: Record<string, string> = {}
-      for (const item of windowsMessage.list) {
+      for (const item of windowList) {
         statusByWindow[item.id] = item.status
       }
 
@@ -394,6 +409,7 @@ export default function Dashboard() {
 
   const agentTeamSummary = useMemo(() => {
     if (agentStatus) {
+      const statusItems = Array.isArray(agentStatus.items) ? agentStatus.items : []
       return {
         configuredAgents: agentStatus.total_configured,
         totalCapacity: agentStatus.total_capacity,
@@ -402,7 +418,7 @@ export default function Dashboard() {
         totalOrchestrator: agentStatus.total_orchestrator,
         totalIdle: agentStatus.total_idle,
         workingRatio: agentStatus.total_capacity > 0 ? Math.round((agentStatus.total_busy / agentStatus.total_capacity) * 100) : 0,
-        byType: agentStatus.items.map((item) => [
+        byType: statusItems.map((item) => [
           item.agent_id,
           {
             capacity: item.capacity,
@@ -458,10 +474,12 @@ export default function Dashboard() {
     if (!agentStatus) {
       return map
     }
-    for (const item of agentStatus.items) {
+    const statusItems = Array.isArray(agentStatus.items) ? agentStatus.items : []
+    for (const item of statusItems) {
+      const assignments = Array.isArray(item.assignments) ? item.assignments : []
       map.set(
         item.agent_id,
-        item.assignments.map((assignment) => ({
+        assignments.map((assignment) => ({
           projectName: assignment.project_name || 'Unassigned',
           taskTitle: assignment.task_title || assignment.task_id || assignment.session_id,
           role: assignment.role || 'worker',

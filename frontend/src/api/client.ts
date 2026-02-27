@@ -1,4 +1,7 @@
+import { buildHTTPURL } from './runtime'
+
 const TOKEN_STORAGE_KEY = 'agenterm_token'
+const DESKTOP_FALLBACK_TOKEN = 'agenterm-desktop-local'
 
 export interface CreateProjectInput {
   name: string
@@ -24,7 +27,21 @@ export function getToken(): string {
     localStorage.setItem(TOKEN_STORAGE_KEY, urlToken)
     return urlToken
   }
-  return localStorage.getItem(TOKEN_STORAGE_KEY) ?? ''
+  const envToken = (import.meta.env.VITE_AGENTERM_TOKEN as string | undefined)?.trim()
+  if (envToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, envToken)
+    return envToken
+  }
+  const tauriRuntime = typeof (window as Window & { __TAURI_IPC__?: unknown }).__TAURI_IPC__ !== 'undefined'
+  if (tauriRuntime) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, DESKTOP_FALLBACK_TOKEN)
+    return DESKTOP_FALLBACK_TOKEN
+  }
+  const stored = localStorage.getItem(TOKEN_STORAGE_KEY)
+  if (stored) {
+    return stored
+  }
+  return ''
 }
 
 interface RequestOptions extends RequestInit {
@@ -42,7 +59,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(path, {
+  const response = await fetch(buildHTTPURL(path), {
     ...options,
     headers,
   })

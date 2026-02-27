@@ -1,12 +1,12 @@
 :root {
-  --bg-main: #f4f5f7;
-  --bg-sidebar: #eceff3;
+  --bg-main: #eef2f7;
+  --bg-sidebar: #f7f9fc;
   --bg-panel: #ffffff;
-  --bg-bubble-output: #eef4ff;
-  --bg-bubble-input: #dceaff;
+  --bg-bubble-output: #ffffff;
+  --bg-bubble-input: #eaf2ff;
   --bg-bubble-error: #ffe9ea;
-  --bg-bubble-prompt: #f2f5ff;
-  --bg-bubble-code: #eef1fb;
+  --bg-bubble-prompt: #f5f8ff;
+  --bg-bubble-code: #f6f8fc;
   --text-primary: #101322;
   --text-secondary: #4f5d76;
   --text-dim: #72819a;
@@ -32,8 +32,8 @@ body,
 body {
   font-family: 'SF Pro Text', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', sans-serif;
   background:
-    radial-gradient(1200px 600px at 10% -10%, #dbe8ff 0%, rgba(219, 232, 255, 0) 65%),
-    radial-gradient(1100px 700px at 100% 0%, #f3dfff 0%, rgba(243, 223, 255, 0) 58%),
+    radial-gradient(1200px 600px at 10% -10%, #dce7f8 0%, rgba(220, 231, 248, 0) 65%),
+    radial-gradient(1100px 700px at 100% 0%, #edf2fb 0%, rgba(237, 242, 251, 0) 58%),
     var(--bg-main);
   color: var(--text-primary);
   overflow-x: hidden;
@@ -55,9 +55,9 @@ textarea {
 }
 
 .sidebar-container {
-  background: var(--bg-sidebar);
+  background: linear-gradient(180deg, #f9fbff 0%, var(--bg-sidebar) 100%);
   border-right: 1px solid var(--border);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45), 10px 0 24px rgba(16, 24, 40, 0.04);
   overflow: hidden;
 }
 
@@ -77,7 +77,7 @@ textarea {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1rem 0.8rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(207, 216, 231, 0.8);
 }
 
 .sidebar-header h1 {
@@ -89,11 +89,20 @@ textarea {
 
 .sidebar-badge {
   font-size: 0.72rem;
-  color: #204a87;
-  background: #dbe8ff;
+  color: #2a4f89;
+  background: #e6f0ff;
   padding: 0.2rem 0.48rem;
   border-radius: 999px;
   font-weight: 600;
+}
+
+.sidebar-section-label {
+  margin: 0.7rem 0.95rem 0.25rem;
+  color: #6c7f9d;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .nav-links {
@@ -101,7 +110,7 @@ textarea {
   grid-template-columns: 1fr;
   gap: 0.4rem;
   padding: 0.75rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(207, 216, 231, 0.75);
 }
 
 .nav-link {
@@ -109,16 +118,29 @@ textarea {
   text-decoration: none;
   padding: 0.62rem 0.75rem;
   border-radius: 10px;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  border: 1px solid transparent;
 }
 
 .nav-link.active,
 .nav-link:hover {
   color: #14396e;
-  background: #dbe8ff;
+  background: #e8f0ff;
+  border-color: #c8d9f3;
+}
+
+.nav-links-secondary {
+  border-bottom: 0;
+  padding-top: 0.35rem;
+}
+
+.sidebar-utility-nav {
+  margin-top: auto;
+  border-top: 1px solid rgba(207, 216, 231, 0.75);
+  padding-bottom: 1rem;
 }
 
 .session-list {
@@ -194,6 +216,7 @@ textarea {
   flex-direction: column;
   min-width: 0;
   overflow-x: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 30%);
 }
 
 .topbar {
@@ -201,9 +224,10 @@ textarea {
   align-items: center;
   gap: 0.75rem;
   padding: 0.8rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(210, 218, 232, 0.8);
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
 }
 
 .sidebar-collapse-toggle {
@@ -312,11 +336,11 @@ textarea {
 }
 
 .dashboard-section {
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.95);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 0.95rem;
-  box-shadow: 0 16px 32px rgba(20, 31, 53, 0.06);
+  box-shadow: 0 12px 26px rgba(20, 31, 53, 0.05);
 }
 
 .dashboard-section-title {
@@ -379,7 +403,7 @@ textarea {
 .project-card {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #f9fbff;
+  background: #ffffff;
   color: var(--text-primary);
   text-align: left;
   padding: 0.75rem;
@@ -444,7 +468,7 @@ textarea {
 .dashboard-resource-card {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #f9fbff;
+  background: #ffffff;
   padding: 0.65rem 0.7rem;
   display: grid;
   gap: 0.25rem;
@@ -469,7 +493,7 @@ textarea {
 .dashboard-agent-card {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f9fbff;
+  background: #ffffff;
   padding: 0.6rem 0.65rem;
   display: grid;
   gap: 0.22rem;
@@ -482,7 +506,7 @@ textarea {
 .session-grid-item {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f8fbff;
+  background: #ffffff;
   color: var(--text-primary);
   display: grid;
   justify-items: center;
@@ -507,7 +531,7 @@ textarea {
 .activity-feed-list li {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fbfcff;
+  background: #ffffff;
   padding: 0.6rem 0.7rem;
   display: flex;
   justify-content: space-between;
@@ -899,6 +923,35 @@ textarea {
   flex-direction: column;
 }
 
+.pm-workspace-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 360px;
+  gap: 0.8rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.pm-workspace-left,
+.pm-workspace-right {
+  display: grid;
+  gap: 0.7rem;
+  min-height: 0;
+  align-content: start;
+}
+
+.pm-workspace-center {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.7rem;
+}
+
+.pm-workspace-center .pm-chat-panel {
+  min-height: 0;
+  height: 100%;
+}
+
 .pm-chat-layout-v2 {
   display: grid;
   gap: 0.8rem;
@@ -915,9 +968,10 @@ textarea {
 .pm-chat-project-list {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
-  min-height: calc(100vh - 230px);
+  min-height: 0;
+  max-height: 46dvh;
   display: flex;
   flex-direction: column;
 }
@@ -933,7 +987,7 @@ textarea {
 .pm-project-list {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -949,7 +1003,7 @@ textarea {
 .pm-project-item {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f8fbff;
+  background: #ffffff;
   color: var(--text-primary);
   text-align: left;
   padding: 0.55rem 0.65rem;
@@ -969,6 +1023,16 @@ textarea {
 .pm-project-item-meta {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+.pm-project-item-alert {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.72rem;
+  color: #9f1239;
+  background: #ffe4ec;
 }
 
 .pm-notification-badge {
@@ -1032,19 +1096,67 @@ textarea {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  display: grid;
+  gap: 0.65rem;
+  grid-template-rows: minmax(340px, 1fr) auto;
+}
+
+.pm-chat-only .pm-chat-panel {
+  min-height: 0;
+}
+
+.pm-agent-deck {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  overflow: hidden;
+}
+
+.pm-agent-deck .pm-project-items {
+  max-height: 200px;
+}
+
+.pm-roadmap {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.pm-roadmap-stage {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 0.4rem 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  text-transform: capitalize;
+  color: var(--text-secondary);
+}
+
+.pm-roadmap-stage.done {
+  border-color: #8dd5b6;
+  background: #effcf6;
+  color: #047857;
+}
+
+.pm-roadmap-stage.active {
+  border-color: #8ab4ff;
+  background: #edf4ff;
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 .pm-project-detail {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
 }
 
 .pm-report-panel {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.96);
   overflow: hidden;
 }
 
@@ -1082,7 +1194,7 @@ textarea {
 .pm-status-card {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f8fbff;
+  background: #ffffff;
   padding: 0.45rem 0.55rem;
   display: grid;
 }
@@ -1103,16 +1215,38 @@ textarea {
 .pm-project-session-item {
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fbff;
-  display: flex;
-  justify-content: space-between;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.45rem 0.55rem;
   color: var(--text-primary);
   text-align: left;
+  cursor: pointer;
 }
 
 .pm-project-session-item small {
   color: var(--text-secondary);
+}
+
+.pm-project-session-meta {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.pm-project-session-meta strong,
+.pm-project-session-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pm-project-session-status {
+  display: grid;
+  justify-items: end;
+  gap: 0.25rem;
 }
 
 .pm-chat-main {
@@ -1131,7 +1265,7 @@ textarea {
 }
 
 .project-selector select {
-  background: #f8fbff;
+  background: #ffffff;
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1148,7 +1282,7 @@ textarea {
 
 .pm-dag-panel,
 .pm-chat-panel {
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid var(--border);
   border-radius: 10px;
   min-height: 0;
@@ -1186,7 +1320,7 @@ textarea {
 .pm-task-node {
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: #f8fbff;
+  background: #ffffff;
   padding: 0.6rem;
 }
 
@@ -1475,6 +1609,13 @@ textarea {
 .settings-page {
   display: grid;
   gap: 0.8rem;
+}
+
+.settings-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
 .settings-tabs {
@@ -2168,7 +2309,8 @@ textarea {
   .pm-chat-layout,
   .pm-chat-main,
   .pm-chat-layout-v2,
-  .pm-execution-layout {
+  .pm-execution-layout,
+  .pm-workspace-layout {
     grid-template-columns: 1fr;
     height: auto;
     min-height: 0;
@@ -2220,7 +2362,8 @@ textarea {
     display: grid;
   }
 
-  .pm-chat-project-list {
+  .pm-chat-project-list,
+  .pm-workspace-right {
     display: none;
   }
 }

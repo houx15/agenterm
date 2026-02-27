@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/1",
   "build": {
-    "beforeBuildCommand": "npm --prefix ../frontend run build",
-    "beforeDevCommand": "npm --prefix ../frontend run dev -- --host",
+    "beforeBuildCommand": "npm --prefix frontend run build",
+    "beforeDevCommand": "npm --prefix frontend run dev -- --host",
     "devPath": "http://localhost:5173",
     "distDir": "../web/frontend/dist"
   },
@@ -22,7 +22,6 @@
       "category": "DeveloperTool",
       "identifier": "io.agenterm.desktop",
       "icon": [
-        "icons/icon.icns",
         "icons/icon.png"
       ]
     },

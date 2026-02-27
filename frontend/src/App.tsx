@@ -9,8 +9,8 @@ import PMChat from './pages/PMChat'
 import ProjectDetail from './pages/ProjectDetail'
 import Sessions from './pages/Sessions'
 import Settings from './pages/Settings'
-import DemandPool from './pages/DemandPool'
 import MobileCompanion from './pages/MobileCompanion'
+import ConnectMobile from './pages/ConnectMobile'
 
 interface AppContextValue {
   token: string
@@ -35,9 +35,10 @@ const router = createBrowserRouter([
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <Dashboard /> },
+      { index: true, element: <PMChat /> },
+      { path: 'stats', element: <Dashboard /> },
+      { path: 'connect', element: <ConnectMobile /> },
       { path: 'pm-chat', element: <PMChat /> },
-      { path: 'demand-pool', element: <DemandPool readOnly /> },
       { path: 'projects/:projectId', element: <ProjectDetail /> },
       { path: 'sessions', element: <Sessions /> },
       { path: 'sessions/:windowId', element: <Sessions /> },

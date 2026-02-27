@@ -12,20 +12,19 @@ export default function Layout() {
   const location = useLocation()
 
   const titleByPath: Record<string, string> = {
-    '/': 'Dashboard',
-    '/sessions': 'Sessions',
-    '/pm-chat': 'PM Chat',
-    '/demand-pool': 'Demand Pool',
-    '/settings': 'Settings',
+    '/': 'Workspace',
+    '/stats': 'Dashboard',
+    '/sessions': 'Session Console',
+    '/pm-chat': 'Workspace',
+    '/connect': 'Connect Mobile',
+    '/settings': 'Agent Registry',
   }
   const topbarTitle = location.pathname.startsWith('/projects/') ? 'Project Detail' : titleByPath[location.pathname] ?? location.pathname.slice(1)
   const topbarSubtitle =
     location.pathname === '/sessions'
       ? app.activeWindow ?? 'Select a session'
-      : location.pathname === '/pm-chat'
-        ? 'Plan, monitor, and steer execution'
-        : location.pathname === '/demand-pool'
-          ? 'Read-only demand overview (edit in PM Chat)'
+      : location.pathname === '/pm-chat' || location.pathname === '/'
+        ? 'Coordinate agents and keep execution flowing'
         : app.connected
           ? 'Realtime sync online'
           : 'Realtime sync offline'

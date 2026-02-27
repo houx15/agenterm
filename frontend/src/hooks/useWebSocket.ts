@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClientMessage, ServerMessage } from '../api/types'
+import { buildWSURL } from '../api/runtime'
 
 const INITIAL_RECONNECT_DELAY_MS = 1000
 const MAX_RECONNECT_DELAY_MS = 30000
@@ -29,8 +30,7 @@ export function useWebSocket(token: string) {
     }
 
     setConnectionStatus('connecting')
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${protocol}//${window.location.host}/ws?token=${encodeURIComponent(token)}`
+    const url = `${buildWSURL('/ws')}?token=${encodeURIComponent(token)}`
 
     const ws = new WebSocket(url)
     wsRef.current = ws

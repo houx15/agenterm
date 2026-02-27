@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:dev": "cd .. && tauri dev --config src-tauri/tauri.conf.json",
+    "tauri:build": "cd .. && tauri build --config src-tauri/tauri.conf.json"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -19,7 +19,7 @@
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.6.6",
+    "@tauri-apps/cli": "^1.6.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

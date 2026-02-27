@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OrchestratorClientMessage, OrchestratorHistoryMessage, OrchestratorServerMessage } from '../api/types'
 import type { MessageActionOption, SessionMessage } from '../components/ChatMessage'
 import { getToken, listOrchestratorHistory } from '../api/client'
+import { buildWSURL } from '../api/runtime'
 import { orchestratorEventBus } from '../orchestrator/bus'
 import { loadProjectTimeline, saveProjectTimeline } from '../orchestrator/replay'
 import { sessionMessageToEvent } from '../orchestrator/schema'
@@ -687,11 +688,10 @@ export function useOrchestratorWS(projectId: string) {
     }
 
     setConnectionStatus('connecting')
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const params = new URLSearchParams()
     params.set('token', token)
     params.set('project_id', projectId)
-    const url = `${protocol}//${window.location.host}/ws/orchestrator?${params.toString()}`
+    const url = `${buildWSURL('/ws/orchestrator')}?${params.toString()}`
 
     const ws = new WebSocket(url)
     wsRef.current = ws
