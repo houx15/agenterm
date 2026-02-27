@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { ClipboardList, House, MessageSquareText, Settings, SquareTerminal } from './Lucide'
+import { ClipboardList, House, MessageSquareText, Settings, Smartphone, SquareTerminal } from './Lucide'
 
 interface SidebarProps {
   closeOnNavigate?: () => void
@@ -29,6 +29,10 @@ export default function Sidebar({ closeOnNavigate }: SidebarProps) {
         <NavLink to="/demand-pool" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           <ClipboardList size={15} />
           <span>Demand Pool</span>
+        </NavLink>
+        <NavLink to="/mobile" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
+          <Smartphone size={15} />
+          <span>Mobile</span>
         </NavLink>
         <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`.trim()}>
           <Settings size={15} />

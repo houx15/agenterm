@@ -150,3 +150,12 @@ export function ClipboardList({ size, ...props }: IconProps) {
     </IconBase>
   )
 }
+
+export function Smartphone({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect height="20" rx="2" width="12" x="6" y="2" />
+      <line x1="12" x2="12.01" y1="18" y2="18" />
+    </IconBase>
+  )
+}

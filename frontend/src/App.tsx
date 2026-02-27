@@ -10,6 +10,7 @@ import ProjectDetail from './pages/ProjectDetail'
 import Sessions from './pages/Sessions'
 import Settings from './pages/Settings'
 import DemandPool from './pages/DemandPool'
+import MobileCompanion from './pages/MobileCompanion'
 
 interface AppContextValue {
   token: string
@@ -26,6 +27,10 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null)
 
 const router = createBrowserRouter([
+  {
+    path: '/mobile',
+    element: <MobileCompanion />,
+  },
   {
     path: '/',
     element: <Layout />,
@@ -68,21 +73,22 @@ export default function App() {
     }
 
     if (ws.lastMessage.type === 'windows') {
-      setWindows(ws.lastMessage.list ?? [])
+      const windowList = Array.isArray(ws.lastMessage.list) ? ws.lastMessage.list : []
+      setWindows(windowList)
 
       setActiveWindowState((current) => {
-        if (!current && ws.lastMessage.list.length > 0) {
-          return ws.lastMessage.list[0].id
+        if (!current && windowList.length > 0) {
+          return windowList[0].id
         }
-        if (current && ws.lastMessage.list.some((item) => item.id === current)) {
+        if (current && windowList.some((item) => item.id === current)) {
           return current
         }
-        return ws.lastMessage.list.length > 0 ? ws.lastMessage.list[0].id : null
+        return windowList.length > 0 ? windowList[0].id : null
       })
 
       setUnreadByWindow((prev) => {
         const next: Record<string, number> = {}
-        for (const item of ws.lastMessage.list) {
+        for (const item of windowList) {
           next[item.id] = prev[item.id] ?? 0
         }
         return next
