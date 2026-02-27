@@ -458,6 +458,10 @@ export default function Workspace() {
           onOpenConnect={() => setConnectOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           collapsed={sidebarCollapsed}
+          onDeleteProject={(id: string) => {
+            setActiveProjectID(id)
+            setDeleteModalOpen(true)
+          }}
         />
 
         {/* Sidebar resize handle */}

@@ -5,6 +5,10 @@ import {
   listOrchestratorExceptions,
   resolveOrchestratorException,
   listDemandPoolItems,
+  createDemandPoolItem,
+  updateDemandPoolItem,
+  deleteDemandPoolItem,
+  promoteDemandPoolItem,
 } from '../api/client'
 import type {
   Project, Task, Session,
@@ -86,6 +90,11 @@ export default function OrchestratorPanel({
 
   // Demand pool items
   const [demandItems, setDemandItems] = useState<DemandPoolItem[]>([])
+  const [demandFormOpen, setDemandFormOpen] = useState(false)
+  const [demandTitle, setDemandTitle] = useState('')
+  const [demandDesc, setDemandDesc] = useState('')
+  const [demandPriority, setDemandPriority] = useState(3)
+  const [editingItemID, setEditingItemID] = useState<string | null>(null)
 
   // Exceptions
   const [exceptions, setExceptions] = useState<OrchestratorExceptionItem[]>([])
@@ -130,6 +139,70 @@ export default function OrchestratorPanel({
       canceled = true
     }
   }, [projectID])
+
+  // Demand pool CRUD helpers
+  const refreshDemandItems = useCallback(async () => {
+    if (!projectID) return
+    try {
+      const items = await listDemandPoolItems<DemandPoolItem[]>(projectID)
+      setDemandItems(items)
+    } catch { /* ignore */ }
+  }, [projectID])
+
+  const saveDemandItem = useCallback(async () => {
+    if (!demandTitle.trim()) return
+    try {
+      if (editingItemID) {
+        await updateDemandPoolItem(editingItemID, {
+          title: demandTitle.trim(),
+          description: demandDesc.trim(),
+          priority: demandPriority,
+        })
+      } else {
+        await createDemandPoolItem(projectID, {
+          title: demandTitle.trim(),
+          description: demandDesc.trim(),
+          priority: demandPriority,
+        })
+      }
+      setDemandFormOpen(false)
+      setDemandTitle('')
+      setDemandDesc('')
+      setDemandPriority(3)
+      setEditingItemID(null)
+      await refreshDemandItems()
+    } catch { /* ignore */ }
+  }, [projectID, demandTitle, demandDesc, demandPriority, editingItemID, refreshDemandItems])
+
+  const removeDemandItem = useCallback(async (itemID: string) => {
+    try {
+      await deleteDemandPoolItem(itemID)
+      await refreshDemandItems()
+    } catch { /* ignore */ }
+  }, [refreshDemandItems])
+
+  const promoteDemand = useCallback(async (itemID: string) => {
+    try {
+      await promoteDemandPoolItem(itemID)
+      await refreshDemandItems()
+    } catch { /* ignore */ }
+  }, [refreshDemandItems])
+
+  const startEditDemand = useCallback((item: DemandPoolItem) => {
+    setEditingItemID(item.id)
+    setDemandTitle(item.title)
+    setDemandDesc(item.description)
+    setDemandPriority(item.priority)
+    setDemandFormOpen(true)
+  }, [])
+
+  const startNewDemand = useCallback(() => {
+    setEditingItemID(null)
+    setDemandTitle('')
+    setDemandDesc('')
+    setDemandPriority(3)
+    setDemandFormOpen(true)
+  }, [])
 
   // Fetch exceptions on mount and when projectID changes
   const refreshExceptions = useCallback(async () => {

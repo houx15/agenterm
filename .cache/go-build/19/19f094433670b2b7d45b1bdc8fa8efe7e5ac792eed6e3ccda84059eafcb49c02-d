@@ -1,0 +1,8 @@
+./autocommit.go
+./coordinator.go
+./hooks.go
+./merger.go
+./autocommit_test.go
+./coordinator_test.go
+./hooks_test.go
+./merger_test.go

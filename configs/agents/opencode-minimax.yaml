@@ -1,0 +1,16 @@
+id: opencode-minimax
+name: OpenCode MiniMax
+model: MiniMax-M2.5
+command: opencode --model minimax-cn/MiniMax-M2.5
+max_parallel_agents: 8
+supports_orchestrator: true
+orchestrator_provider: anthropic
+orchestrator_api_key: sk-cp-7DlGQE5Bv_RdE9ZuIGSvw0oXQfBOrSg0PQjWIOhq8qWT2R0Id1wkhPzpAdHfTECo6ARB8lejUWx3Ko9GAiM79yb_SjYi5DgLYRi7GW_F1VmNiVIMat5ih5s
+orchestrator_api_base: https://api.minimaxi.com/anthropic
+capabilities: []
+languages: []
+cost_tier: medium
+speed_tier: medium
+supports_session_resume: false
+supports_headless: false
+notes: Good at writing codes, but cannot finish complex tasks or unclear demands.

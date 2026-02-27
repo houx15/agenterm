@@ -1,0 +1,15 @@
+id: claude-code-opus
+name: Claude Opus
+model: default
+command: |-
+    export https_proxy=http://127.0.0.1:10808
+    export http_proxy=http://127.0.0.1:10808
+    claude --model opus --permission-mode acceptEdits
+max_parallel_agents: 8
+capabilities: []
+languages: []
+cost_tier: medium
+speed_tier: medium
+supports_session_resume: false
+supports_headless: false
+notes: Extremely strong at brainstorming, planning, building and testing, token-consuming, suitable for complext tasks or the planning stage

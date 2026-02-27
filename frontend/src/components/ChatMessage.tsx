@@ -1,6 +1,6 @@
 import type { ActionMessage } from '../api/types'
-import type { ReactNode } from 'react'
-import { Hammer, MessageSquare, ShieldCheck } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
+import { Hammer, MessageSquare, ShieldCheck, ChevronRight, ChevronDown } from 'lucide-react'
 
 export interface MessageTaskLink {
   id: string
@@ -39,6 +39,19 @@ interface ChatMessageProps {
   variant?: 'terminal' | 'pm'
   onTaskClick?: (taskID: string) => void
   onActionClick?: (value: string, label: string, messageID?: string) => void
+}
+
+function CollapsibleSection({ label, children, defaultOpen = false }: { label: string; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="pm-collapsible">
+      <button className="pm-collapsible-toggle" onClick={() => setOpen((prev) => !prev)} type="button">
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <small>{label}</small>
+      </button>
+      {open && <div className="pm-collapsible-content">{children}</div>}
+    </div>
+  )
 }
 
 export default function ChatMessage({ message, variant = 'terminal', onTaskClick, onActionClick }: ChatMessageProps) {
@@ -184,8 +197,7 @@ function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: s
       <div className="pm-structured-card">
         {discussion && <p>{renderTextWithTaskLinks(discussion, message.taskLinks, onTaskClick)}</p>}
         {commands.length > 0 && (
-          <div className="pm-tool-section">
-            <small>Commands</small>
+          <CollapsibleSection label={`Commands (${commands.length})`}>
             <ul className="pm-structured-list">
               {commands.map((command, index) => (
                 <li key={`${command}-${index}`}>
@@ -193,17 +205,16 @@ function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: s
                 </li>
               ))}
             </ul>
-          </div>
+          </CollapsibleSection>
         )}
         {stateUpdates.length > 0 && (
-          <div className="pm-tool-section">
-            <small>State Updates</small>
+          <CollapsibleSection label={`State Updates (${stateUpdates.length})`}>
             <ul className="pm-structured-list">
               {stateUpdates.map((item, index) => (
                 <li key={`${item}-${index}`}>{item}</li>
               ))}
             </ul>
-          </div>
+          </CollapsibleSection>
         )}
         {message.status === 'confirmation' && confirmationPrompt && (
           <div className="pm-tool-section">
@@ -219,15 +230,16 @@ function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: s
     const parsed = parseToolCallText(message.text)
     if (parsed) {
       return (
-        <div className="pm-tool-card">
-          <div className="pm-tool-title">Tool: {parsed.name}</div>
-          {parsed.args != null && (
-            <div className="pm-tool-section">
-              <small>Arguments</small>
-              {renderDataBlock(parsed.args)}
-            </div>
-          )}
-        </div>
+        <CollapsibleSection label={`Tool: ${parsed.name}`}>
+          <div className="pm-tool-card">
+            {parsed.args != null && (
+              <div className="pm-tool-section">
+                <small>Arguments</small>
+                {renderDataBlock(parsed.args)}
+              </div>
+            )}
+          </div>
+        </CollapsibleSection>
       )
     }
   }
@@ -238,15 +250,16 @@ function renderPMBubbleContent(message: SessionMessage, onTaskClick?: (taskID: s
       const payloadObject = parsed.payload && typeof parsed.payload === 'object' && !Array.isArray(parsed.payload) ? (parsed.payload as Record<string, unknown>) : null
       const error = payloadObject && typeof payloadObject.error === 'string' ? payloadObject.error : ''
       return (
-        <div className="pm-tool-card">
-          <div className={`pm-tool-title ${error ? 'error' : 'ok'}`.trim()}>{error ? `Result: ${error}` : 'Result: success'}</div>
-          {(parsed.payload != null || parsed.rawPayload) && (
-            <div className="pm-tool-section">
-              <small>Output</small>
-              {renderDataBlock(parsed.payload ?? parsed.rawPayload)}
-            </div>
-          )}
-        </div>
+        <CollapsibleSection label={error ? `Result: ${error}` : 'Result: success'}>
+          <div className="pm-tool-card">
+            {(parsed.payload != null || parsed.rawPayload) && (
+              <div className="pm-tool-section">
+                <small>Output</small>
+                {renderDataBlock(parsed.payload ?? parsed.rawPayload)}
+              </div>
+            )}
+          </div>
+        </CollapsibleSection>
       )
     }
   }

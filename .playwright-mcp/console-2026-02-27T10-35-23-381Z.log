@@ -1,0 +1,75 @@
+[    1581ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useWebSocket.ts:83
+[   23028ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws/orchestrator?token=agenterm-desktop-local&project_id=ce11b0b33792d317bcaa32bc6fdc2285' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useOrchestratorWS.ts:728
+[  225221ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed:  @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  225226ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed:  @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  225226ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws/orchestrator?token=agenterm-desktop-local&project_id=ce11b0b33792d317bcaa32bc6fdc2285' failed:  @ http://localhost:5173/src/hooks/useOrchestratorWS.ts:587
+[  225226ms] [ERROR] WebSocket connection to 'ws://localhost:5173/?token=zqrI1ppvtBLy' failed:  @ http://localhost:5173/@vite/client:535
+[  226586ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  227281ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  227589ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  228594ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  229597ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  230600ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  231284ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  231608ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  232612ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  233616ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  234620ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  235624ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  236628ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  237632ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  238634ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  239314ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  239655ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  240680ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  241682ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  242687ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  243691ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  244695ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  245699ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  246702ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  247705ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  248707ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  249710ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  250714ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  251718ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  252724ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  253727ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  254732ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  255361ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/hooks/useWebSocket.ts:26
+[  255736ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  256741ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  257745ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  258749ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  259753ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  260755ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  261759ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  262764ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  263768ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  264774ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  265780ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  266785ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  267789ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  268792ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  269797ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  270802ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  271806ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  272809ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  273811ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  274813ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  275816ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[  282148ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useWebSocket.ts:83
+[ 8912344ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:5173/src/components/SettingsModal.tsx?t=1772197434719:0
+[ 8912501ms] [ERROR] [hmr] Failed to reload /src/components/SettingsModal.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://localhost:5173/@vite/client:175
+[ 9085272ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws/orchestrator?token=agenterm-desktop-local&project_id=23a7737ba0f31ed4f5f0a60fe1c509f3' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useOrchestratorWS.ts:728
+[ 9090995ms] TypeError: Cannot read properties of undefined (reading 'dimensions')
+    at get dimensions (http://localhost:5173/node_modules/.vite/deps/@xterm_xterm.js?v=e94fdeec:1885:41)
+    at t2.Viewport.syncScrollArea (http://localhost:5173/node_modules/.vite/deps/@xterm_xterm.js?v=e94fdeec:831:70)
+    at http://localhost:5173/node_modules/.vite/deps/@xterm_xterm.js?v=e94fdeec:808:1498
+[ 9805856ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[ 9806861ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[ 9807840ms] [ERROR] WebSocket connection to 'ws://localhost:5173/ws/orchestrator?token=agenterm-desktop-local&project_id=23a7737ba0f31ed4f5f0a60fe1c509f3' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/src/hooks/useOrchestratorWS.ts:587
+[ 9807895ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[ 9808898ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:5173/:0
+[ 9816779ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws?token=agenterm-desktop-local' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useWebSocket.ts:83
+[ 9819701ms] [WARNING] WebSocket connection to 'ws://localhost:5173/ws/orchestrator?token=agenterm-desktop-local&project_id=23a7737ba0f31ed4f5f0a60fe1c509f3' failed: WebSocket is closed before the connection is established. @ http://localhost:5173/src/hooks/useOrchestratorWS.ts:728

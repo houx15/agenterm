@@ -1,0 +1,5 @@
+./ansi.go
+./parser.go
+./patterns.go
+./types.go
+./parser_test.go

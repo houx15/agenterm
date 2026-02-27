@@ -1,0 +1,12 @@
+id: opencode-qwen
+name: OpenCode Qwen
+model: qwen3-coder-plus
+command: opencode --model bailian-coding-plan-test/qwen3-coder-plus
+max_parallel_agents: 16
+capabilities: []
+languages: []
+cost_tier: medium
+speed_tier: medium
+supports_session_resume: false
+supports_headless: false
+notes: Good at writing codes, but cannot finish complex tasks or unclear demands.

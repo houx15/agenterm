@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createAgent, deleteAgent, listAgents, updateAgent } from '../api/client'
 import type { AgentConfig } from '../api/types'
+import { loadASRSettings, saveASRSettings } from '../settings/asr'
 import Modal from './Modal'
 import { Plus, Trash2 } from './Lucide'
 
@@ -37,7 +38,12 @@ function clampParallelAgents(value: number): number {
   return Math.min(64, Math.max(1, Math.trunc(value)))
 }
 
+type SettingsTab = 'agents' | 'speech'
+
 export default function SettingsModal({ open, onClose }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('agents')
+
+  // Agent registry state
   const [agents, setAgents] = useState<AgentConfig[]>([])
   const [selectedID, setSelectedID] = useState('')
   const [draft, setDraft] = useState<AgentConfig>(DEFAULT_AGENT)
@@ -45,6 +51,11 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+
+  // ASR settings state
+  const [asrAppID, setAsrAppID] = useState('')
+  const [asrAccessKey, setAsrAccessKey] = useState('')
+  const [asrNotice, setAsrNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
 
   const isNew = selectedID === ''
   const selectedAgent = useMemo(
@@ -87,6 +98,20 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
       cancelled = true
     }
   }, [open])
+
+  // Load ASR settings when modal opens
+  useEffect(() => {
+    if (!open) return
+    const settings = loadASRSettings()
+    setAsrAppID(settings.appID)
+    setAsrAccessKey(settings.accessKey)
+    setAsrNotice(null)
+  }, [open])
+
+  const saveASR = () => {
+    saveASRSettings({ appID: asrAppID.trim(), accessKey: asrAccessKey.trim() })
+    setAsrNotice({ kind: 'success', text: 'ASR settings saved.' })
+  }
 
   const selectAgent = (id: string) => {
     const found = agents.find((item) => item.id === id)
@@ -171,8 +196,76 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
 
   return (
-    <Modal open={open} title="Agent Registry" onClose={onClose}>
+    <Modal open={open} title="Settings" onClose={onClose}>
       <div className="modal-form">
+        {/* Tab bar */}
+        <div className="settings-tabs">
+          <button
+            className={`settings-tab ${activeTab === 'agents' ? 'active' : ''}`.trim()}
+            onClick={() => setActiveTab('agents')}
+            type="button"
+          >
+            Agent Registry
+          </button>
+          <button
+            className={`settings-tab ${activeTab === 'speech' ? 'active' : ''}`.trim()}
+            onClick={() => setActiveTab('speech')}
+            type="button"
+          >
+            Speech Recognition
+          </button>
+        </div>
+
+        {/* Speech Recognition tab */}
+        {activeTab === 'speech' && (
+          <div className="settings-editor" style={{ maxWidth: '480px' }}>
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Configure Volcengine ASR credentials for speech-to-text input.
+            </p>
+            {asrNotice && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  padding: '0.45rem 0.7rem',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  marginBottom: '8px',
+                  background: asrNotice.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
+                  color: asrNotice.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
+                }}
+              >
+                {asrNotice.text}
+              </div>
+            )}
+            <label>
+              App ID
+              <input
+                value={asrAppID}
+                onChange={(e) => setAsrAppID(e.target.value)}
+                placeholder="Your Volcengine ASR App ID"
+              />
+            </label>
+            <label>
+              Access Key
+              <input
+                type="password"
+                value={asrAccessKey}
+                onChange={(e) => setAsrAccessKey(e.target.value)}
+                placeholder="Your Volcengine ASR Access Key"
+              />
+            </label>
+            <div className="settings-actions">
+              <button className="btn btn-primary" onClick={saveASR} type="button">
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Agent Registry tab */}
+        {activeTab === 'agents' && (
+          <>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
             Register local TUIs with one-line specs. Orchestrator picks workers from this list.
@@ -393,6 +486,8 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </Modal>

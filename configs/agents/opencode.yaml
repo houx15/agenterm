@@ -1,21 +1,25 @@
 id: opencode
-name: OpenCode
-model: glm5
-command: opencode
-max_parallel_agents: 4
+name: OpenCode GLM
+model: glm-5
+command: opencode —model zhipu-coding-plan/glm-5
+max_parallel_agents: 10
+supports_orchestrator: true
+orchestrator_provider: openai
+orchestrator_api_key: 072ce2a82129e63d16002b5c485f2224.tMVphACWJSl78lmW
+orchestrator_api_base: https://open.bigmodel.cn/api/coding/paas/v4
 resume_command: opencode resume
 headless_command: opencode run --yes
 capabilities:
-  - coding
-  - review
-  - orchestration
+    - coding
+    - review
+    - orchestration
 languages:
-  - go
-  - typescript
-  - python
+    - go
+    - typescript
+    - python
 cost_tier: low
 speed_tier: fast
 supports_session_resume: true
 supports_headless: true
 auto_accept_mode: supported
-notes: change model to glm5, minimax, ark-latest-code, or qwen3-coder
+notes: Strong logic, relatively slow, not good at beautiful UI.

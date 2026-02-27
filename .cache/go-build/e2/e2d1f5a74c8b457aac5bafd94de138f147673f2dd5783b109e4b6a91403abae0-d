@@ -1,0 +1,4 @@
+./autocommit.go
+./coordinator.go
+./hooks.go
+./merger.go

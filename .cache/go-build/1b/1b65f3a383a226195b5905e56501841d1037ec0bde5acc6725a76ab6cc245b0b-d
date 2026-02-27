@@ -1,0 +1,11 @@
+./envelope.go
+./events.go
+./orchestrator.go
+./prompt.go
+./scheduler.go
+./skill_catalog.go
+./tools.go
+./envelope_test.go
+./orchestrator_test.go
+./scheduler_test.go
+./tools_test.go

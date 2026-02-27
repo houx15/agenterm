@@ -102,7 +102,7 @@ export default function Terminal({ sessionId, history, onInput, onResize }: Term
 
     fit.fit()
     onResizeRef.current(term.cols, term.rows)
-  }, [history, onResize, sessionId])
+  }, [history, sessionId])
 
   return <div className="terminal" ref={rootRef} />
 }

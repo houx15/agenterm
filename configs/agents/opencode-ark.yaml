@@ -1,0 +1,16 @@
+id: opencode-ark
+name: OpenCode Doubao
+model: ark-code-latest
+command: opencode --model volcano-engine/ark-code-latest
+max_parallel_agents: 10
+supports_orchestrator: true
+orchestrator_provider: openai
+orchestrator_api_key: 0124a934-937d-4ce4-943b-8be624303d21
+orchestrator_api_base: https://ark.cn-beijing.volces.com/api/coding/v3
+capabilities: []
+languages: []
+cost_tier: medium
+speed_tier: medium
+supports_session_resume: false
+supports_headless: false
+notes: Good at writing codes, but cannot finish complex tasks or unclear demands.

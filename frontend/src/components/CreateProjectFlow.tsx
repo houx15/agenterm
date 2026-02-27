@@ -3,6 +3,7 @@ import {
   createProject,
   listAgents,
   listDirectories,
+  listPlaybooks,
   updateProjectOrchestrator,
 } from '../api/client'
 import type { AgentConfig, Project, ProjectOrchestratorProfile } from '../api/types'
@@ -29,6 +30,8 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
   const [workers, setWorkers] = useState(2)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [playbooks, setPlaybooks] = useState<Array<{ id: string; name: string; description?: string }>>([])
+  const [selectedPlaybookID, setSelectedPlaybookID] = useState('')
 
   // Directory browser state
   const [browseOpen, setBrowseOpen] = useState(false)
@@ -44,10 +47,13 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
     return preferred?.id ?? ''
   }, [agents])
 
-  // Load agents on mount
+  // Load agents and playbooks on mount
   useEffect(() => {
     if (!open) return
     void listAgents<AgentConfig[]>().then(setAgents).catch(() => {})
+    void listPlaybooks<Array<{ id: string; name: string; description?: string }>>()
+      .then(setPlaybooks)
+      .catch(() => {})
   }, [open])
 
   // Reset form when modal opens
@@ -63,6 +69,7 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
     setBrowseState(null)
     setBrowseBusy(false)
     setBrowseError('')
+    setSelectedPlaybookID('')
   }, [open])
 
   // Sync default agent selection when agents load

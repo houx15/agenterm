@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { Project, Session } from '../api/types'
 import { getWindowID } from '../api/types'
-import { House, Settings, QrCode, Bot, TerminalIcon, ChevronDown, ChevronRight } from './Lucide'
+import { House, Settings, QrCode, Bot, TerminalIcon, ChevronDown, ChevronRight, Trash2 } from './Lucide'
 
 interface ProjectSidebarProps {
   projects: Project[]
@@ -15,6 +15,7 @@ interface ProjectSidebarProps {
   onOpenConnect: () => void
   onOpenSettings: () => void
   collapsed: boolean
+  onDeleteProject?: (id: string) => void
 }
 
 function isOrchestrator(session: Session): boolean {
@@ -53,6 +54,7 @@ export default function ProjectSidebar({
   onOpenConnect,
   onOpenSettings,
   collapsed,
+  onDeleteProject,
 }: ProjectSidebarProps) {
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
 
@@ -110,6 +112,17 @@ export default function ProjectSidebar({
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {project.name}
                 </span>
+                {onDeleteProject && (
+                  <button
+                    className="btn btn-ghost btn-icon sidebar-delete-btn"
+                    onClick={(e) => { e.stopPropagation(); onDeleteProject(project.id) }}
+                    style={{ opacity: 0.5, fontSize: '11px' }}
+                    title="Delete project"
+                    type="button"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
               </div>
 
               {isExpanded &&

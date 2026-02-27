@@ -1,0 +1,7 @@
+./command_policy.go
+./manager.go
+./monitor.go
+./command_policy_test.go
+./manager_ready_test.go
+./manager_test.go
+./monitor_test.go
