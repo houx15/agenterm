@@ -1,7 +1,8 @@
 :root {
-  --bg-main: #eef2f7;
-  --bg-sidebar: #f7f9fc;
+  --bg-main: #eef3f9;
+  --bg-sidebar: #f8fafd;
   --bg-panel: #ffffff;
+  --bg-panel-soft: rgba(255, 255, 255, 0.92);
   --bg-bubble-output: #ffffff;
   --bg-bubble-input: #eaf2ff;
   --bg-bubble-error: #ffe9ea;
@@ -10,12 +11,41 @@
   --text-primary: #101322;
   --text-secondary: #4f5d76;
   --text-dim: #72819a;
-  --accent: #1473e6;
-  --accent-hover: #0f5ec0;
+  --accent: #1468d8;
+  --accent-hover: #0f56b3;
   --error: #cc2b45;
   --warning: #c48300;
   --success: #0d8f56;
-  --border: #d8dde8;
+  --border: #d5dce8;
+  --bg-grad-a: #dfe9fb;
+  --bg-grad-b: #edf3fd;
+  --topbar-bg: rgba(255, 255, 255, 0.82);
+  --shadow-soft: rgba(16, 24, 40, 0.06);
+}
+
+:root[data-theme='dark'] {
+  --bg-main: #0b111d;
+  --bg-sidebar: #0f1727;
+  --bg-panel: #111b2e;
+  --bg-panel-soft: rgba(17, 27, 46, 0.92);
+  --bg-bubble-output: #101a2c;
+  --bg-bubble-input: #16233a;
+  --bg-bubble-error: #3a1621;
+  --bg-bubble-prompt: #12203a;
+  --bg-bubble-code: #152137;
+  --text-primary: #e7edf8;
+  --text-secondary: #a6b4cd;
+  --text-dim: #7f8eaa;
+  --accent: #5d96ff;
+  --accent-hover: #78a7ff;
+  --error: #ff6a7e;
+  --warning: #e3aa35;
+  --success: #38d48e;
+  --border: #223249;
+  --bg-grad-a: #162039;
+  --bg-grad-b: #10192d;
+  --topbar-bg: rgba(11, 17, 30, 0.85);
+  --shadow-soft: rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -32,8 +62,8 @@ body,
 body {
   font-family: 'SF Pro Text', 'Avenir Next', 'Helvetica Neue', 'Segoe UI', sans-serif;
   background:
-    radial-gradient(1200px 600px at 10% -10%, #dce7f8 0%, rgba(220, 231, 248, 0) 65%),
-    radial-gradient(1100px 700px at 100% 0%, #edf2fb 0%, rgba(237, 242, 251, 0) 58%),
+    radial-gradient(1200px 600px at 10% -10%, var(--bg-grad-a) 0%, rgba(220, 231, 248, 0) 65%),
+    radial-gradient(1100px 700px at 100% 0%, var(--bg-grad-b) 0%, rgba(237, 242, 251, 0) 58%),
     var(--bg-main);
   color: var(--text-primary);
   overflow-x: hidden;
@@ -55,9 +85,9 @@ textarea {
 }
 
 .sidebar-container {
-  background: linear-gradient(180deg, #f9fbff 0%, var(--bg-sidebar) 100%);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--bg-sidebar) 92%, #fff 8%) 0%, var(--bg-sidebar) 100%);
   border-right: 1px solid var(--border);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.45), 10px 0 24px rgba(16, 24, 40, 0.04);
+  box-shadow: inset -1px 0 0 color-mix(in oklab, var(--bg-sidebar) 60%, #fff 40%), 10px 0 24px var(--shadow-soft);
   overflow: hidden;
 }
 
@@ -225,9 +255,9 @@ textarea {
   gap: 0.75rem;
   padding: 0.8rem 1rem;
   border-bottom: 1px solid rgba(210, 218, 232, 0.8);
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--topbar-bg);
   backdrop-filter: blur(18px);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 8px 20px var(--shadow-soft);
 }
 
 .sidebar-collapse-toggle {
@@ -336,11 +366,11 @@ textarea {
 }
 
 .dashboard-section {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-panel-soft);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 0.95rem;
-  box-shadow: 0 12px 26px rgba(20, 31, 53, 0.05);
+  box-shadow: 0 12px 26px var(--shadow-soft);
 }
 
 .dashboard-section-title {
@@ -925,8 +955,8 @@ textarea {
 
 .pm-workspace-layout {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 360px;
-  gap: 0.8rem;
+  grid-template-columns: 300px 8px minmax(0, 1fr) 8px 360px;
+  gap: 0;
   height: 100%;
   min-height: 0;
 }
@@ -937,6 +967,13 @@ textarea {
   gap: 0.7rem;
   min-height: 0;
   align-content: start;
+  overflow: hidden;
+}
+
+.pm-workspace-left.collapsed,
+.pm-workspace-right.collapsed {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .pm-workspace-center {
@@ -950,6 +987,41 @@ textarea {
 .pm-workspace-center .pm-chat-panel {
   min-height: 0;
   height: 100%;
+}
+
+.pm-pane-divider {
+  width: 8px;
+  cursor: col-resize;
+  position: relative;
+  border-radius: 999px;
+}
+
+.pm-pane-divider::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--border) 76%, var(--accent) 24%);
+  opacity: 0.5;
+}
+
+.pm-pane-divider:hover::after {
+  opacity: 0.95;
+}
+
+.pm-pane-divider.hidden {
+  pointer-events: none;
+}
+
+.pm-pane-divider.hidden::after {
+  opacity: 0;
+}
+
+.pm-workspace-layout.resizing {
+  user-select: none;
 }
 
 .pm-chat-layout-v2 {
@@ -968,7 +1040,7 @@ textarea {
 .pm-chat-project-list {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-panel-soft);
   overflow: hidden;
   min-height: 0;
   max-height: 46dvh;
@@ -987,7 +1059,7 @@ textarea {
 .pm-project-list {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-panel-soft);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1003,7 +1075,7 @@ textarea {
 .pm-project-item {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #ffffff;
+  background: var(--bg-panel);
   color: var(--text-primary);
   text-align: left;
   padding: 0.55rem 0.65rem;
@@ -1108,7 +1180,7 @@ textarea {
 .pm-agent-deck {
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-panel-soft);
   overflow: hidden;
 }
 
@@ -1149,14 +1221,14 @@ textarea {
 .pm-project-detail {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-panel-soft);
   overflow: hidden;
 }
 
 .pm-report-panel {
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-panel-soft);
   overflow: hidden;
 }
 
@@ -2387,8 +2459,8 @@ textarea {
     z-index: 11;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #13213f;
-    color: var(--text-primary);
+    background: color-mix(in oklab, var(--bg-panel) 20%, #0e1629 80%);
+    color: #f4f8ff;
     padding: 0.4rem 0.55rem;
   }
 

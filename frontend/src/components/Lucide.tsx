@@ -159,3 +159,27 @@ export function Smartphone({ size, ...props }: IconProps) {
     </IconBase>
   )
 }
+
+export function Sun({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" x2="12" y1="2" y2="5" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+      <line x1="2" x2="5" y1="12" y2="12" />
+      <line x1="19" x2="22" y1="12" y2="12" />
+      <line x1="4.9" x2="7.1" y1="4.9" y2="7.1" />
+      <line x1="16.9" x2="19.1" y1="16.9" y2="19.1" />
+      <line x1="16.9" x2="19.1" y1="7.1" y2="4.9" />
+      <line x1="4.9" x2="7.1" y1="19.1" y2="16.9" />
+    </IconBase>
+  )
+}
+
+export function Moon({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+    </IconBase>
+  )
+}

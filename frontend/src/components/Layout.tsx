@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
-import { ChevronLeft, ChevronRight, Menu } from './Lucide'
+import { ChevronLeft, ChevronRight, Menu, Moon, Sun } from './Lucide'
 import { useAppContext } from '../App'
 
 export default function Layout() {
@@ -9,6 +9,16 @@ export default function Layout() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') {
+      return 'light'
+    }
+    const stored = window.localStorage.getItem('agenterm:theme')
+    if (stored === 'light' || stored === 'dark') {
+      return stored
+    }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  })
   const location = useLocation()
 
   const titleByPath: Record<string, string> = {
@@ -40,6 +50,11 @@ export default function Layout() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    window.localStorage.setItem('agenterm:theme', theme)
+  }, [theme])
 
   const closeOnMobile = () => {
     if (isMobile) {
@@ -84,6 +99,10 @@ export default function Layout() {
               <span className="sidebar-collapse-label">{desktopSidebarCollapsed ? 'Show' : 'Hide'}</span>
             </button>
           )}
+          <button className="secondary-btn icon-only-btn" onClick={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))} type="button">
+            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+            <span className="sr-only">Toggle theme</span>
+          </button>
           <div className={`connection-indicator ${app.connected ? '' : app.connectionStatus}`.trim()} />
           <strong>{topbarTitle}</strong>
           <span className="topbar-subtitle">{topbarSubtitle}</span>

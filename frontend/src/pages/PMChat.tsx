@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   deleteProject,
@@ -92,6 +92,12 @@ export default function PMChat() {
   const [projectSessionWindows, setProjectSessionWindows] = useState<Record<string, string[]>>({})
   const [projectSessionStats, setProjectSessionStats] = useState<Record<string, ProjectSessionStats>>({})
   const [projectID, setProjectID] = useState(() => new URLSearchParams(window.location.search).get('project') ?? '')
+  const [leftPaneWidth, setLeftPaneWidth] = useState<number>(() => loadPanePreference().leftWidth)
+  const [rightPaneWidth, setRightPaneWidth] = useState<number>(() => loadPanePreference().rightWidth)
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState<boolean>(() => loadPanePreference().leftCollapsed)
+  const [rightPaneCollapsed, setRightPaneCollapsed] = useState<boolean>(() => loadPanePreference().rightCollapsed)
+  const [resizingPane, setResizingPane] = useState<'left' | 'right' | null>(null)
+  const dragOriginRef = useRef<{ x: number; width: number } | null>(null)
 
   const orchestrator = useOrchestratorWS(projectID)
 
@@ -100,6 +106,43 @@ export default function PMChat() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
+
+  useEffect(() => {
+    savePanePreference({
+      leftWidth: leftPaneWidth,
+      rightWidth: rightPaneWidth,
+      leftCollapsed: leftPaneCollapsed,
+      rightCollapsed: rightPaneCollapsed,
+    })
+  }, [leftPaneCollapsed, leftPaneWidth, rightPaneCollapsed, rightPaneWidth])
+
+  useEffect(() => {
+    if (!resizingPane || isMobile) {
+      return
+    }
+    const onMouseMove = (event: MouseEvent) => {
+      const origin = dragOriginRef.current
+      if (!origin) {
+        return
+      }
+      const delta = event.clientX - origin.x
+      if (resizingPane === 'left') {
+        setLeftPaneWidth(clampPaneWidth(origin.width + delta, 240, 520))
+      } else {
+        setRightPaneWidth(clampPaneWidth(origin.width - delta, 280, 560))
+      }
+    }
+    const onMouseUp = () => {
+      dragOriginRef.current = null
+      setResizingPane(null)
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [isMobile, resizingPane])
 
   const loadProjectData = useCallback(async () => {
     if (!projectID) {
@@ -519,11 +562,31 @@ export default function PMChat() {
     </div>
   )
 
+  const startPaneResize = (pane: 'left' | 'right') => (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isMobile) {
+      return
+    }
+    event.preventDefault()
+    dragOriginRef.current = {
+      x: event.clientX,
+      width: pane === 'left' ? leftPaneWidth : rightPaneWidth,
+    }
+    setResizingPane(pane)
+  }
+
+  const workspaceStyle = isMobile
+    ? undefined
+    : ({
+        gridTemplateColumns: `${leftPaneCollapsed ? 0 : leftPaneWidth}px ${leftPaneCollapsed ? 0 : 8}px minmax(0, 1fr) ${
+          rightPaneCollapsed ? 0 : 8
+        }px ${rightPaneCollapsed ? 0 : rightPaneWidth}px`,
+      } as const)
+
   return (
     <section className="pm-chat-page">
-      <div className="pm-workspace-layout">
+      <div className={`pm-workspace-layout ${resizingPane ? 'resizing' : ''}`.trim()} style={workspaceStyle}>
         {!isMobile && (
-          <aside className="pm-workspace-left">
+          <aside className={`pm-workspace-left ${leftPaneCollapsed ? 'collapsed' : ''}`.trim()}>
             <section className="pm-chat-project-list">
               <div className="pm-panel-header">
                 <h3>Projects</h3>
@@ -583,6 +646,14 @@ export default function PMChat() {
             </section>
           </aside>
         )}
+        {!isMobile && (
+          <div
+            aria-hidden={leftPaneCollapsed}
+            className={`pm-pane-divider ${leftPaneCollapsed ? 'hidden' : ''}`.trim()}
+            onMouseDown={startPaneResize('left')}
+            role="separator"
+          />
+        )}
 
         <section className="pm-workspace-center">
           <div className="pm-chat-header">
@@ -600,6 +671,16 @@ export default function PMChat() {
             )}
             {selectedProject && (
               <div className="pm-pane-toggle">
+                {!isMobile && (
+                  <>
+                    <button className="secondary-btn" onClick={() => setLeftPaneCollapsed((prev) => !prev)} type="button">
+                      {leftPaneCollapsed ? 'Show Projects' : 'Hide Projects'}
+                    </button>
+                    <button className="secondary-btn" onClick={() => setRightPaneCollapsed((prev) => !prev)} type="button">
+                      {rightPaneCollapsed ? 'Show Details' : 'Hide Details'}
+                    </button>
+                  </>
+                )}
                 <button className="secondary-btn" onClick={() => setDemandPoolOpen(true)} type="button">
                   Demand Pool
                 </button>
@@ -637,8 +718,16 @@ export default function PMChat() {
             </div>
           )}
         </section>
+        {!isMobile && (
+          <div
+            aria-hidden={rightPaneCollapsed}
+            className={`pm-pane-divider ${rightPaneCollapsed ? 'hidden' : ''}`.trim()}
+            onMouseDown={startPaneResize('right')}
+            role="separator"
+          />
+        )}
 
-        {!isMobile && <aside className="pm-workspace-right">{infoPanel}</aside>}
+        {!isMobile && <aside className={`pm-workspace-right ${rightPaneCollapsed ? 'collapsed' : ''}`.trim()}>{infoPanel}</aside>}
       </div>
 
       <Modal onClose={() => setShowMobileInfo(false)} open={showMobileInfo} title="Project Info">
@@ -680,6 +769,56 @@ export default function PMChat() {
       </Modal>
     </section>
   )
+}
+
+interface PanePreference {
+  leftWidth: number
+  rightWidth: number
+  leftCollapsed: boolean
+  rightCollapsed: boolean
+}
+
+const panePreferenceStorageKey = 'agenterm:pm-workspace:pane:v1'
+
+function clampPaneWidth(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min
+  }
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function loadPanePreference(): PanePreference {
+  const fallback: PanePreference = {
+    leftWidth: 300,
+    rightWidth: 360,
+    leftCollapsed: false,
+    rightCollapsed: false,
+  }
+  if (typeof window === 'undefined') {
+    return fallback
+  }
+  try {
+    const raw = window.localStorage.getItem(panePreferenceStorageKey)
+    if (!raw) {
+      return fallback
+    }
+    const decoded = JSON.parse(raw) as Partial<PanePreference>
+    return {
+      leftWidth: clampPaneWidth(Number(decoded.leftWidth ?? fallback.leftWidth), 240, 520),
+      rightWidth: clampPaneWidth(Number(decoded.rightWidth ?? fallback.rightWidth), 280, 560),
+      leftCollapsed: Boolean(decoded.leftCollapsed),
+      rightCollapsed: Boolean(decoded.rightCollapsed),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function savePanePreference(preference: PanePreference): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(panePreferenceStorageKey, JSON.stringify(preference))
 }
 
 function readAsString(value: unknown): string {
