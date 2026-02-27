@@ -126,6 +126,66 @@ Remaining UI work under this plan:
 2. harden session console terminal UX to Superset-style interaction quality,
 3. finalize mobile companion views for approvals, blocker alerts, and report timeline.
 
+## 6.1.2 Cursor/Superset UI Remake Blueprint
+
+Target visual direction:
+
+1. Cursor-like shell composition (app-like, keyboard-friendly, dense information hierarchy).
+2. Superset-inspired terminal ergonomics (stable session list/detail, durable replay, clear status chips).
+3. Mac-first desktop behavior in vNext.
+
+Layout system:
+
+1. Workspace uses adjustable three-pane split with collapse/expand:
+   - left: projects + project agent stack,
+   - center: orchestrator timeline + composer,
+   - right: roadmap/lanes/assignments/reports.
+2. Left pane rules:
+   - multi-project list first,
+   - selected project agents second,
+   - orchestrator pinned to top,
+   - worker/reviewer/tester agents below.
+3. Center pane rules:
+   - orchestrator is chat-first and management-only,
+   - command cards and confirmation cards are structured,
+   - no raw JSON rendering in normal mode.
+4. Right pane rules:
+   - foldable project overview at top,
+   - stage and lane operational state below,
+   - progress report and exception inbox visible and collapsible.
+
+Terminal experience model:
+
+1. xterm-only terminal rendering.
+2. Session route is list/detail split with persistent active session id.
+3. Each terminal card exposes:
+   - role,
+   - lane/worktree,
+   - status (`working`, `needs-response`, `idle`, `reviewing`),
+   - last activity,
+   - quick actions (`respond`, `interrupt`, `close`).
+4. Output modes:
+   - raw stream,
+   - parsed transcript,
+   - issue/highlight filter.
+5. Reconnect and resume behavior:
+   - restore active session by id,
+   - restore scrollback snapshot,
+   - preserve command ledger continuity.
+
+Visual language:
+
+1. Support light/dark app theme at shell level.
+2. Use compact spacing, high-contrast text, muted panel layering, and low-noise borders.
+3. Treat dashboard/connect/settings as utility surfaces, not primary workflow surfaces.
+4. Connect Mobile remains simple QR pair + mobile companion entry.
+5. Settings remains agent registry focused:
+   - name,
+   - start command,
+   - one-line specification,
+   - max parallel,
+   - optional orchestrator credentials.
+
 Session view:
 
 1. list/detail split,
@@ -231,3 +291,28 @@ Operationally:
 
 1. old plan becomes historical context,
 2. this vNext plan drives execution backlog and acceptance criteria.
+
+## 10. Coverage Check (Requirements + Decisions + Preflight)
+
+Coverage against user requirements from latest UI directive:
+
+1. Cursor-style shell layout: covered in `6.1.2`.
+2. Superset-inspired terminal model: covered in `6.1.2` and Slice 2 acceptance.
+3. Multi-project left + project agents under selection: covered in `6.1.2`.
+4. Orchestrator is manager-only (dispatch/schedule/inject/gather): covered in section `4`.
+5. Demand pool opened from orchestrator chat (not primary page): covered in `6.1.1`.
+6. Dashboard/connect/settings as utility surfaces: covered in `6.1.1` and `6.1.2`.
+7. Settings simplified to agent registry only: covered in `6.1.1` and `6.1.2`.
+
+Coverage against `docs/DECISION-vnext.md`:
+
+1. Stage definitions and gates: covered in sections `3`, `4`, `7`.
+2. Human approval and policy boundaries: covered in sections `4`, `5.3`, Slice 3.
+3. Metrics and diagnostics orientation: covered in slices and acceptance criteria.
+
+Coverage against `docs/TAURI-PREFLIGHT-QUESTIONS.md`:
+
+1. PTY direction: aligned with preflight Q3.1 decision.
+2. Adjustable/foldable layout: covered in `6.1.2`.
+3. Mobile QR pairing: covered in `6.2` and `6.1.2`.
+4. Remaining open preflight items are handled as slice-level implementation decisions (not blockers for UI shell completion).
