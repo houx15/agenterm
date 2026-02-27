@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 )
 
 var tmuxSessionExistsFn = tmuxSessionExists
+var capturePaneOutputFn = capturePaneOutput
 
 type MonitorConfig struct {
 	SessionID      string
@@ -51,6 +54,7 @@ type Monitor struct {
 	lastCompletionCheck time.Time
 	markerDoneCached    bool
 	readyCommitCached   bool
+	bootstrapAttemptAt  time.Time
 }
 
 func NewMonitor(cfg MonitorConfig) *Monitor {
@@ -118,6 +122,7 @@ func (m *Monitor) Run(ctx context.Context) {
 }
 
 func (m *Monitor) OutputSince(since time.Time) []OutputEntry {
+	m.tryBootstrapOutput()
 	return m.buffer.Since(since)
 }
 
@@ -132,6 +137,7 @@ func (m *Monitor) ReadyState() ReadyState {
 	if m == nil {
 		return ReadyState{}
 	}
+	m.tryBootstrapOutput()
 	hasOutput := len(m.buffer.Last(1)) > 0
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -140,6 +146,40 @@ func (m *Monitor) ReadyState() ReadyState {
 		ObservedOutput: hasOutput,
 		LastClass:      m.lastClass,
 		LastText:       m.lastText,
+	}
+}
+
+func (m *Monitor) tryBootstrapOutput() {
+	if m == nil || strings.TrimSpace(m.windowID) == "" {
+		return
+	}
+	if len(m.buffer.Last(1)) > 0 {
+		return
+	}
+	now := time.Now().UTC()
+	m.mu.Lock()
+	lastAttempt := m.bootstrapAttemptAt
+	if !lastAttempt.IsZero() && now.Sub(lastAttempt) < 3*time.Second {
+		m.mu.Unlock()
+		return
+	}
+	m.bootstrapAttemptAt = now
+	captureLines := m.captureLines
+	windowID := m.windowID
+	m.mu.Unlock()
+
+	lines, err := capturePaneOutputFn(windowID, captureLines)
+	if err != nil || len(lines) == 0 {
+		return
+	}
+
+	base := now.Add(-time.Duration(len(lines)) * time.Microsecond)
+	for idx, line := range lines {
+		trimmed := strings.TrimRight(line, "\r")
+		if strings.TrimSpace(trimmed) == "" {
+			continue
+		}
+		m.IngestParsed(trimmed, "normal", base.Add(time.Duration(idx)*time.Microsecond))
 	}
 }
 
@@ -303,6 +343,27 @@ func tmuxSessionExists(name string) bool {
 	return cmd.Run() == nil
 }
 
+func capturePaneOutput(windowID string, lines int) ([]string, error) {
+	if strings.TrimSpace(windowID) == "" {
+		return nil, fmt.Errorf("window id is required")
+	}
+	if lines <= 0 {
+		lines = defaultCaptureLines
+	}
+	cmd := exec.Command("tmux", "capture-pane", "-p", "-t", windowID, "-S", fmt.Sprintf("-%d", lines))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if stderr.Len() > 0 {
+			return nil, fmt.Errorf("tmux capture-pane failed: %s", strings.TrimSpace(stderr.String()))
+		}
+		return nil, err
+	}
+	raw := strings.ReplaceAll(string(out), "\r\n", "\n")
+	return strings.Split(raw, "\n"), nil
+}
+
 type ringBuffer struct {
 	mu      sync.RWMutex
 	entries []OutputEntry
@@ -330,7 +391,7 @@ func (r *ringBuffer) Since(since time.Time) []OutputEntry {
 	defer r.mu.RUnlock()
 	result := make([]OutputEntry, 0, len(r.entries))
 	for _, entry := range r.entries {
-		if since.IsZero() || entry.Timestamp.After(since) || entry.Timestamp.Equal(since) {
+		if since.IsZero() || entry.Timestamp.After(since) {
 			result = append(result, entry)
 		}
 	}

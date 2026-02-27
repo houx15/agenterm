@@ -884,7 +884,7 @@ func (h *handler) recordAndReadSessionOutput(windowID string, captured []string,
 
 	filteredEntries := make([]sessionOutputLine, 0, len(state.entries))
 	for _, entry := range state.entries {
-		if since.IsZero() || entry.Timestamp.After(since) || entry.Timestamp.Equal(since) {
+		if since.IsZero() || entry.Timestamp.After(since) {
 			filteredEntries = append(filteredEntries, entry)
 		}
 	}

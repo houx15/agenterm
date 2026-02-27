@@ -890,8 +890,8 @@ func TestSessionOutputSinceFiltering(t *testing.T) {
 	}
 	var lines2 []map[string]any
 	decodeBody(t, second, &lines2)
-	if len(lines2) != 1 {
-		t.Fatalf("len(lines2)=%d want 1", len(lines2))
+	if len(lines2) != 0 {
+		t.Fatalf("len(lines2)=%d want 0", len(lines2))
 	}
 }
 

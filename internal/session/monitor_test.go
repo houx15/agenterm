@@ -193,3 +193,48 @@ func TestMonitorRunMarksFailedWhenSessionDisappearsWithoutCompletionSignal(t *te
 		t.Fatalf("status=%q want failed", updated.Status)
 	}
 }
+
+func TestMonitorOutputSinceBootstrapsFromPane(t *testing.T) {
+	origCapture := capturePaneOutputFn
+	t.Cleanup(func() { capturePaneOutputFn = origCapture })
+
+	called := 0
+	capturePaneOutputFn = func(windowID string, lines int) ([]string, error) {
+		called++
+		return []string{"", "boot-a", "boot-b"}, nil
+	}
+
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-bootstrap",
+		TmuxSession:  "tmux-bootstrap",
+		WindowID:     "@9",
+		IdleTimeout:  30 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	out := m.OutputSince(time.Time{})
+	if called != 1 {
+		t.Fatalf("capture called=%d want 1", called)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len(out)=%d want 2", len(out))
+	}
+	if out[0].Text != "boot-a" || out[1].Text != "boot-b" {
+		t.Fatalf("unexpected bootstrap output: %+v", out)
+	}
+}
+
+func TestRingBufferSinceIsExclusive(t *testing.T) {
+	r := newRingBuffer(8)
+	ts := time.Now().UTC()
+	r.Add(OutputEntry{Text: "line-1", Timestamp: ts})
+	r.Add(OutputEntry{Text: "line-2", Timestamp: ts.Add(time.Millisecond)})
+
+	got := r.Since(ts)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1", len(got))
+	}
+	if got[0].Text != "line-2" {
+		t.Fatalf("got=%+v want line-2 only", got)
+	}
+}
