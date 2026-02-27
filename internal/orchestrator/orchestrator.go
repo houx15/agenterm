@@ -34,6 +34,7 @@ const (
 	defaultLLMCallTimeout    = 90 * time.Second
 	defaultMaxHistory        = 50
 	defaultGlobalMaxParallel = 32
+	defaultMaxRoleIterations = 20
 	maxCommandLedgerEntries  = 500
 	executionLane            = "execution"
 	demandLane               = "demand"
@@ -1557,11 +1558,20 @@ func (o *Orchestrator) checkRoleHandoffAndRetries(ctx context.Context, taskID st
 		return true, "role is not in playbook"
 	}
 	attempts := o.roleAttemptCount(ctx, taskID, roleName)
-	if role.RetryPolicy.MaxIterations > 0 && attempts >= role.RetryPolicy.MaxIterations {
-		reason := fmt.Sprintf("max_iterations reached (%d/%d)", attempts, role.RetryPolicy.MaxIterations)
+	maxIter := role.RetryPolicy.MaxIterations
+	if maxIter <= 0 {
+		maxIter = defaultMaxRoleIterations
+	}
+	if attempts >= maxIter {
+		reason := fmt.Sprintf("max_iterations reached (%d/%d)", attempts, maxIter)
 		if len(role.RetryPolicy.EscalateOn) > 0 {
 			reason += fmt.Sprintf("; escalate_on=%s", strings.Join(role.RetryPolicy.EscalateOn, ","))
 		}
+		// Two-tier escalation:
+		// Tier 1 — auto-diagnostic context appended to reason for LLM/caller consumption
+		reason += fmt.Sprintf("; diagnostic: task=%s role=%s attempts=%d stage=%s", taskID, roleName, attempts, stageName)
+		// Tier 2 — the caller (createSession) surfaces this as an error, which the
+		// LLM relays to the user as a human-visible escalation notice.
 		return true, reason
 	}
 
