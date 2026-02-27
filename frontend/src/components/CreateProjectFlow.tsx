@@ -125,6 +125,7 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
         name: trimmedName,
         repo_path: trimmedRepoPath,
         status: 'active',
+        ...(selectedPlaybookID ? { playbook_id: selectedPlaybookID } : {}),
       })
       if (selectedAgent) {
         await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
@@ -245,6 +246,23 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
             ))}
           </select>
         </label>
+
+        {playbooks.length > 0 && (
+          <label className="settings-field">
+            <span>Playbook Template</span>
+            <select
+              onChange={(e) => setSelectedPlaybookID(e.target.value)}
+              value={selectedPlaybookID}
+            >
+              <option value="">None (default workflow)</option>
+              {playbooks.map((pb) => (
+                <option key={pb.id} value={pb.id}>
+                  {pb.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="settings-field">
           <span>Assigned Workers</span>
