@@ -2,11 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, BellRing, CheckCircle2, ClipboardList, LoaderCircle, MessageSquareText, RefreshCw } from 'lucide-react'
 import { getOrchestratorReport, listOrchestratorExceptions, listProjectTasks, listProjects, listSessions, resolveOrchestratorException } from '../api/client'
 import type { OrchestratorExceptionItem, OrchestratorProgressReport, Project, Session, Task } from '../api/types'
-import type { SessionMessage } from '../components/ChatMessage'
+import type { MessageActionOption, SessionMessage } from '../components/ChatMessage'
 import { useOrchestratorWS } from '../hooks/useOrchestratorWS'
 import { useAppContext } from '../App'
 
 type MobileTab = 'projects' | 'approvals' | 'reports' | 'alerts'
+const DEFAULT_APPROVAL_OPTIONS: MessageActionOption[] = [
+  { label: 'Confirm', value: 'approve' },
+  { label: 'Modify', value: 'modify' },
+  { label: 'Cancel', value: 'cancel' },
+]
 
 function readAsNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -37,8 +42,39 @@ function looksLikeApprovalReply(text: string): boolean {
   if (!trimmed) {
     return false
   }
-  const tokens = ['confirm', 'approved', 'approve', 'cancel', 'reject', 'modify', '同意', '确认', '取消', '拒绝', '修改']
+  const tokens = ['confirm', 'approved', 'approve', 'yes', 'proceed', 'continue', 'cancel', 'reject', 'deny', 'stop', 'modify', 'change', 'replan', '同意', '确认', '取消', '拒绝', '修改']
   return tokens.some((token) => trimmed.includes(token))
+}
+
+function resolveApprovalReply(option: MessageActionOption): string {
+  const probe = `${option.value ?? ''} ${option.label ?? ''}`.toLowerCase()
+  if (/(cancel|reject|deny|stop|abort|no)/.test(probe)) {
+    return 'Cancel execution for now.'
+  }
+  if (/(modify|change|adjust|replan|edit)/.test(probe)) {
+    return 'Modify plan before execution.'
+  }
+  if (/(approve|confirm|yes|continue|proceed|execute|run)/.test(probe)) {
+    return 'Approved. Execute now.'
+  }
+  if (typeof option.label === 'string' && option.label.trim()) {
+    return option.label.trim()
+  }
+  if (typeof option.value === 'string' && option.value.trim()) {
+    return option.value.trim()
+  }
+  return 'Approved. Execute now.'
+}
+
+function resolveApprovalButtonClass(option: MessageActionOption): string {
+  const probe = `${option.value ?? ''} ${option.label ?? ''}`.toLowerCase()
+  if (/(cancel|reject|deny|stop|abort|no)/.test(probe)) {
+    return 'secondary-btn danger-btn'
+  }
+  if (/(approve|confirm|yes|continue|proceed|execute|run)/.test(probe)) {
+    return 'primary-btn'
+  }
+  return 'secondary-btn'
 }
 
 function resolvePendingConfirmations(messages: SessionMessage[]): SessionMessage[] {
@@ -153,6 +189,18 @@ export default function MobileCompanion() {
   }, [app.lastMessage, refreshSelectedProject, selectedProjectID])
 
   const pendingApprovals = useMemo(() => resolvePendingConfirmations(orchestrator.messages), [orchestrator.messages])
+  const activeApproval = pendingApprovals[0] ?? null
+  const approvalActions = useMemo(() => {
+    const options = Array.isArray(activeApproval?.confirmationOptions) ? activeApproval?.confirmationOptions : []
+    if (!options || options.length === 0) {
+      return DEFAULT_APPROVAL_OPTIONS
+    }
+    return options.filter((item) => {
+      const label = typeof item?.label === 'string' ? item.label.trim() : ''
+      const value = typeof item?.value === 'string' ? item.value.trim() : ''
+      return Boolean(label || value)
+    })
+  }, [activeApproval?.confirmationOptions])
 
   const blockerAlerts = useMemo(() => {
     const blockers = readAsStringArray(report?.blockers)
@@ -330,17 +378,20 @@ export default function MobileCompanion() {
                   ))}
                 </ul>
               )}
-              <div className="mobile-action-row">
-                <button className="primary-btn" onClick={() => sendQuickReply('Approved. Execute now.')} type="button">
-                  Confirm
-                </button>
-                <button className="secondary-btn" onClick={() => sendQuickReply('Modify plan before execution.')} type="button">
-                  Modify
-                </button>
-                <button className="secondary-btn danger-btn" onClick={() => sendQuickReply('Cancel execution for now.')} type="button">
-                  Cancel
-                </button>
-              </div>
+              {pendingApprovals.length > 0 && (
+                <div className="mobile-action-row">
+                  {approvalActions.map((option, index) => (
+                    <button
+                      key={`${option.label}-${option.value}-${index}`}
+                      className={resolveApprovalButtonClass(option)}
+                      onClick={() => sendQuickReply(resolveApprovalReply(option))}
+                      type="button"
+                    >
+                      {option.label || option.value || 'Confirm'}
+                    </button>
+                  ))}
+                </div>
+              )}
             </article>
 
             <article className="mobile-card">
