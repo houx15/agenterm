@@ -322,7 +322,7 @@ export default function Workspace() {
   return (
     <>
       <div
-        className={`workspace ${panelOpen ? 'panel-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`.trim()}
+        className={`workspace ${panelOpen && selectedProject ? 'panel-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`.trim()}
       >
         {/* Left sidebar */}
         <ProjectSidebar

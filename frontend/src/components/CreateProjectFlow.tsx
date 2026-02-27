@@ -37,15 +37,12 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
   const [browseBusy, setBrowseBusy] = useState(false)
   const [browseError, setBrowseError] = useState('')
 
-  const orchestratorAgents = useMemo(
-    () => agents.filter((a) => a.supports_orchestrator),
-    [agents],
-  )
-
   const defaultOrchestratorAgentID = useMemo(() => {
-    const preferred = orchestratorAgents.find((a) => a.id === 'orchestrator')
-    return preferred?.id ?? orchestratorAgents[0]?.id ?? ''
-  }, [orchestratorAgents])
+    const preferred = agents.find((a) => a.supports_orchestrator && a.id === 'orchestrator')
+      ?? agents.find((a) => a.supports_orchestrator)
+      ?? agents[0]
+    return preferred?.id ?? ''
+  }, [agents])
 
   // Load agents on mount
   useEffect(() => {
@@ -113,24 +110,22 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
       setError('Project name and folder are required.')
       return
     }
-    if (!orchestratorAgentID) {
-      setError('Please select an orchestrator agent.')
-      return
-    }
     setError('')
     setBusy(true)
     try {
-      const selectedAgent = orchestratorAgents.find((a) => a.id === orchestratorAgentID)
+      const selectedAgent = agents.find((a) => a.id === orchestratorAgentID)
       const created = await createProject<Project>({
         name: trimmedName,
         repo_path: trimmedRepoPath,
         status: 'active',
       })
-      await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
-        default_provider: selectedAgent?.orchestrator_provider || 'anthropic',
-        default_model: selectedAgent?.model || '',
-        max_parallel: workers,
-      })
+      if (selectedAgent) {
+        await updateProjectOrchestrator<ProjectOrchestratorProfile>(created.id, {
+          default_provider: selectedAgent.orchestrator_provider || 'anthropic',
+          default_model: selectedAgent.model || '',
+          max_parallel: workers,
+        })
+      }
       onCreated()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -235,12 +230,10 @@ export default function CreateProjectFlow({ open, onClose, onCreated }: CreatePr
             onChange={(e) => setOrchestratorAgentID(e.target.value)}
             value={orchestratorAgentID}
           >
-            {orchestratorAgents.length === 0 && (
-              <option value="">No orchestrator-capable agents</option>
-            )}
-            {orchestratorAgents.map((agent) => (
+            <option value="">None (skip orchestrator)</option>
+            {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
-                {agent.name} ({agent.id})
+                {agent.name} ({agent.id}){agent.supports_orchestrator ? ' *' : ''}
               </option>
             ))}
           </select>
