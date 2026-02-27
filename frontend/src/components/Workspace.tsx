@@ -23,6 +23,7 @@ import HomeView from './HomeView'
 import ConnectModal from './ConnectModal'
 import CreateProjectFlow from './CreateProjectFlow'
 import Modal from './Modal'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 
 // ---------------------------------------------------------------------------
 // Helpers (migrated from PMChat.tsx / Sessions.tsx)
@@ -318,6 +319,32 @@ export default function Workspace() {
     }
     return unread
   }, [app.unreadByWindow, projectSessionWindows])
+
+  // =========================================================================
+  // Keyboard shortcuts
+  // =========================================================================
+
+  const shortcutActions = useMemo(
+    () => ({
+      switchProject: (index: number) => {
+        if (index < projects.length) {
+          setActiveProjectID(projects[index].id)
+        }
+      },
+      togglePanel: () => setPanelOpen((prev) => !prev),
+      focusActiveTerminal: () => {
+        const el = document.querySelector('.terminal') as HTMLElement | null
+        el?.focus()
+      },
+      focusChatInput: () => {
+        const el = document.querySelector('.pm-input textarea, .pm-input input') as HTMLElement | null
+        el?.focus()
+      },
+    }),
+    [projects],
+  )
+
+  useKeyboardShortcuts(shortcutActions)
 
   // =========================================================================
   // Render
