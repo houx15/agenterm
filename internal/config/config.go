@@ -24,6 +24,7 @@ type Config struct {
 	LLMModel                      string
 	LLMBaseURL                    string
 	OrchestratorGlobalMaxParallel int
+	OrchestratorUserLanguage      string
 }
 
 func Load() (*Config, error) {
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		LLMModel:                      "claude-sonnet-4-5",
 		LLMBaseURL:                    "https://api.anthropic.com/v1/messages",
 		OrchestratorGlobalMaxParallel: 32,
+		OrchestratorUserLanguage:      "en",
 	}
 
 	if err := cfg.loadFromFile(); err != nil && !os.IsNotExist(err) {
@@ -60,6 +62,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.LLMModel, "llm-model", cfg.LLMModel, "LLM model name for orchestrator")
 	flag.StringVar(&cfg.LLMBaseURL, "llm-base-url", cfg.LLMBaseURL, "LLM API URL for orchestrator")
 	flag.IntVar(&cfg.OrchestratorGlobalMaxParallel, "orchestrator-global-max-parallel", cfg.OrchestratorGlobalMaxParallel, "global max parallel sessions for orchestrator scheduling")
+	flag.StringVar(&cfg.OrchestratorUserLanguage, "orchestrator-language", cfg.OrchestratorUserLanguage, "language for orchestrator user-facing responses (e.g. en, zh, ja)")
 	flag.BoolVar(&cfg.PrintToken, "print-token", false, "print token to stdout (for local debugging)")
 	flag.Parse()
 
@@ -133,6 +136,8 @@ func (c *Config) loadFromFile() error {
 				return fmt.Errorf("invalid OrchestratorGlobalMaxParallel value %q: %w", value, err)
 			}
 			c.OrchestratorGlobalMaxParallel = v
+		case "OrchestratorUserLanguage":
+			c.OrchestratorUserLanguage = value
 		}
 	}
 	return nil
@@ -144,8 +149,8 @@ func (c *Config) saveToFile() error {
 		return err
 	}
 	data := fmt.Sprintf(
-		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nPlaybooksDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\nOrchestratorGlobalMaxParallel=%d\n",
-		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.PlaybooksDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL, c.OrchestratorGlobalMaxParallel,
+		"Port=%d\nTmuxSession=%s\nToken=%s\nDefaultDir=%s\nDBPath=%s\nAgentsDir=%s\nPlaybooksDir=%s\nLLMAPIKey=%s\nLLMModel=%s\nLLMBaseURL=%s\nOrchestratorGlobalMaxParallel=%d\nOrchestratorUserLanguage=%s\n",
+		c.Port, c.TmuxSession, c.Token, c.DefaultDir, c.DBPath, c.AgentsDir, c.PlaybooksDir, c.LLMAPIKey, c.LLMModel, c.LLMBaseURL, c.OrchestratorGlobalMaxParallel, c.OrchestratorUserLanguage,
 	)
 	return os.WriteFile(c.ConfigPath, []byte(data), 0600)
 }

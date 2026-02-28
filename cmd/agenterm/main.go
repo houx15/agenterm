@@ -461,6 +461,7 @@ func main() {
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
+		UserLanguage:            cfg.OrchestratorUserLanguage,
 	})
 	demandOrchestratorInst := orchestrator.New(orchestrator.Options{
 		APIKey:                  cfg.LLMAPIKey,
@@ -485,6 +486,7 @@ func main() {
 		Registry:                agentRegistry,
 		PlaybookRegistry:        playbookRegistry,
 		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
+		UserLanguage:            cfg.OrchestratorUserLanguage,
 		Lane:                    "demand",
 	})
 

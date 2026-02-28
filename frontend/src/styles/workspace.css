@@ -37,6 +37,35 @@
   --error: #ef4444;
 }
 
+/* Font stack fallback */
+:root {
+  --font-sans-fallback: -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Terminal color variables (dark defaults) */
+:root {
+  --terminal-bg: #0a0f1a;
+  --terminal-fg: #d1d5db;
+  --terminal-cursor: #d1d5db;
+  --terminal-selection: rgba(139, 92, 246, 0.3);
+  --terminal-black: #1a1a2e;
+  --terminal-red: #ef4444;
+  --terminal-green: #22c55e;
+  --terminal-yellow: #eab308;
+  --terminal-blue: #3b82f6;
+  --terminal-magenta: #a855f7;
+  --terminal-cyan: #06b6d4;
+  --terminal-white: #d1d5db;
+  --terminal-bright-black: #4b5563;
+  --terminal-bright-red: #f87171;
+  --terminal-bright-green: #4ade80;
+  --terminal-bright-yellow: #fde047;
+  --terminal-bright-blue: #60a5fa;
+  --terminal-bright-magenta: #c084fc;
+  --terminal-bright-cyan: #22d3ee;
+  --terminal-bright-white: #f3f4f6;
+}
+
 /* Light theme override */
 :root[data-theme='light'] {
   --bg-app: #fafafa;
@@ -56,6 +85,108 @@
   --success: #2e7d32;
   --error-bg: #fdecea;
   --error: #c62828;
+  --terminal-bg: #ffffff;
+  --terminal-fg: #1e1e1e;
+  --terminal-cursor: #1e1e1e;
+  --terminal-selection: rgba(124, 58, 237, 0.15);
+  --terminal-black: #000000;
+  --terminal-red: #cd3131;
+  --terminal-green: #00bc00;
+  --terminal-yellow: #949800;
+  --terminal-blue: #0451a5;
+  --terminal-magenta: #bc05bc;
+  --terminal-cyan: #0598bc;
+  --terminal-white: #555555;
+  --terminal-bright-black: #666666;
+  --terminal-bright-red: #cd3131;
+  --terminal-bright-green: #14ce14;
+  --terminal-bright-yellow: #b5ba00;
+  --terminal-bright-blue: #0451a5;
+  --terminal-bright-magenta: #bc05bc;
+  --terminal-bright-cyan: #0598bc;
+  --terminal-bright-white: #a5a5a5;
+}
+
+/* Monokai theme */
+:root[data-theme='monokai'] {
+  --bg-app: #272822;
+  --bg-surface: #2d2e27;
+  --bg-surface-hover: #3e3d32;
+  --bg-surface-active: #49483e;
+  --bg-elevated: #3e3d32;
+  --border-subtle: #3e3d32;
+  --border-default: #49483e;
+  --text-primary: #f8f8f2;
+  --text-secondary: #a6a28c;
+  --text-tertiary: #75715e;
+  --accent: #a6e22e;
+  --accent-hover: #b6f23e;
+  --accent-muted: rgba(166, 226, 46, 0.15);
+  --success-bg: rgba(166, 226, 46, 0.12);
+  --success: #a6e22e;
+  --error-bg: rgba(249, 38, 114, 0.12);
+  --error: #f92672;
+  --terminal-bg: #272822;
+  --terminal-fg: #f8f8f2;
+  --terminal-cursor: #f8f8f0;
+  --terminal-selection: rgba(73, 72, 62, 0.5);
+  --terminal-black: #272822;
+  --terminal-red: #f92672;
+  --terminal-green: #a6e22e;
+  --terminal-yellow: #f4bf75;
+  --terminal-blue: #66d9ef;
+  --terminal-magenta: #ae81ff;
+  --terminal-cyan: #a1efe4;
+  --terminal-white: #f8f8f2;
+  --terminal-bright-black: #75715e;
+  --terminal-bright-red: #f92672;
+  --terminal-bright-green: #a6e22e;
+  --terminal-bright-yellow: #f4bf75;
+  --terminal-bright-blue: #66d9ef;
+  --terminal-bright-magenta: #ae81ff;
+  --terminal-bright-cyan: #a1efe4;
+  --terminal-bright-white: #f9f8f5;
+}
+
+/* One Dark Pro theme */
+:root[data-theme='one-dark-pro'] {
+  --bg-app: #282c34;
+  --bg-surface: #2c313a;
+  --bg-surface-hover: #333842;
+  --bg-surface-active: #3b4048;
+  --bg-elevated: #333842;
+  --border-subtle: #3b4048;
+  --border-default: #4b5263;
+  --text-primary: #abb2bf;
+  --text-secondary: #7f848e;
+  --text-tertiary: #5c6370;
+  --accent: #61afef;
+  --accent-hover: #82c0f0;
+  --accent-muted: rgba(97, 175, 239, 0.15);
+  --success-bg: rgba(152, 195, 121, 0.12);
+  --success: #98c379;
+  --error-bg: rgba(224, 108, 117, 0.12);
+  --error: #e06c75;
+  --terminal-bg: #282c34;
+  --terminal-fg: #abb2bf;
+  --terminal-cursor: #528bff;
+  --terminal-selection: rgba(97, 175, 239, 0.25);
+  --terminal-black: #282c34;
+  --terminal-red: #e06c75;
+  --terminal-green: #98c379;
+  --terminal-yellow: #e5c07b;
+  --terminal-blue: #61afef;
+  --terminal-magenta: #c678dd;
+  --terminal-cyan: #56b6c2;
+  --terminal-white: #abb2bf;
+  --terminal-bright-black: #5c6370;
+  --terminal-bright-red: #e06c75;
+  --terminal-bright-green: #98c379;
+  --terminal-bright-yellow: #e5c07b;
+  --terminal-bright-blue: #61afef;
+  --terminal-bright-magenta: #c678dd;
+  --terminal-bright-cyan: #56b6c2;
+  --terminal-bright-white: #ffffff;
 }
 
 /* --------------------------------------------------------------------------

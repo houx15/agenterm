@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createAgent, deleteAgent, listAgents, updateAgent } from '../api/client'
+import { createAgent, deleteAgent, listAgents, updateAgent, getSettings, updateSettings } from '../api/client'
 import type { AgentConfig } from '../api/types'
 import { loadASRSettings, saveASRSettings } from '../settings/asr'
+import {
+  loadAppearanceSettings,
+  saveAppearanceSettings,
+  applyAppearanceToDOM,
+  type AppearanceSettings,
+} from '../settings/appearance'
 import Modal from './Modal'
 import { Plus, Trash2 } from './Lucide'
 
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
+  onAppearanceChange?: (settings: AppearanceSettings) => void
 }
 
 type NoticeKind = 'success' | 'error'
@@ -38,9 +45,52 @@ function clampParallelAgents(value: number): number {
   return Math.min(64, Math.max(1, Math.trunc(value)))
 }
 
-type SettingsTab = 'agents' | 'speech'
+type SettingsTab = 'agents' | 'speech' | 'appearance'
 
-export default function SettingsModal({ open, onClose }: SettingsModalProps) {
+const THEME_OPTIONS = [
+  { value: 'system', label: 'System' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'light', label: 'Light' },
+  { value: 'monokai', label: 'Monokai' },
+  { value: 'one-dark-pro', label: 'One Dark Pro' },
+]
+
+const LANGUAGE_OPTIONS = [
+  { value: 'en', label: 'English' },
+  { value: 'zh', label: 'Chinese (\u4e2d\u6587)' },
+  { value: 'ja', label: 'Japanese (\u65e5\u672c\u8a9e)' },
+  { value: 'ko', label: 'Korean (\ud55c\uad6d\uc5b4)' },
+  { value: 'es', label: 'Spanish (Espa\u00f1ol)' },
+  { value: 'fr', label: 'French (Fran\u00e7ais)' },
+  { value: 'de', label: 'German (Deutsch)' },
+  { value: 'ru', label: 'Russian (\u0420\u0443\u0441\u0441\u043a\u0438\u0439)' },
+]
+
+const FONT_LATIN_OPTIONS = [
+  { value: '', label: 'System Default' },
+  { value: 'Inter', label: 'Inter' },
+  { value: 'SF Pro Text', label: 'SF Pro Text' },
+  { value: 'Segoe UI', label: 'Segoe UI' },
+]
+
+const FONT_CJK_OPTIONS = [
+  { value: '', label: 'System Default' },
+  { value: 'PingFang SC', label: 'PingFang SC' },
+  { value: 'Noto Sans CJK SC', label: 'Noto Sans CJK SC' },
+  { value: 'Microsoft YaHei', label: 'Microsoft YaHei' },
+  { value: 'Hiragino Sans', label: 'Hiragino Sans' },
+]
+
+const FONT_TERMINAL_OPTIONS = [
+  { value: '', label: 'System Default' },
+  { value: 'SF Mono', label: 'SF Mono' },
+  { value: 'Fira Code', label: 'Fira Code' },
+  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
+  { value: 'Cascadia Code', label: 'Cascadia Code' },
+  { value: 'Source Code Pro', label: 'Source Code Pro' },
+]
+
+export default function SettingsModal({ open, onClose, onAppearanceChange }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('agents')
 
   // Agent registry state
@@ -56,6 +106,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [asrAppID, setAsrAppID] = useState('')
   const [asrAccessKey, setAsrAccessKey] = useState('')
   const [asrNotice, setAsrNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
+
+  // Appearance settings state
+  const [appearance, setAppearance] = useState<AppearanceSettings>(loadAppearanceSettings)
+  const [appearanceNotice, setAppearanceNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
 
   const isNew = selectedID === ''
   const selectedAgent = useMemo(
@@ -108,9 +162,35 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
     setAsrNotice(null)
   }, [open])
 
+  // Load appearance settings when modal opens
+  useEffect(() => {
+    if (!open) return
+    setAppearance(loadAppearanceSettings())
+    setAppearanceNotice(null)
+    // Load server-side language setting
+    getSettings().then((s) => {
+      setAppearance((prev) => ({ ...prev, language: s.orchestrator_language || prev.language }))
+    }).catch(() => { /* ignore */ })
+  }, [open])
+
   const saveASR = () => {
     saveASRSettings({ appID: asrAppID.trim(), accessKey: asrAccessKey.trim() })
     setAsrNotice({ kind: 'success', text: 'ASR settings saved.' })
+  }
+
+  const saveAppearance = async () => {
+    saveAppearanceSettings(appearance)
+    applyAppearanceToDOM(appearance)
+    onAppearanceChange?.(appearance)
+
+    // Sync language to server
+    try {
+      await updateSettings({ orchestrator_language: appearance.language })
+    } catch {
+      // Settings saved locally even if server sync fails
+    }
+
+    setAppearanceNotice({ kind: 'success', text: 'Appearance settings saved.' })
   }
 
   const selectAgent = (id: string) => {
@@ -214,7 +294,114 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
           >
             Speech Recognition
           </button>
+          <button
+            className={`settings-tab ${activeTab === 'appearance' ? 'active' : ''}`.trim()}
+            onClick={() => setActiveTab('appearance')}
+            type="button"
+          >
+            Appearance
+          </button>
         </div>
+
+        {/* Appearance tab */}
+        {activeTab === 'appearance' && (
+          <div className="settings-editor" style={{ maxWidth: '480px' }}>
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Customize theme, fonts, and orchestrator language.
+            </p>
+            {appearanceNotice && (
+              <div
+                role="status"
+                aria-live="polite"
+                style={{
+                  padding: '0.45rem 0.7rem',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  marginBottom: '8px',
+                  background: appearanceNotice.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
+                  color: appearanceNotice.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
+                }}
+              >
+                {appearanceNotice.text}
+              </div>
+            )}
+            <label>
+              Theme
+              <select
+                value={appearance.theme}
+                onChange={(e) => setAppearance((prev) => ({ ...prev, theme: e.target.value }))}
+              >
+                {THEME_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Orchestrator Language
+              <select
+                value={appearance.language}
+                onChange={(e) => setAppearance((prev) => ({ ...prev, language: e.target.value }))}
+              >
+                {LANGUAGE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              UI Font (Latin)
+              <select
+                value={appearance.fontLatin}
+                onChange={(e) => setAppearance((prev) => ({ ...prev, fontLatin: e.target.value }))}
+              >
+                {FONT_LATIN_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              UI Font (CJK)
+              <select
+                value={appearance.fontCJK}
+                onChange={(e) => setAppearance((prev) => ({ ...prev, fontCJK: e.target.value }))}
+              >
+                {FONT_CJK_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Terminal Font
+              <select
+                value={appearance.fontTerminal}
+                onChange={(e) => setAppearance((prev) => ({ ...prev, fontTerminal: e.target.value }))}
+              >
+                {FONT_TERMINAL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Terminal Font Size
+              <input
+                type="number"
+                min={12}
+                max={20}
+                value={appearance.terminalFontSize}
+                onChange={(e) =>
+                  setAppearance((prev) => ({
+                    ...prev,
+                    terminalFontSize: Math.min(20, Math.max(12, Number(e.target.value) || 13)),
+                  }))
+                }
+              />
+            </label>
+            <div className="settings-actions">
+              <button className="btn btn-primary" onClick={() => void saveAppearance()} type="button">
+                Save
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Speech Recognition tab */}
         {activeTab === 'speech' && (

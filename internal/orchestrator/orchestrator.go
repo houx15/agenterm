@@ -86,6 +86,7 @@ type Options struct {
 	MaxHistory        int
 	GlobalMaxParallel int
 	Lane              string
+	UserLanguage      string
 }
 
 type Orchestrator struct {
@@ -111,6 +112,7 @@ type Orchestrator struct {
 	playbookRegistry        *playbook.Registry
 	toolset                 *Toolset
 	lane                    string
+	userLanguage            string
 
 	maxToolRounds     int
 	maxHistory        int
@@ -205,6 +207,7 @@ func New(opts Options) *Orchestrator {
 	if lane == "" {
 		lane = executionLane
 	}
+	userLanguage := strings.TrimSpace(opts.UserLanguage)
 
 	return &Orchestrator{
 		apiKey:                  strings.TrimSpace(opts.APIKey),
@@ -228,6 +231,7 @@ func New(opts Options) *Orchestrator {
 		playbookRegistry:        opts.PlaybookRegistry,
 		toolset:                 toolset,
 		lane:                    lane,
+		userLanguage:            userLanguage,
 		maxToolRounds:           maxRounds,
 		maxHistory:              maxHistory,
 		globalMaxParallel:       globalMaxParallel,
@@ -241,6 +245,18 @@ func New(opts Options) *Orchestrator {
 
 func (o *Orchestrator) Enabled() bool {
 	return o != nil && strings.TrimSpace(o.apiKey) != ""
+}
+
+func (o *Orchestrator) SetUserLanguage(lang string) {
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	o.userLanguage = strings.TrimSpace(lang)
+}
+
+func (o *Orchestrator) UserLanguage() string {
+	o.commandMu.Lock()
+	defer o.commandMu.Unlock()
+	return o.userLanguage
 }
 
 func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage string) (<-chan StreamEvent, error) {
@@ -273,14 +289,14 @@ func (o *Orchestrator) Chat(ctx context.Context, projectID string, userMessage s
 	approval := evaluateApprovalGate(userMessage)
 	var systemPrompt string
 	if o.lane == demandLane {
-		systemPrompt = BuildDemandSystemPrompt(state, agents)
+		systemPrompt = BuildDemandSystemPrompt(state, agents, o.userLanguage)
 	} else {
 		matchedPlaybook := o.loadProjectPlaybook(ctx, state.Project)
 		if matchedPlaybook == nil {
 			matchedPlaybook = o.loadWorkflowAsPlaybook(ctx, projectID)
 		}
 		activeStage := o.resolveExecutionStage(ctx, projectID, state, matchedPlaybook)
-		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook, activeStage)
+		systemPrompt = BuildSystemPrompt(state, agents, matchedPlaybook, activeStage, o.userLanguage)
 	}
 	systemPrompt += "\n\nApproval gate:\n"
 	if approval.Confirmed {

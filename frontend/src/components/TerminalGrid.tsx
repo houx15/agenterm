@@ -12,6 +12,9 @@ interface TerminalGridProps {
   onTerminalResize: (windowID: string, sessionID: string, cols: number, rows: number) => void
   onClosePane: (windowID: string) => void
   onFocusPane: (windowID: string) => void
+  terminalFontSize?: number
+  terminalFontFamily?: string
+  themeKey?: string
 }
 
 export default function TerminalGrid({
@@ -22,6 +25,9 @@ export default function TerminalGrid({
   onTerminalResize,
   onClosePane,
   onFocusPane,
+  terminalFontSize,
+  terminalFontFamily,
+  themeKey,
 }: TerminalGridProps) {
   const terminalSessions = sessions.filter(
     (s) => getWindowID(s) && s.agent_type !== 'orchestrator',
@@ -68,6 +74,9 @@ export default function TerminalGrid({
               history={rawBuffers[windowID] || ''}
               onInput={(keys) => onTerminalInput(windowID, session.id, keys)}
               onResize={(cols, rows) => onTerminalResize(windowID, session.id, cols, rows)}
+              terminalFontSize={terminalFontSize}
+              terminalFontFamily={terminalFontFamily}
+              themeKey={themeKey}
             />
           </div>
         )

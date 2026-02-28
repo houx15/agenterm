@@ -14,7 +14,7 @@ import type {
   ServerMessage,
 } from '../api/types'
 import { getWindowID } from '../api/types'
-import { PanelRight, PanelLeft, Moon, Sun } from './Lucide'
+import { PanelRight, PanelLeft } from './Lucide'
 import ProjectSidebar from './ProjectSidebar'
 import TerminalGrid from './TerminalGrid'
 import OrchestratorPanel from './OrchestratorPanel'
@@ -24,6 +24,11 @@ import ConnectModal from './ConnectModal'
 import CreateProjectFlow from './CreateProjectFlow'
 import Modal from './Modal'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
+import {
+  loadAppearanceSettings,
+  applyAppearanceToDOM,
+  type AppearanceSettings,
+} from '../settings/appearance'
 
 // ---------------------------------------------------------------------------
 // Helpers (migrated from PMChat.tsx / Sessions.tsx)
@@ -89,11 +94,7 @@ export default function Workspace() {
   // ---- UI state -----------------------------------------------------------
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [panelOpen, setPanelOpen] = useState(true)
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const stored = localStorage.getItem('agenterm:theme')
-    if (stored === 'light' || stored === 'dark') return stored
-    return 'dark'
-  })
+  const [appearance, setAppearance] = useState<AppearanceSettings>(loadAppearanceSettings)
 
   // ---- Pane resize state --------------------------------------------------
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -134,12 +135,20 @@ export default function Workspace() {
   const [projectSessionWindows, setProjectSessionWindows] = useState<Record<string, string[]>>({})
 
   // =========================================================================
-  // Theme persistence
+  // Appearance persistence
   // =========================================================================
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('agenterm:theme', theme)
-  }, [theme])
+    applyAppearanceToDOM(appearance)
+  }, [appearance])
+
+  // Listen for system color scheme changes when theme is 'system'
+  useEffect(() => {
+    if (appearance.theme !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => applyAppearanceToDOM(appearance)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [appearance])
 
   // =========================================================================
   // Pane width persistence
@@ -503,13 +512,6 @@ export default function Workspace() {
             >
               <PanelLeft size={14} />
             </button>
-            <button
-              className="btn btn-ghost btn-icon"
-              onClick={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-              type="button"
-            >
-              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-            </button>
             <span style={{ flex: 1 }} />
             {selectedProject && (
               <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -562,6 +564,9 @@ export default function Workspace() {
                 setActiveWindowID(windowID)
                 app.setActiveWindow(windowID)
               }}
+              terminalFontSize={appearance.terminalFontSize}
+              terminalFontFamily={appearance.fontTerminal || undefined}
+              themeKey={appearance.theme}
             />
           ) : selectedProject ? (
             <div className="empty-state">No active agent sessions</div>
@@ -612,7 +617,11 @@ export default function Workspace() {
       </div>
 
       {/* Modals */}
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onAppearanceChange={setAppearance}
+      />
       <ConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
       {createProjectOpen && (
         <CreateProjectFlow

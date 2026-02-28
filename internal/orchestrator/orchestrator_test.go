@@ -48,7 +48,7 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	prompt := BuildSystemPrompt(&ProjectState{
 		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
 		Tasks:   []*db.Task{{Status: "pending"}, {Status: "running"}},
-	}, []*registry.AgentConfig{{ID: "codex", Name: "Codex", Capabilities: []string{"code"}, Languages: []string{"go"}, SpeedTier: "fast", CostTier: "medium"}}, nil, "plan")
+	}, []*registry.AgentConfig{{ID: "codex", Name: "Codex", Capabilities: []string{"code"}, Languages: []string{"go"}, SpeedTier: "fast", CostTier: "medium"}}, nil, "plan", "")
 
 	if !contains(prompt, "Demo") {
 		t.Fatalf("prompt missing project name: %s", prompt)
@@ -79,6 +79,67 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	}
 	if !contains(prompt, "NEVER loop retrying read_session_output") {
 		t.Fatalf("prompt missing anti-loop instruction for selection menus")
+	}
+	if !contains(prompt, "TUI AGENT COLLABORATION PROTOCOL") {
+		t.Fatalf("prompt missing TUI collaboration protocol")
+	}
+	if !contains(prompt, "TASK_COMPLETE") {
+		t.Fatalf("prompt missing TASK_COMPLETE completion signal")
+	}
+	if !contains(prompt, "NEVER poll more than 3 times") {
+		t.Fatalf("prompt missing bounded polling rule")
+	}
+	if !contains(prompt, "NEVER BYPASS AGENTS") {
+		t.Fatalf("prompt missing agent bypass prohibition")
+	}
+}
+
+func TestBuildSystemPromptLanguageRulesZh(t *testing.T) {
+	prompt := BuildSystemPrompt(&ProjectState{
+		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
+	}, nil, nil, "build", "zh")
+
+	if !contains(prompt, "Language rules:") {
+		t.Fatalf("prompt missing language rules block for zh")
+	}
+	if !contains(prompt, "Respond to the user (discussion field) in zh") {
+		t.Fatalf("prompt missing zh language instruction")
+	}
+	if !contains(prompt, "Always use English when composing commands") {
+		t.Fatalf("prompt missing English agent command instruction")
+	}
+}
+
+func TestBuildSystemPromptLanguageRulesEnOmitted(t *testing.T) {
+	prompt := BuildSystemPrompt(&ProjectState{
+		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
+	}, nil, nil, "build", "en")
+
+	if contains(prompt, "Language rules:") {
+		t.Fatalf("prompt should NOT include language rules block for en")
+	}
+}
+
+func TestBuildSystemPromptLanguageRulesEmptyOmitted(t *testing.T) {
+	prompt := BuildSystemPrompt(&ProjectState{
+		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
+	}, nil, nil, "build", "")
+
+	if contains(prompt, "Language rules:") {
+		t.Fatalf("prompt should NOT include language rules block for empty language")
+	}
+}
+
+func TestBuildDemandSystemPromptLanguageRules(t *testing.T) {
+	prompt := BuildDemandSystemPrompt(&ProjectState{
+		Project: &db.Project{ID: "p1", Name: "Demo", RepoPath: "/tmp/demo", Status: "active"},
+	}, nil, "ja")
+
+	if !contains(prompt, "Language rules:") {
+		t.Fatalf("demand prompt missing language rules block for ja")
+	}
+	if !contains(prompt, "Respond to the user in ja") {
+		t.Fatalf("demand prompt missing ja language instruction")
 	}
 }
 

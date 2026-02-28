@@ -113,7 +113,7 @@ func stageExecutionContract(stage string) string {
 	}
 }
 
-func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook, activeStage string) string {
+func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, playbook *Playbook, activeStage string, userLanguage string) string {
 	var b strings.Builder
 	b.WriteString("You are the AgenTerm Orchestrator, an auxiliary coordinator.\n")
 	b.WriteString("Your role is to decompose requests into tasks, assign them to TUI agents, and monitor progress.\n")
@@ -145,6 +145,38 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("  d) If you cannot decide which option to pick, present the options to the user in your discussion text and ask for their choice via confirmation.\n")
 	b.WriteString("  e) NEVER loop retrying read_session_output/wait_for_session_ready on a selection menu — the session is waiting for YOUR input, not processing.\n")
 	b.WriteString("  f) Common patterns: 'Enter to select · ↑/↓ to navigate', '(Y/n)', '[y/N]', 'Choose:', 'Select:' — all require send_key response.\n\n")
+	b.WriteString("15) TUI AGENT COLLABORATION PROTOCOL — follow this lifecycle for every agent task:\n\n")
+	b.WriteString("  STEP 1 — SEND A SELF-CONTAINED TASK PROMPT:\n")
+	b.WriteString("  When sending work to an agent via send_command, the prompt must be a single, complete message that includes:\n")
+	b.WriteString("  a) The goal: what the agent should accomplish.\n")
+	b.WriteString("  b) Context: repo path, relevant file paths, branch, any specs or constraints.\n")
+	b.WriteString("  c) Deliverables: what files/artifacts the agent should produce.\n")
+	b.WriteString("  d) Completion signal: always end with 'When finished, commit your work and output TASK_COMPLETE.'\n")
+	b.WriteString("  Do NOT send vague instructions like 'analyze this' or 'start working'. Be specific.\n\n")
+
+	b.WriteString("  STEP 2 — WAIT THEN CHECK (bounded):\n")
+	b.WriteString("  a) After sending the task, call is_session_idle once. If not idle, wait (the agent is working).\n")
+	b.WriteString("  b) Check is_session_idle up to 3 times total, with increasing intervals.\n")
+	b.WriteString("  c) On each idle check, call read_session_output ONCE and scan for:\n")
+	b.WriteString("     - TASK_COMPLETE or similar done markers → agent finished, proceed to Step 3.\n")
+	b.WriteString("     - Error messages or stuck indicators → diagnose and send a follow-up command.\n")
+	b.WriteString("     - Interactive prompts (Y/n, selection menus) → respond per rule 11.5.\n")
+	b.WriteString("     - Agent still producing output → it is working, wait again.\n")
+	b.WriteString("  d) After 3 idle checks with no completion signal, STOP polling. Report to the user:\n")
+	b.WriteString("     'Agent [name] has been working but has not signaled completion. Output summary: [last relevant lines]. How should I proceed?'\n")
+	b.WriteString("  e) NEVER poll more than 3 times. NEVER silently retry the same check.\n\n")
+
+	b.WriteString("  STEP 3 — HARVEST RESULTS:\n")
+	b.WriteString("  a) When the agent signals completion, call read_session_output to capture the final state.\n")
+	b.WriteString("  b) Look for concrete evidence of work: commit hashes, file paths created/modified, test results.\n")
+	b.WriteString("  c) If the output shows the agent committed work, verify via git tools (worktree git-log, git-status).\n")
+	b.WriteString("  d) Update task status based on actual evidence, not assumptions.\n\n")
+
+	b.WriteString("  STEP 4 — NEVER BYPASS AGENTS:\n")
+	b.WriteString("  a) If an agent did not produce expected deliverables, do NOT do the work yourself.\n")
+	b.WriteString("  b) Instead: report what happened to the user, suggest re-sending the task with clearer instructions, or ask if a different agent should be used.\n")
+	b.WriteString("  c) You are a coordinator. Your only outputs are discussion text and tool calls. You cannot write code, create files, or run shell commands directly.\n\n")
+
 	b.WriteString("12) Follow current stage contract strictly and do not run tools that are outside the active stage.\n\n")
 	b.WriteString("12.1) In project-scoped chat, do not create other projects; use current project only.\n\n")
 	b.WriteString("13) Assistant text responses must use a JSON envelope for UI parsing:\n")
@@ -153,6 +185,14 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	b.WriteString("14) If confirmation is needed, set confirmation.needed=true and provide a concise confirmation.prompt.\n\n")
 	if block := strings.TrimSpace(SkillSummaryPromptBlock()); block != "" {
 		b.WriteString(block + "\n\n")
+	}
+
+	lang := strings.TrimSpace(userLanguage)
+	if lang != "" && lang != "en" {
+		b.WriteString("Language rules:\n")
+		b.WriteString(fmt.Sprintf("- Respond to the user (discussion field) in %s.\n", lang))
+		b.WriteString("- Always use English when composing commands, prompts, and instructions sent to TUI agents via send_command/send_key.\n")
+		b.WriteString("- Task titles, descriptions, and technical artifacts must remain in English.\n\n")
 	}
 
 	stage := strings.ToLower(strings.TrimSpace(activeStage))
@@ -249,7 +289,7 @@ func BuildSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfi
 	return b.String()
 }
 
-func BuildDemandSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig) string {
+func BuildDemandSystemPrompt(projectState *ProjectState, agents []*registry.AgentConfig, userLanguage string) string {
 	var b strings.Builder
 	b.WriteString("You are the AgenTerm Demand Orchestrator, focused on backlog capture and prioritization.\n")
 	b.WriteString("You are strictly separated from execution orchestration.\n\n")
@@ -259,6 +299,12 @@ func BuildDemandSystemPrompt(projectState *ProjectState, agents []*registry.Agen
 	b.WriteString("3) For mutating operations, require explicit user confirmation in this turn.\n")
 	b.WriteString("4) Keep summaries concise and deterministic; use tools for state-changing actions.\n")
 	b.WriteString("5) When promoting demand to tasks, confirm impact and scope with the user first.\n\n")
+	lang := strings.TrimSpace(userLanguage)
+	if lang != "" && lang != "en" {
+		b.WriteString("Language rules:\n")
+		b.WriteString(fmt.Sprintf("- Respond to the user in %s.\n", lang))
+		b.WriteString("- Task titles, descriptions, and technical artifacts must remain in English.\n\n")
+	}
 	if projectState == nil || projectState.Project == nil {
 		b.WriteString("Current project state: unavailable.\n")
 		return b.String()

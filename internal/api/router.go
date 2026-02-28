@@ -160,6 +160,9 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, orche
 	mux.HandleFunc("DELETE /api/demand-pool/{id}", handler.deleteDemandPoolItem)
 	mux.HandleFunc("POST /api/demand-pool/{id}/promote", handler.promoteDemandPoolItem)
 
+	mux.HandleFunc("GET /api/settings", handler.getSettings)
+	mux.HandleFunc("PUT /api/settings", handler.updateSettings)
+
 	wrapped := authMiddleware(token)(jsonMiddleware(corsMiddleware(mux)))
 	return wrapped
 }

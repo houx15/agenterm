@@ -347,6 +347,23 @@ export function reprioritizeDemandPool<T>(projectID: string, input: { items: Arr
   })
 }
 
+// --- Settings ---
+
+export interface AppSettings {
+  orchestrator_language: string
+}
+
+export function getSettings() {
+  return apiFetch<AppSettings>('/api/settings')
+}
+
+export function updateSettings(input: Partial<AppSettings>) {
+  return apiFetch<AppSettings>('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
 export interface ASRTranscribeInput {
   appID: string
   accessKey: string
