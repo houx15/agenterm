@@ -506,7 +506,7 @@ func defaultTools(client *RESTToolClient) []Tool {
 				}
 				query := url.Values{}
 				query.Set("lines", fmt.Sprintf("%d", lines))
-				var out []map[string]any
+				var out map[string]any
 				err = client.doJSON(ctx, http.MethodGet, "/api/sessions/"+sessionID+"/output", query, nil, &out)
 				if err != nil {
 					return nil, err

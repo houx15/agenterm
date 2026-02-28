@@ -194,10 +194,43 @@ func (m *Monitor) IngestParsed(text string, class string, ts time.Time) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.buffer.Add(OutputEntry{Text: text, Timestamp: ts})
+	m.buffer.Add(OutputEntry{Text: text, Class: strings.ToLower(strings.TrimSpace(class)), Timestamp: ts})
 	m.lastOutput = ts
 	m.lastClass = strings.ToLower(strings.TrimSpace(class))
 	m.lastText = text
+}
+
+type IdleStateResult struct {
+	Idle                bool   `json:"idle"`
+	IdleReason          string `json:"idle_reason"`
+	TimeSinceLastOutput int64  `json:"time_since_last_output_ms"`
+	PromptDetected      bool   `json:"prompt_detected"`
+	LastOutputClass     string `json:"last_output_class"`
+}
+
+func (m *Monitor) IdleState() IdleStateResult {
+	if m == nil {
+		return IdleStateResult{Idle: true, IdleReason: "no_monitor"}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	elapsed := time.Since(m.lastOutput)
+	idle := elapsed >= m.idleTimeout
+	reason := "working"
+	if idle {
+		reason = "no_output"
+	}
+	promptDetected := m.lastClass == string(parser.ClassPrompt) && parser.PromptShellPattern.MatchString(strings.TrimSpace(m.lastText))
+	if promptDetected {
+		reason = "prompt_detected"
+	}
+	return IdleStateResult{
+		Idle:                idle || promptDetected,
+		IdleReason:          reason,
+		TimeSinceLastOutput: elapsed.Milliseconds(),
+		PromptDetected:      promptDetected,
+		LastOutputClass:     m.lastClass,
+	}
 }
 
 func (m *Monitor) detectStatus() string {

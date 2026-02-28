@@ -55,6 +55,7 @@ type CommandRequest struct {
 
 type OutputEntry struct {
 	Text      string    `json:"text"`
+	Class     string    `json:"class,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -142,16 +143,97 @@ func (sm *Manager) Start(ctx context.Context) error {
 		return err
 	}
 	for _, sess := range active {
-		if err := sm.ensureMonitorForSession(context.Background(), sess); err != nil {
-			slog.Warn("failed to start monitor for active session", "session_id", sess.ID, "error", err)
+		// If the PTY process is still alive, just monitor it.
+		if sm.backend.SessionExists(context.Background(), sess.ID) {
+			if err := sm.ensureMonitorForSession(context.Background(), sess); err != nil {
+				slog.Warn("failed to start monitor for active session", "session_id", sess.ID, "error", err)
+			}
+			continue
+		}
+
+		// PTY is dead — attempt resume if the agent supports it.
+		if err := sm.ResumeSession(context.Background(), sess); err != nil {
+			slog.Warn("session resume failed, marking terminated", "session_id", sess.ID, "agent", sess.AgentType, "error", err)
+			sess.Status = "terminated"
+			_ = sm.sessionRepo.Update(context.Background(), sess)
+			if sm.hub != nil {
+				sm.hub.BroadcastSessionStatus(sess.ID, sess.Status)
+			}
 		}
 	}
+	return nil
+}
+
+// ResumeSession re-spawns a dead PTY session using the agent's resume command.
+// The existing session ID and DB record are preserved.
+func (sm *Manager) ResumeSession(ctx context.Context, sess *db.Session) error {
+	if sess == nil {
+		return fmt.Errorf("session is required")
+	}
+
+	agent := sm.registry.Get(sess.AgentType)
+	if agent == nil {
+		return fmt.Errorf("unknown agent type %q", sess.AgentType)
+	}
+	if !agent.SupportsSessionResume || strings.TrimSpace(agent.ResumeCommand) == "" {
+		return fmt.Errorf("agent %q does not support session resume", sess.AgentType)
+	}
+
+	workDir := sm.resolveWorkDirForSession(ctx, sess)
+	resumeCmd := strings.TrimSpace(agent.ResumeCommand)
+
+	slog.Info("resuming session", "session_id", sess.ID, "agent", sess.AgentType, "command", resumeCmd)
+
+	terminalID, err := sm.backend.CreateSession(ctx, sess.ID, agent.Name, resumeCmd, workDir)
+	if err != nil {
+		return fmt.Errorf("spawn resume PTY: %w", err)
+	}
+
+	sess.TmuxSessionName = terminalID
+	sess.TmuxWindowID = terminalID
+	sess.Status = "working"
+	if err := sm.sessionRepo.Update(ctx, sess); err != nil {
+		_ = sm.backend.DestroySession(ctx, terminalID)
+		return err
+	}
+
+	// Handle auto-accept sequence if configured.
+	if seq, ok := autoAcceptSequence(agent.AutoAcceptMode); ok {
+		go func(tid string, mode string) {
+			time.Sleep(600 * time.Millisecond)
+			if err := sm.backend.SendInput(context.Background(), tid, mode); err != nil {
+				slog.Debug("auto-accept send failed on resume", "session", sess.ID, "error", err)
+			}
+		}(terminalID, seq)
+	}
+
+	if err := sm.ensureMonitorForSession(ctx, sess); err != nil {
+		slog.Warn("failed to start monitor for resumed session", "session_id", sess.ID, "error", err)
+	}
+	if sm.hub != nil {
+		sm.hub.BroadcastSessionStatus(sess.ID, sess.Status)
+	}
+
+	slog.Info("session resumed successfully", "session_id", sess.ID, "agent", sess.AgentType)
 	return nil
 }
 
 func (sm *Manager) Close() {
 	if sm == nil {
 		return
+	}
+
+	// Mark active sessions as suspended so they can be resumed on next startup.
+	if sm.sessionRepo != nil {
+		active, _ := sm.sessionRepo.ListActive(context.Background())
+		for _, sess := range active {
+			switch strings.ToLower(strings.TrimSpace(sess.Status)) {
+			case "working", "idle", "waiting_review", "human_takeover":
+				sess.Status = "suspended"
+				_ = sm.sessionRepo.Update(context.Background(), sess)
+				slog.Info("session suspended for future resume", "session_id", sess.ID, "agent", sess.AgentType)
+			}
+		}
 	}
 
 	sm.mu.Lock()
@@ -565,6 +647,27 @@ func (sm *Manager) GetOutput(ctx context.Context, sessionID string, since time.T
 		return []OutputEntry{}, nil
 	}
 	return handle.monitor.OutputSince(since), nil
+}
+
+func (sm *Manager) GetIdleState(ctx context.Context, sessionID string) (IdleStateResult, error) {
+	session, err := sm.sessionRepo.Get(ctx, sessionID)
+	if err != nil {
+		return IdleStateResult{}, err
+	}
+	if session == nil {
+		return IdleStateResult{}, errNotFound("session")
+	}
+	if err := sm.ensureMonitorForSession(ctx, session); err != nil {
+		return IdleStateResult{}, err
+	}
+
+	sm.mu.RLock()
+	handle := sm.monitors[sessionID]
+	sm.mu.RUnlock()
+	if handle.monitor == nil {
+		return IdleStateResult{Idle: true, IdleReason: "no_monitor"}, nil
+	}
+	return handle.monitor.IdleState(), nil
 }
 
 type SessionReadyState struct {

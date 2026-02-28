@@ -47,6 +47,7 @@ type sessionCloseCheckResponse struct {
 
 type sessionOutputLine struct {
 	Text      string    `json:"text"`
+	Class     string    `json:"class,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -303,7 +304,14 @@ func (h *handler) enqueueAndRespond(w http.ResponseWriter, r *http.Request, req 
 		jsonResponse(w, http.StatusOK, cmd)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]string{"status": "sent"})
+	resp := map[string]any{
+		"status":     "sent",
+		"command_id": cmd.ID,
+	}
+	if sess, err := h.sessionRepo.Get(r.Context(), sessionID); err == nil && sess != nil {
+		resp["session_status"] = sess.Status
+	}
+	jsonResponse(w, http.StatusOK, resp)
 }
 
 
@@ -340,12 +348,26 @@ func (h *handler) getSessionOutput(w http.ResponseWriter, r *http.Request) {
 	}
 	result := make([]sessionOutputLine, 0, len(entries))
 	for _, entry := range entries {
-		result = append(result, sessionOutputLine{Text: entry.Text, Timestamp: entry.Timestamp})
+		result = append(result, sessionOutputLine{Text: entry.Text, Class: entry.Class, Timestamp: entry.Timestamp})
 	}
 	if lines > 0 && len(result) > lines {
 		result = result[len(result)-lines:]
 	}
-	jsonResponse(w, http.StatusOK, result)
+
+	// Add summary metadata via ready state.
+	sessionID := r.PathValue("id")
+	resp := map[string]any{"lines": result}
+	if h.lifecycle != nil {
+		state, err := h.lifecycle.GetSessionReadyState(r.Context(), sessionID)
+		if err == nil {
+			resp["summary"] = map[string]any{
+				"prompt_detected": state.PromptDetected,
+				"last_class":      state.LastClass,
+				"status":          state.Status,
+			}
+		}
+	}
+	jsonResponse(w, http.StatusOK, resp)
 }
 
 func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
@@ -354,14 +376,24 @@ func (h *handler) getSessionIdle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := strings.ToLower(strings.TrimSpace(session.Status))
-	idle := status == "idle"
-	jsonResponse(w, http.StatusOK, map[string]any{
-		"idle":           idle,
+
+	resp := map[string]any{
+		"idle":           status == "idle",
 		"last_activity":  session.LastActivityAt,
 		"status":         session.Status,
 		"waiting_review": status == "waiting_review",
 		"human_takeover": status == "human_takeover",
-	})
+	}
+	if h.lifecycle != nil {
+		idleState, err := h.lifecycle.GetIdleState(r.Context(), r.PathValue("id"))
+		if err == nil {
+			resp["idle_reason"] = idleState.IdleReason
+			resp["time_since_last_output_ms"] = idleState.TimeSinceLastOutput
+			resp["prompt_detected"] = idleState.PromptDetected
+			resp["last_output_class"] = idleState.LastOutputClass
+		}
+	}
+	jsonResponse(w, http.StatusOK, resp)
 }
 
 func (h *handler) getSessionReady(w http.ResponseWriter, r *http.Request) {

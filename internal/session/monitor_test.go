@@ -254,6 +254,118 @@ func TestMonitorReadyStateUsesPromptFromBootstrapSnapshot(t *testing.T) {
 	}
 }
 
+func TestOutputEntryCarriesClassThroughRingBuffer(t *testing.T) {
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-class",
+		TmuxSession:  "s-class",
+		WindowID:     "s-class",
+		IdleTimeout:  30 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	ts := time.Now().UTC()
+	m.IngestParsed("hello world", "normal", ts)
+	m.IngestParsed("$ ", "prompt", ts.Add(time.Millisecond))
+	m.IngestParsed("error: oops", "ERROR", ts.Add(2*time.Millisecond))
+
+	entries := m.OutputSince(time.Time{})
+	if len(entries) != 3 {
+		t.Fatalf("len(entries)=%d want 3", len(entries))
+	}
+	if entries[0].Class != "normal" {
+		t.Fatalf("entries[0].Class=%q want normal", entries[0].Class)
+	}
+	if entries[1].Class != "prompt" {
+		t.Fatalf("entries[1].Class=%q want prompt", entries[1].Class)
+	}
+	if entries[2].Class != "error" {
+		t.Fatalf("entries[2].Class=%q want error (lowercased)", entries[2].Class)
+	}
+}
+
+func TestIdleStateReturnsPromptDetected(t *testing.T) {
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-idle",
+		TmuxSession:  "s-idle",
+		WindowID:     "s-idle",
+		IdleTimeout:  30 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	m.IngestParsed("$ ", "prompt", time.Now().UTC())
+
+	state := m.IdleState()
+	if !state.PromptDetected {
+		t.Fatalf("PromptDetected=%v want true", state.PromptDetected)
+	}
+	if !state.Idle {
+		t.Fatalf("Idle=%v want true (prompt means idle)", state.Idle)
+	}
+	if state.IdleReason != "prompt_detected" {
+		t.Fatalf("IdleReason=%q want prompt_detected", state.IdleReason)
+	}
+	if state.LastOutputClass != "prompt" {
+		t.Fatalf("LastOutputClass=%q want prompt", state.LastOutputClass)
+	}
+}
+
+func TestIdleStateReturnsWorkingWhenActive(t *testing.T) {
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-active",
+		TmuxSession:  "s-active",
+		WindowID:     "s-active",
+		IdleTimeout:  30 * time.Second,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	m.IngestParsed("compiling...", "normal", time.Now().UTC())
+
+	state := m.IdleState()
+	if state.Idle {
+		t.Fatalf("Idle=%v want false", state.Idle)
+	}
+	if state.IdleReason != "working" {
+		t.Fatalf("IdleReason=%q want working", state.IdleReason)
+	}
+	if state.TimeSinceLastOutput < 0 {
+		t.Fatalf("TimeSinceLastOutput=%d want >= 0", state.TimeSinceLastOutput)
+	}
+}
+
+func TestIdleStateReturnsNoOutputWhenTimedOut(t *testing.T) {
+	m := NewMonitor(MonitorConfig{
+		SessionID:    "s-timeout",
+		TmuxSession:  "s-timeout",
+		WindowID:     "s-timeout",
+		IdleTimeout:  10 * time.Millisecond,
+		PollInterval: 10 * time.Millisecond,
+	})
+
+	m.IngestParsed("some output", "normal", time.Now().UTC().Add(-time.Second))
+
+	state := m.IdleState()
+	if !state.Idle {
+		t.Fatalf("Idle=%v want true", state.Idle)
+	}
+	if state.IdleReason != "no_output" {
+		t.Fatalf("IdleReason=%q want no_output", state.IdleReason)
+	}
+	if state.TimeSinceLastOutput < 1000 {
+		t.Fatalf("TimeSinceLastOutput=%d want >= 1000ms", state.TimeSinceLastOutput)
+	}
+}
+
+func TestIdleStateNilMonitor(t *testing.T) {
+	var m *Monitor
+	state := m.IdleState()
+	if !state.Idle {
+		t.Fatalf("Idle=%v want true for nil monitor", state.Idle)
+	}
+	if state.IdleReason != "no_monitor" {
+		t.Fatalf("IdleReason=%q want no_monitor", state.IdleReason)
+	}
+}
+
 // bootstrapBackend is a fakeBackend that returns canned CaptureOutput.
 type bootstrapBackend struct {
 	*fakeBackend
