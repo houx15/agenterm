@@ -71,6 +71,29 @@ func TestBuildSystemPromptIncludesStateAndAgents(t *testing.T) {
 	if !contains(prompt, "Assistant text responses must use a JSON envelope for UI parsing") {
 		t.Fatalf("prompt missing response envelope contract")
 	}
+	if !contains(prompt, "INTERACTIVE TUI SELECTION MENUS") {
+		t.Fatalf("prompt missing interactive TUI selection menu guidance")
+	}
+	if !contains(prompt, "Up/Down to navigate") {
+		t.Fatalf("prompt missing arrow key navigation instruction")
+	}
+	if !contains(prompt, "NEVER loop retrying read_session_output") {
+		t.Fatalf("prompt missing anti-loop instruction for selection menus")
+	}
+}
+
+func TestSendKeyToolDescriptionIncludesArrowKeys(t *testing.T) {
+	client := &RESTToolClient{BaseURL: "http://localhost", Token: ""}
+	ts := NewToolset(client)
+	tool, ok := ts.tools["send_key"]
+	if !ok {
+		t.Fatal("send_key tool not found in toolset")
+	}
+	for _, keyword := range []string{"Up", "Down", "Left", "Right", "Enter", "Escape", "TUI selection"} {
+		if !contains(tool.Description, keyword) {
+			t.Errorf("send_key description missing %q: %s", keyword, tool.Description)
+		}
+	}
 }
 
 func TestChatToolExecutionLoop(t *testing.T) {
