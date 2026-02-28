@@ -463,10 +463,10 @@ func defaultTools(client *RESTToolClient) []Tool {
 		},
 		{
 			Name:        "send_key",
-			Description: "Send a control key to session (e.g. C-m/C-c/Escape/Tab)",
+			Description: "Send a key to session. Supported: Enter, C-m, C-c, C-d, C-z, C-l, Escape, Tab, Backspace, Up, Down, Left, Right, or any single character (e.g. '1', 'y'). Use Up/Down to navigate TUI selection menus, then Enter to confirm.",
 			Parameters: map[string]Param{
 				"session_id": {Type: "string", Description: "Session id", Required: true},
-				"key":        {Type: "string", Description: "Control key name", Required: true},
+				"key":        {Type: "string", Description: "Key name or character to send", Required: true},
 			},
 			Execute: func(ctx context.Context, args map[string]any) (any, error) {
 				sessionID, err := requiredString(args, "session_id")
