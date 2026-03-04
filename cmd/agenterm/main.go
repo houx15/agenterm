@@ -16,7 +16,6 @@ import (
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
 	"github.com/user/agenterm/internal/parser"
-	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/pty"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/server"
@@ -241,12 +240,6 @@ func main() {
 		slog.Error("failed to initialize agent registry", "dir", cfg.AgentsDir, "error", err)
 		os.Exit(1)
 	}
-	playbookRegistry, err := playbook.NewRegistry(cfg.PlaybooksDir)
-	if err != nil {
-		slog.Error("failed to initialize playbook registry", "dir", cfg.PlaybooksDir, "error", err)
-		os.Exit(1)
-	}
-
 	backend := pty.NewBackend()
 	h := hub.New(cfg.Token, nil)
 	lifecycleManager := session.NewManager(appDB.SQL(), backend, agentRegistry, h)
@@ -331,7 +324,7 @@ func main() {
 
 	// --- Server ---
 
-	apiRouter := api.NewRouter(appDB.SQL(), lifecycleManager, h, cfg.Token, agentRegistry, playbookRegistry)
+	apiRouter := api.NewRouter(appDB.SQL(), lifecycleManager, h, cfg.Token, agentRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

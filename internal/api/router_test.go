@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/user/agenterm/internal/db"
-	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 )
 
@@ -35,11 +34,7 @@ func openAPI(t *testing.T, _ *fakeGateway) (http.Handler, *db.DB) {
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
-	playbookRegistry, err := playbook.NewRegistry(filepath.Join(t.TempDir(), "playbooks"))
-	if err != nil {
-		t.Fatalf("new playbook registry: %v", err)
-	}
-	return NewRouter(database.SQL(), nil, nil, "test-token", agentRegistry, playbookRegistry), database
+	return NewRouter(database.SQL(), nil, nil, "test-token", agentRegistry), database
 }
 
 func apiRequest(t *testing.T, h http.Handler, method, path string, body any, auth bool) *httptest.ResponseRecorder {
@@ -608,59 +603,6 @@ func TestAgentRegistryCRUDEndpoints(t *testing.T) {
 	getMissing := apiRequest(t, h, http.MethodGet, "/api/agents/custom-agent", nil, true)
 	if getMissing.Code != http.StatusNotFound {
 		t.Fatalf("get deleted status=%d body=%s", getMissing.Code, getMissing.Body.String())
-	}
-}
-
-func TestPlaybookCRUDEndpoints(t *testing.T) {
-	h, _ := openAPI(t, &fakeGateway{})
-
-	create := apiRequest(t, h, http.MethodPost, "/api/playbooks", map[string]any{
-		"id":          "custom-playbook",
-		"name":        "Custom Playbook",
-		"description": "test",
-		"phases": []map[string]any{
-			{"name": "Plan", "agent": "codex", "role": "planner", "description": "review scope"},
-			{"name": "Ship", "agent": "claude-code", "role": "implementer", "description": "deliver feature"},
-		},
-	}, true)
-	if create.Code != http.StatusCreated {
-		t.Fatalf("create playbook status=%d body=%s", create.Code, create.Body.String())
-	}
-
-	get := apiRequest(t, h, http.MethodGet, "/api/playbooks/custom-playbook", nil, true)
-	if get.Code != http.StatusOK {
-		t.Fatalf("get playbook status=%d body=%s", get.Code, get.Body.String())
-	}
-	var got map[string]any
-	decodeBody(t, get, &got)
-	if got["name"] != "Custom Playbook" {
-		t.Fatalf("name=%v want Custom Playbook", got["name"])
-	}
-
-	update := apiRequest(t, h, http.MethodPut, "/api/playbooks/custom-playbook", map[string]any{
-		"name":        "Custom Playbook v2",
-		"description": "updated",
-		"phases": []map[string]any{
-			{"name": "Implement", "agent": "codex", "role": "implementer", "description": "write code"},
-		},
-	}, true)
-	if update.Code != http.StatusOK {
-		t.Fatalf("update playbook status=%d body=%s", update.Code, update.Body.String())
-	}
-
-	list := apiRequest(t, h, http.MethodGet, "/api/playbooks", nil, true)
-	if list.Code != http.StatusOK {
-		t.Fatalf("list playbooks status=%d body=%s", list.Code, list.Body.String())
-	}
-
-	del := apiRequest(t, h, http.MethodDelete, "/api/playbooks/custom-playbook", nil, true)
-	if del.Code != http.StatusNoContent {
-		t.Fatalf("delete playbook status=%d body=%s", del.Code, del.Body.String())
-	}
-
-	getMissing := apiRequest(t, h, http.MethodGet, "/api/playbooks/custom-playbook", nil, true)
-	if getMissing.Code != http.StatusNotFound {
-		t.Fatalf("get deleted playbook status=%d body=%s", getMissing.Code, getMissing.Body.String())
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
-	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/session"
 )
@@ -26,7 +25,6 @@ type handler struct {
 	runRepo            *db.RunRepo
 	demandPoolRepo     *db.DemandPoolRepo
 	registry           *registry.Registry
-	playbookRegistry   *playbook.Registry
 	lifecycle          *session.Manager
 	hub                *hub.Hub
 	asrTranscriber     asrTranscriber
@@ -35,7 +33,7 @@ type handler struct {
 	outputState map[string]*windowOutputState
 }
 
-func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
+func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token string, agentRegistry *registry.Registry) http.Handler {
 	handler := &handler{
 		projectRepo:        db.NewProjectRepo(conn),
 		taskRepo:           db.NewTaskRepo(conn),
@@ -47,7 +45,6 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 		runRepo:            db.NewRunRepo(conn),
 		demandPoolRepo:     db.NewDemandPoolRepo(conn),
 		registry:           agentRegistry,
-		playbookRegistry:   playbookRegistry,
 		lifecycle:          lifecycle,
 		hub:                hubInst,
 		asrTranscriber:     newVolcASRTranscriber(),
@@ -94,11 +91,6 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 	mux.HandleFunc("POST /api/agents", handler.createAgent)
 	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
-	mux.HandleFunc("GET /api/playbooks", handler.listPlaybooks)
-	mux.HandleFunc("GET /api/playbooks/{id}", handler.getPlaybook)
-	mux.HandleFunc("POST /api/playbooks", handler.createPlaybook)
-	mux.HandleFunc("PUT /api/playbooks/{id}", handler.updatePlaybook)
-	mux.HandleFunc("DELETE /api/playbooks/{id}", handler.deletePlaybook)
 	mux.HandleFunc("GET /api/fs/directories", handler.listDirectories)
 	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 
