@@ -10,26 +10,29 @@ import (
 )
 
 type Project struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	RepoPath  string    `json:"repo_path"`
-	Status    string    `json:"status"`
-	Playbook  string    `json:"playbook,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	RepoPath        string    `json:"repo_path"`
+	Status          string    `json:"status"`
+	Playbook        string    `json:"playbook,omitempty"`
+	ContextTemplate string    `json:"context_template,omitempty"`
+	Knowledge       string    `json:"knowledge,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Task struct {
-	ID          string    `json:"id"`
-	ProjectID   string    `json:"project_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      string    `json:"status"`
-	DependsOn   []string  `json:"depends_on"`
-	WorktreeID  string    `json:"worktree_id,omitempty"`
-	SpecPath    string    `json:"spec_path,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"project_id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Status        string    `json:"status"`
+	DependsOn     []string  `json:"depends_on"`
+	WorktreeID    string    `json:"worktree_id,omitempty"`
+	SpecPath      string    `json:"spec_path,omitempty"`
+	RequirementID string    `json:"requirement_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Worktree struct {
@@ -135,6 +138,36 @@ type ProjectKnowledgeEntry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type Requirement struct {
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"project_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Priority    int       `json:"priority"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PlanningSession struct {
+	ID             string    `json:"id"`
+	RequirementID  string    `json:"requirement_id"`
+	AgentSessionID string    `json:"agent_session_id,omitempty"`
+	Status         string    `json:"status"`
+	Blueprint      string    `json:"blueprint,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type PermissionTemplate struct {
+	ID        string    `json:"id"`
+	AgentType string    `json:"agent_type"`
+	Name      string    `json:"name"`
+	Config    string    `json:"config"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type ReviewCycle struct {
 	ID         string    `json:"id"`
 	TaskID     string    `json:"task_id"`
@@ -183,6 +216,11 @@ type DemandPoolFilter struct {
 	Query     string
 	Limit     int
 	Offset    int
+}
+
+type RequirementFilter struct {
+	ProjectID string
+	Status    string
 }
 
 type AgentConfigFilter struct {

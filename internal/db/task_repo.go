@@ -36,9 +36,9 @@ func (r *TaskRepo) Create(ctx context.Context, task *Task) error {
 	}
 
 	_, err = r.db.ExecContext(ctx, `
-INSERT INTO tasks (id, project_id, title, description, status, depends_on, worktree_id, spec_path, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, task.ID, task.ProjectID, task.Title, task.Description, task.Status, dependsOnRaw, task.WorktreeID, task.SpecPath, formatTimestamp(task.CreatedAt), formatTimestamp(task.UpdatedAt))
+INSERT INTO tasks (id, project_id, title, description, status, depends_on, worktree_id, spec_path, requirement_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, task.ID, task.ProjectID, task.Title, task.Description, task.Status, dependsOnRaw, task.WorktreeID, task.SpecPath, task.RequirementID, formatTimestamp(task.CreatedAt), formatTimestamp(task.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -51,10 +51,10 @@ func (r *TaskRepo) Get(ctx context.Context, id string) (*Task, error) {
 	var dependsOnRaw, createdAtRaw, updatedAtRaw string
 
 	err := r.db.QueryRowContext(ctx, `
-SELECT id, project_id, title, description, status, depends_on, worktree_id, spec_path, created_at, updated_at
+SELECT id, project_id, title, description, status, depends_on, worktree_id, spec_path, requirement_id, created_at, updated_at
 FROM tasks
 WHERE id = ?
-`, id).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &dependsOnRaw, &t.WorktreeID, &t.SpecPath, &createdAtRaw, &updatedAtRaw)
+`, id).Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &dependsOnRaw, &t.WorktreeID, &t.SpecPath, &t.RequirementID, &createdAtRaw, &updatedAtRaw)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -79,7 +79,7 @@ WHERE id = ?
 }
 
 func (r *TaskRepo) List(ctx context.Context, filter TaskFilter) ([]*Task, error) {
-	query := `SELECT id, project_id, title, description, status, depends_on, worktree_id, spec_path, created_at, updated_at FROM tasks`
+	query := `SELECT id, project_id, title, description, status, depends_on, worktree_id, spec_path, requirement_id, created_at, updated_at FROM tasks`
 	args := []any{}
 	where := []string{}
 
@@ -106,7 +106,7 @@ func (r *TaskRepo) List(ctx context.Context, filter TaskFilter) ([]*Task, error)
 	for rows.Next() {
 		var t Task
 		var dependsOnRaw, createdAtRaw, updatedAtRaw string
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &dependsOnRaw, &t.WorktreeID, &t.SpecPath, &createdAtRaw, &updatedAtRaw); err != nil {
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Description, &t.Status, &dependsOnRaw, &t.WorktreeID, &t.SpecPath, &t.RequirementID, &createdAtRaw, &updatedAtRaw); err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
 		t.DependsOn, err = decodeStringSlice(dependsOnRaw)
@@ -147,9 +147,9 @@ func (r *TaskRepo) Update(ctx context.Context, task *Task) error {
 	}
 	res, err := r.db.ExecContext(ctx, `
 UPDATE tasks
-SET project_id = ?, title = ?, description = ?, status = ?, depends_on = ?, worktree_id = ?, spec_path = ?, updated_at = ?
+SET project_id = ?, title = ?, description = ?, status = ?, depends_on = ?, worktree_id = ?, spec_path = ?, requirement_id = ?, updated_at = ?
 WHERE id = ?
-`, task.ProjectID, task.Title, task.Description, task.Status, dependsOnRaw, task.WorktreeID, task.SpecPath, formatTimestamp(task.UpdatedAt), task.ID)
+`, task.ProjectID, task.Title, task.Description, task.Status, dependsOnRaw, task.WorktreeID, task.SpecPath, task.RequirementID, formatTimestamp(task.UpdatedAt), task.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update task %q: %w", task.ID, err)
 	}

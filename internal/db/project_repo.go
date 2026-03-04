@@ -31,9 +31,9 @@ func (r *ProjectRepo) Create(ctx context.Context, project *Project) error {
 	}
 
 	_, err := r.db.ExecContext(ctx, `
-INSERT INTO projects (id, name, repo_path, status, playbook, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`, project.ID, project.Name, project.RepoPath, project.Status, project.Playbook, formatTimestamp(project.CreatedAt), formatTimestamp(project.UpdatedAt))
+INSERT INTO projects (id, name, repo_path, status, playbook, context_template, knowledge, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, project.ID, project.Name, project.RepoPath, project.Status, project.Playbook, project.ContextTemplate, project.Knowledge, formatTimestamp(project.CreatedAt), formatTimestamp(project.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
 	}
@@ -45,10 +45,10 @@ func (r *ProjectRepo) Get(ctx context.Context, id string) (*Project, error) {
 	var createdAtRaw, updatedAtRaw string
 
 	err := r.db.QueryRowContext(ctx, `
-SELECT id, name, repo_path, status, playbook, created_at, updated_at
+SELECT id, name, repo_path, status, playbook, context_template, knowledge, created_at, updated_at
 FROM projects
 WHERE id = ?
-`, id).Scan(&p.ID, &p.Name, &p.RepoPath, &p.Status, &p.Playbook, &createdAtRaw, &updatedAtRaw)
+`, id).Scan(&p.ID, &p.Name, &p.RepoPath, &p.Status, &p.Playbook, &p.ContextTemplate, &p.Knowledge, &createdAtRaw, &updatedAtRaw)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -69,7 +69,7 @@ WHERE id = ?
 }
 
 func (r *ProjectRepo) List(ctx context.Context, filter ProjectFilter) ([]*Project, error) {
-	query := `SELECT id, name, repo_path, status, playbook, created_at, updated_at FROM projects`
+	query := `SELECT id, name, repo_path, status, playbook, context_template, knowledge, created_at, updated_at FROM projects`
 	args := []any{}
 	where := []string{}
 	if filter.Status != "" {
@@ -91,7 +91,7 @@ func (r *ProjectRepo) List(ctx context.Context, filter ProjectFilter) ([]*Projec
 	for rows.Next() {
 		var p Project
 		var createdAtRaw, updatedAtRaw string
-		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Status, &p.Playbook, &createdAtRaw, &updatedAtRaw); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.Status, &p.Playbook, &p.ContextTemplate, &p.Knowledge, &createdAtRaw, &updatedAtRaw); err != nil {
 			return nil, fmt.Errorf("failed to scan project: %w", err)
 		}
 		p.CreatedAt, err = parseTimestamp(createdAtRaw)
@@ -120,9 +120,9 @@ func (r *ProjectRepo) Update(ctx context.Context, project *Project) error {
 	project.UpdatedAt = nowUTC()
 	res, err := r.db.ExecContext(ctx, `
 UPDATE projects
-SET name = ?, repo_path = ?, status = ?, playbook = ?, updated_at = ?
+SET name = ?, repo_path = ?, status = ?, playbook = ?, context_template = ?, knowledge = ?, updated_at = ?
 WHERE id = ?
-`, project.Name, project.RepoPath, project.Status, project.Playbook, formatTimestamp(project.UpdatedAt), project.ID)
+`, project.Name, project.RepoPath, project.Status, project.Playbook, project.ContextTemplate, project.Knowledge, formatTimestamp(project.UpdatedAt), project.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update project %q: %w", project.ID, err)
 	}
