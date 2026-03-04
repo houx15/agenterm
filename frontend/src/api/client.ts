@@ -393,3 +393,139 @@ export function transcribeASR<T>(input: ASRTranscribeInput) {
     body: form,
   })
 }
+
+// ─── Requirements ───
+
+export interface Requirement {
+  id: string
+  project_id: string
+  title: string
+  description: string
+  priority: number
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export function listRequirements(projectID: string) {
+  return apiFetch<Requirement[]>(`/api/projects/${encodeURIComponent(projectID)}/requirements`)
+}
+
+export function createRequirement(projectID: string, data: { title: string; description?: string }) {
+  return apiFetch<Requirement>(`/api/projects/${encodeURIComponent(projectID)}/requirements`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateRequirement(id: string, data: Partial<Pick<Requirement, 'title' | 'description' | 'status'>>) {
+  return apiFetch<Requirement>(`/api/requirements/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteRequirement(id: string) {
+  return apiFetch<void>(`/api/requirements/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function reorderRequirements(projectID: string, ids: string[]) {
+  return apiFetch<void>(`/api/projects/${encodeURIComponent(projectID)}/requirements/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
+// ─── Planning Sessions ───
+
+export interface PlanningSession {
+  id: string
+  requirement_id: string
+  agent_session_id: string
+  status: string
+  blueprint: string
+  created_at: string
+  updated_at: string
+}
+
+export function createPlanningSession(requirementID: string) {
+  return apiFetch<PlanningSession>(`/api/requirements/${encodeURIComponent(requirementID)}/planning`, {
+    method: 'POST',
+  })
+}
+
+export function getPlanningSession(requirementID: string) {
+  return apiFetch<PlanningSession>(`/api/requirements/${encodeURIComponent(requirementID)}/planning`)
+}
+
+export function saveBlueprint(planningSessionID: string, blueprint: object) {
+  return apiFetch<PlanningSession>(`/api/planning-sessions/${encodeURIComponent(planningSessionID)}/blueprint`, {
+    method: 'POST',
+    body: JSON.stringify({ blueprint: JSON.stringify(blueprint) }),
+  })
+}
+
+// ─── Execution ───
+
+export function launchExecution(requirementID: string) {
+  return apiFetch<any>(`/api/requirements/${encodeURIComponent(requirementID)}/launch`, {
+    method: 'POST',
+  })
+}
+
+export function transitionStage(requirementID: string, transition: string) {
+  return apiFetch<any>(`/api/requirements/${encodeURIComponent(requirementID)}/transition`, {
+    method: 'POST',
+    body: JSON.stringify({ transition }),
+  })
+}
+
+// ─── Permission Templates ───
+
+export interface PermissionTemplate {
+  id: string
+  agent_type: string
+  name: string
+  config: string
+  created_at: string
+  updated_at: string
+}
+
+export function listPermissionTemplates(agentType?: string) {
+  const path = agentType
+    ? `/api/permission-templates/${encodeURIComponent(agentType)}`
+    : '/api/permission-templates'
+  return apiFetch<PermissionTemplate[]>(path)
+}
+
+export function createPermissionTemplate(data: { agent_type: string; name: string; config: string }) {
+  return apiFetch<PermissionTemplate>('/api/permission-templates', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updatePermissionTemplate(id: string, data: Partial<PermissionTemplate>) {
+  return apiFetch<PermissionTemplate>(`/api/permission-templates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deletePermissionTemplate(id: string) {
+  return apiFetch<void>(`/api/permission-templates/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// ─── Agent Status ───
+
+export interface AgentStatus {
+  id: string
+  name: string
+  max_parallel: number
+  busy: number
+  idle: number
+}
+
+export function getAgentStatuses() {
+  return apiFetch<AgentStatus[]>('/api/agents/status')
+}
