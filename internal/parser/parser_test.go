@@ -162,6 +162,30 @@ func TestClassification(t *testing.T) {
 			expectedClass:  ClassPrompt,
 			expectedAction: 2,
 		},
+		{
+			name:           "review ready signal",
+			input:          "All tasks completed. [READY_FOR_REVIEW]",
+			expectedClass:  ClassReviewReady,
+			expectedAction: 0,
+		},
+		{
+			name:           "blocked signal",
+			input:          "Cannot proceed due to missing dependency. [BLOCKED]",
+			expectedClass:  ClassBlocked,
+			expectedAction: 0,
+		},
+		{
+			name:           "review ready in multiline",
+			input:          "Build complete\nTests passed\n[READY_FOR_REVIEW]\nDone",
+			expectedClass:  ClassReviewReady,
+			expectedAction: 0,
+		},
+		{
+			name:           "blocked in multiline",
+			input:          "Attempting build\n[BLOCKED]\nMissing credentials",
+			expectedClass:  ClassBlocked,
+			expectedAction: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -457,6 +481,61 @@ func TestParserMessageIDs(t *testing.T) {
 		if !strings.HasPrefix(msg.ID, msg.WindowID+"-") {
 			t.Errorf("Message ID %q should start with WindowID %q", msg.ID, msg.WindowID)
 		}
+	}
+}
+
+func TestParserSignalDetectionReviewReady(t *testing.T) {
+	p := New()
+	defer p.Close()
+
+	p.Feed("win1", "Build done. [READY_FOR_REVIEW]\n$ ")
+
+	select {
+	case msg := <-p.Messages():
+		if msg.Class != ClassReviewReady {
+			t.Errorf("Class = %v, want %v", msg.Class, ClassReviewReady)
+		}
+		if !strings.Contains(msg.Text, "[READY_FOR_REVIEW]") {
+			t.Errorf("Text should contain [READY_FOR_REVIEW], got %q", msg.Text)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("timeout waiting for review_ready message")
+	}
+}
+
+func TestParserSignalDetectionBlocked(t *testing.T) {
+	p := New()
+	defer p.Close()
+
+	p.Feed("win1", "Cannot continue. [BLOCKED]\n$ ")
+
+	select {
+	case msg := <-p.Messages():
+		if msg.Class != ClassBlocked {
+			t.Errorf("Class = %v, want %v", msg.Class, ClassBlocked)
+		}
+		if !strings.Contains(msg.Text, "[BLOCKED]") {
+			t.Errorf("Text should contain [BLOCKED], got %q", msg.Text)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("timeout waiting for blocked message")
+	}
+}
+
+func TestParserSignalPriorityOverError(t *testing.T) {
+	// Signals should take priority over error classification.
+	p := New()
+	defer p.Close()
+
+	p.Feed("win1", "Error: something failed [BLOCKED]\n$ ")
+
+	select {
+	case msg := <-p.Messages():
+		if msg.Class != ClassBlocked {
+			t.Errorf("Class = %v, want %v (signal should override error)", msg.Class, ClassBlocked)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Error("timeout waiting for message")
 	}
 }
 

@@ -5,11 +5,13 @@ import "time"
 type MessageClass string
 
 const (
-	ClassNormal MessageClass = "normal"
-	ClassPrompt MessageClass = "prompt"
-	ClassError  MessageClass = "error"
-	ClassCode   MessageClass = "code"
-	ClassSystem MessageClass = "system"
+	ClassNormal      MessageClass = "normal"
+	ClassPrompt      MessageClass = "prompt"
+	ClassError       MessageClass = "error"
+	ClassCode        MessageClass = "code"
+	ClassSystem      MessageClass = "system"
+	ClassReviewReady MessageClass = "review_ready"
+	ClassBlocked     MessageClass = "blocked"
 )
 
 type QuickAction struct {

@@ -123,6 +123,14 @@ func (p *Parser) flushBufferLocked(buf *windowBuffer, forcedClass MessageClass, 
 }
 
 func (p *Parser) classify(text string) (MessageClass, []QuickAction) {
+	// Detect agent lifecycle signals first.
+	if strings.Contains(text, "[READY_FOR_REVIEW]") {
+		return ClassReviewReady, nil
+	}
+	if strings.Contains(text, "[BLOCKED]") {
+		return ClassBlocked, nil
+	}
+
 	if PromptConfirmPattern.MatchString(text) || PromptQuestionPattern.MatchString(text) || PromptBracketedChoicePattern.MatchString(text) || hasNumberedChoices(text) {
 		actions := generateQuickActions(text)
 		return ClassPrompt, actions
