@@ -245,10 +245,20 @@ export function getDemandOrchestratorReport<T>(projectID: string) {
 
 export interface SessionOutputLine {
   text: string
+  class?: string
   timestamp: string
 }
 
-export function getSessionOutput<T = SessionOutputLine[]>(sessionID: string, lines = 400) {
+export interface SessionOutputResponse {
+  lines: SessionOutputLine[]
+  summary?: {
+    prompt_detected: boolean
+    last_class: string
+    status: string
+  }
+}
+
+export function getSessionOutput<T = SessionOutputResponse>(sessionID: string, lines = 400) {
   const params = new URLSearchParams()
   params.set('lines', String(lines))
   return apiFetch<T>(`/api/sessions/${encodeURIComponent(sessionID)}/output?${params.toString()}`)

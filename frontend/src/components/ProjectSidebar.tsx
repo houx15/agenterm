@@ -26,8 +26,8 @@ function isOrchestrator(session: Session): boolean {
 function statusClass(status: string): string {
   const s = (status || '').toLowerCase()
   if (['working', 'running', 'executing', 'busy', 'active'].includes(s)) return 'working'
-  if (['waiting', 'waiting_review', 'human_takeover', 'blocked', 'needs_input'].includes(s)) return 'waiting'
-  if (['error', 'failed'].includes(s)) return 'error'
+  if (['waiting', 'waiting_review', 'human_takeover', 'blocked', 'needs_input', 'suspended'].includes(s)) return 'waiting'
+  if (['error', 'failed', 'terminated'].includes(s)) return 'error'
   return 'idle'
 }
 

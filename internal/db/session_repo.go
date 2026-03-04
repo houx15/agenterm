@@ -134,7 +134,7 @@ func (r *SessionRepo) ListActive(ctx context.Context) ([]*Session, error) {
 	rows, err := r.db.QueryContext(ctx, `
 SELECT id, task_id, tmux_session_name, tmux_window_id, agent_type, role, status, human_attached, created_at, last_activity_at
 FROM sessions
-WHERE status != 'completed'
+WHERE status NOT IN ('completed', 'terminated', 'failed')
 ORDER BY created_at DESC
 `)
 	if err != nil {

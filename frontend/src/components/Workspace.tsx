@@ -306,8 +306,8 @@ export default function Workspace() {
   const refreshWindowSnapshot = useCallback(async (sessionID: string, windowID: string) => {
     if (!sessionID?.trim() || !windowID?.trim()) return
     try {
-      const lines = await getSessionOutput<Array<{ text: string }>>(sessionID, 1200)
-      const snapshot = lines.map((line) => line.text ?? '').join('\r\n')
+      const resp = await getSessionOutput(sessionID, 1200)
+      const snapshot = (resp.lines ?? []).map((line) => line.text ?? '').join('\r\n')
       setRawBuffers((prev) => {
         const existing = prev[windowID] ?? ''
         // Skip if we already have live data that's longer (i.e., from WS stream)
