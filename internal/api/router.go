@@ -24,6 +24,7 @@ type handler struct {
 	reviewRepo         *db.ReviewRepo
 	runRepo            *db.RunRepo
 	demandPoolRepo     *db.DemandPoolRepo
+	requirementRepo    *db.RequirementRepo
 	registry           *registry.Registry
 	lifecycle          *session.Manager
 	hub                *hub.Hub
@@ -43,6 +44,7 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 		reviewRepo:         db.NewReviewRepo(conn),
 		runRepo:            db.NewRunRepo(conn),
 		demandPoolRepo:     db.NewDemandPoolRepo(conn),
+		requirementRepo:    db.NewRequirementRepo(conn),
 		registry:           agentRegistry,
 		lifecycle:          lifecycle,
 		hub:                hubInst,
@@ -110,6 +112,13 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 	mux.HandleFunc("PATCH /api/demand-pool/{id}", handler.updateDemandPoolItem)
 	mux.HandleFunc("DELETE /api/demand-pool/{id}", handler.deleteDemandPoolItem)
 	mux.HandleFunc("POST /api/demand-pool/{id}/promote", handler.promoteDemandPoolItem)
+
+	mux.HandleFunc("POST /api/projects/{id}/requirements", handler.createRequirement)
+	mux.HandleFunc("GET /api/projects/{id}/requirements", handler.listRequirements)
+	mux.HandleFunc("GET /api/requirements/{id}", handler.getRequirement)
+	mux.HandleFunc("PATCH /api/requirements/{id}", handler.updateRequirement)
+	mux.HandleFunc("DELETE /api/requirements/{id}", handler.deleteRequirement)
+	mux.HandleFunc("POST /api/projects/{id}/requirements/reorder", handler.reorderRequirements)
 
 	mux.HandleFunc("GET /api/settings", handler.getSettings)
 	mux.HandleFunc("PUT /api/settings", handler.updateSettings)
