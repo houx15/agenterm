@@ -2,6 +2,10 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { getToken } from './api/client'
 import type { ClientMessage, ServerMessage, WindowInfo } from './api/types'
 import { useWebSocket } from './hooks/useWebSocket'
+import AppSidebar from './components/AppSidebar'
+import NewProjectModal from './components/NewProjectModal'
+import DemandPool from './components/DemandPool'
+import WorkspaceView from './components/WorkspaceView'
 
 // ---------------------------------------------------------------------------
 // App modes
@@ -47,23 +51,6 @@ export function useAppContext(): AppContextValue {
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder components (will be replaced in Phase 3B)
-// ---------------------------------------------------------------------------
-
-function AppSidebar() {
-  return (
-    <aside className="w-56 bg-bg-secondary border-r border-border flex flex-col shrink-0">
-      <div className="px-4 py-3 text-sm font-bold tracking-wider text-text-secondary uppercase">
-        agenterm
-      </div>
-      <div className="flex-1 px-3 py-2 text-xs text-text-secondary">
-        Sidebar (TODO)
-      </div>
-    </aside>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -86,6 +73,9 @@ export default function App() {
 
   // ── Mode ──
   const [mode, setMode] = useState<AppMode>('workspace')
+
+  // ── Modal state ──
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
 
   // ── Handle WebSocket messages ──
   useEffect(() => {
@@ -182,7 +172,10 @@ export default function App() {
   return (
     <AppContext.Provider value={value}>
       <div className="flex h-screen bg-bg-primary text-text-primary">
-        <AppSidebar />
+        <AppSidebar
+          onNewProject={() => setNewProjectOpen(true)}
+          onOpenSettings={() => setMode('settings')}
+        />
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
             {modeButton('workspace', 'Workspace')}
@@ -202,16 +195,8 @@ export default function App() {
             </div>
           </div>
           <div className="flex-1 overflow-hidden">
-            {mode === 'workspace' && (
-              <div className="flex items-center justify-center h-full text-text-secondary">
-                Workspace (TODO)
-              </div>
-            )}
-            {mode === 'demands' && (
-              <div className="flex items-center justify-center h-full text-text-secondary">
-                Demands (TODO)
-              </div>
-            )}
+            {mode === 'workspace' && <WorkspaceView />}
+            {mode === 'demands' && <DemandPool />}
             {mode === 'settings' && (
               <div className="flex items-center justify-center h-full text-text-secondary">
                 Settings (TODO)
@@ -220,6 +205,13 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* Modals */}
+      <NewProjectModal
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={() => setNewProjectOpen(false)}
+      />
     </AppContext.Provider>
   )
 }

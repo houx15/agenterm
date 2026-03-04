@@ -350,3 +350,87 @@ export function RefreshCw({ size, ...props }: IconProps) {
     </IconBase>
   )
 }
+
+export function ChevronUp({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <polyline points="18 15 12 9 6 15" />
+    </IconBase>
+  )
+}
+
+export function ArrowUp({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="m5 12 7-7 7 7" />
+      <path d="M12 19V5" />
+    </IconBase>
+  )
+}
+
+export function ArrowDown({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M12 5v14" />
+      <path d="m19 12-7 7-7-7" />
+    </IconBase>
+  )
+}
+
+export function FileText({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="M10 9H8" />
+      <path d="M16 13H8" />
+      <path d="M16 17H8" />
+    </IconBase>
+  )
+}
+
+export function Play({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <polygon points="6 3 20 12 6 21 6 3" />
+    </IconBase>
+  )
+}
+
+export function CheckCircle({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="m9 11 3 3L22 4" />
+    </IconBase>
+  )
+}
+
+export function GitBranch({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <line x1="6" x2="6" y1="3" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </IconBase>
+  )
+}
+
+export function SplitSquareHorizontal({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <line x1="12" x2="12" y1="3" y2="21" />
+    </IconBase>
+  )
+}
+
+export function Eye({ size, ...props }: IconProps) {
+  return (
+    <IconBase size={size} {...props}>
+      <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" />
+      <circle cx="12" cy="12" r="3" />
+    </IconBase>
+  )
+}
