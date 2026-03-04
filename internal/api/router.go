@@ -27,7 +27,6 @@ type handler struct {
 	registry           *registry.Registry
 	lifecycle          *session.Manager
 	hub                *hub.Hub
-	asrTranscriber     asrTranscriber
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
@@ -47,7 +46,6 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 		registry:           agentRegistry,
 		lifecycle:          lifecycle,
 		hub:                hubInst,
-		asrTranscriber:     newVolcASRTranscriber(),
 		outputState:        make(map[string]*windowOutputState),
 	}
 
@@ -92,7 +90,6 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 	mux.HandleFunc("PUT /api/agents/{id}", handler.updateAgent)
 	mux.HandleFunc("DELETE /api/agents/{id}", handler.deleteAgent)
 	mux.HandleFunc("GET /api/fs/directories", handler.listDirectories)
-	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
 
 	mux.HandleFunc("GET /api/projects/{id}/runs/current", handler.getCurrentProjectRun)
 	mux.HandleFunc("POST /api/projects/{id}/runs/{run_id}/transition", handler.transitionProjectRun)
