@@ -1,13 +1,14 @@
 # agenterm
 
-> A self-hosted, browser-based control plane for running AI coding agents — orchestrate multiple LLM sessions through tmux, chat with a project manager AI, and watch your codebase build itself.
+> A desktop control plane for human-orchestrated AI coding agents — you make the decisions, agents execute in scoped terminal sessions.
 
 ![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat&logo=go)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=flat&logo=react)
+![Tauri](https://img.shields.io/badge/Tauri-1.x-FFC131?style=flat&logo=tauri)
 ![SQLite](https://img.shields.io/badge/SQLite-embedded-003B57?style=flat&logo=sqlite)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
-agenterm is a single-binary Go server that bridges tmux terminal sessions to a modern React web UI. It gives you a project-level orchestrator powered by Claude, a playbook system for multi-agent workflows, speech-to-text input, and live streaming of every agent's output — all accessible from a phone over Tailscale.
+agenterm puts you in the driver's seat. Instead of an AI orchestrator deciding what to do next, **you** drive the workflow — planning, building, reviewing, merging, and testing — while AI agents execute autonomously within scoped PTY sessions. Think of it as a human-orchestrator's IDE for managing a fleet of coding agents.
 
 ---
 
@@ -16,125 +17,97 @@ agenterm is a single-binary Go server that bridges tmux terminal sessions to a m
 - [Why agenterm](#why-agenterm)
 - [Features](#features)
 - [Architecture](#architecture)
-  - [Orchestrator Architecture Doc](#orchestrator-architecture-doc)
 - [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Agentic Onboarding](#agentic-onboarding)
+- [Getting Started](#getting-started)
+  - [Desktop App (Tauri)](#desktop-app-tauri)
+  - [Server Only (no Tauri)](#server-only-no-tauri)
 - [Configuration](#configuration)
-- [Usage Guide](#usage-guide)
-  - [PM Chat — Talk to the Orchestrator](#pm-chat--talk-to-the-orchestrator)
-  - [Sessions — Live Agent Terminals](#sessions--live-agent-terminals)
-  - [Settings — Agents, Playbooks & ASR](#settings--agents-playbooks--asr)
-  - [Human Takeover](#human-takeover)
-  - [Remote Access via Tailscale](#remote-access-via-tailscale)
-- [Agent System](#agent-system)
-- [Skills Protocol](#skills-protocol)
-- [Playbook System](#playbook-system)
-- [Review Cycles](#review-cycles)
+- [Usage](#usage)
 - [REST API](#rest-api)
 - [WebSocket Protocol](#websocket-protocol)
 - [Development](#development)
 - [Project Structure](#project-structure)
-- [Security](#security)
-- [Contributing](#contributing)
 - [License](#license)
 
 ---
 
 ## Why agenterm
 
-Modern LLM coding agents (Claude Code, Codex, Gemini CLI) run in terminal sessions. Managing a fleet of them — each working on an isolated git worktree, coordinating handoffs, reviewing each other's code — is painful with raw tmux.
+Modern LLM coding agents (Claude Code, Codex, Gemini CLI, Kimi CLI, OpenCode) run in terminal sessions. Managing a fleet of them — each working on an isolated git worktree — is painful with raw terminal tabs.
 
-agenterm wraps that workflow in a structured control plane:
+agenterm gives you a structured control plane:
 
-- **Durable metadata**: projects, tasks, sessions, and review cycles stored in SQLite
-- **Orchestrator**: an LLM that reads your backlog, spawns agents, and drives tasks to completion via tool calls against the REST API
-- **Playbooks**: YAML-defined workflow stages (`plan` / `build` / `test`) matched to projects by language or path pattern
-- **Live UI**: chat with the orchestrator, watch agent output stream in real time, take over a terminal with a tap
+- **Requirement-driven workflow**: describe what you want to build, plan it with an AI planner, then launch agents to execute
+- **Human decisions, AI execution**: you pick the stage transitions (plan → build → review → merge → test); agents just code
+- **Live terminal views**: watch every agent's PTY output in real time, switch between TUI/Markdown/Split views
+- **Agent capacity dashboard**: see which agents are busy and how many slots are free at a glance
 
 ---
 
 ## Features
 
-### Core Platform
-- **Multi-session tmux management** — create, monitor, and destroy agent sessions via REST; each session is a tmux window in control mode
-- **Live output streaming** — WebSocket hub pushes ANSI-stripped, classified output to every subscribed browser tab
-- **Output classification** — parser segments output into prompts, errors, code blocks, and normal text; generates quick-action buttons for `[Y/n]`, `Ctrl+C`, etc.
-- **SQLite persistence** — projects, tasks, worktrees, sessions, orchestrator history, and review cycles survive restarts
-- **Single binary** — Go embeds the React SPA; deploy by copying one file
+### Core
+- **PTY-based sessions** — each agent runs in a native PTY (no tmux dependency); output streams to the browser in real time
+- **Output classification** — parser segments output into prompts, errors, code blocks, tool calls, and signals like `[READY_FOR_REVIEW]` or `[BLOCKED]`
+- **SQLite persistence** — projects, requirements, sessions, worktrees, review cycles survive restarts
+- **Single Go binary** — embeds the React SPA; deploy by copying one file
+- **Tauri desktop shell** — native macOS/Linux/Windows app that auto-launches the Go backend as a sidecar
 
-### Orchestration
-- **PM Chat** — chat UI backed by a Claude tool-calling loop; the orchestrator can list/create/update projects, tasks, sessions, and worktrees through the local API
-- **Scheduler guardrails** — global, per-project, per-workflow, per-role, and per-model parallelism limits prevent runaway agent spawning
-- **Orchestrator history** — every tool call, result, and message is persisted and replayed on reconnect
-- **Project knowledge** — store freeform notes that the orchestrator injects into its system prompt
-- **Progressive skill disclosure** — orchestrator sees skill summaries first, then loads full skill docs only when it decides to apply one
+### Workflow
+- **Demand pool** — queue up what you want to build; promote demands into requirements
+- **Planning sessions** — open a planner agent TUI to brainstorm and produce a blueprint (task breakdown with worktree assignments)
+- **One-click execution** — assign agents to blueprint tasks and launch all sessions at once
+- **Stage pipeline** — Plan → Build → Review → Merge → Test; you trigger each transition
+- **Scaffold system** — auto-generates CLAUDE.md/AGENTS.md and permission configs per worktree based on agent type
 
-### Agents & Playbooks
-- **Agent registry** — YAML-defined agent profiles (command, model, capabilities, cost tier, speed tier); managed via Settings UI or REST API
-- **Playbook system** — multi-phase workflow templates matched to projects by language or path; define the sequence of agents and their roles
-- **Git worktree isolation** — each task gets its own `git worktree`, keeping branches independent
+### UI
+- **Foldable sidebar** — projects list + agent capacity with status dots
+- **Three-mode workspace** — Workspace (active sessions), Demands (requirement queue), Settings (project config)
+- **Per-agent view modes** — TUI only, Markdown only, or TUI/Markdown split
+- **Markdown file tree** — browse and edit `.md` files in any worktree
+- **Onboarding wizard** — first-run setup for agents and permission templates
 
-### Automation
-- **Auto-commit** — periodic commit loop keeps work checkpointed
-- **Review coordinator** — detects `[READY_FOR_REVIEW]` commits, prompts a reviewer agent, and feeds results back to the coder
-- **Auto-merge** — attempts merge after review passes; escalates conflicts to the orchestrator
-
-### Developer Experience
-- **ASR speech input** — record audio in the browser, transcribe via Volcengine, populate the chat input
-- **Human takeover** — click "Take Over" to pause automation and type directly into any agent's terminal
-- **Review cycles** — structured API for tracking code review iterations and individual issues
-- **Mobile-first UI** — collapsible sidebar, responsive layout, works on phones over Tailscale
+### Agents
+- **Agent registry** — define agents with command, capacity, capabilities; managed via REST API or Settings UI
+- **Permission templates** — per-agent-type permission configs (`.claude/settings.json`, `.codex/rules/`, `opencode.json`, etc.)
+- **Capacity tracking** — real-time view of busy/idle slots per agent
 
 ---
 
 ## Architecture
 
-### Orchestrator Architecture Doc
-
-Detailed orchestrator architecture is documented in `docs/orchestrator-architecture.md`.
-
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Browser (React SPA)                      │
-│                                                                  │
-│  ┌──────────┐  ┌─────────────────┐  ┌──────────────────────┐   │
-│  │ Sidebar  │  │   PM Chat Page  │  │   Sessions Page      │   │
-│  │ (nav)    │  │ orchestrator WS │  │ live output + input  │   │
-│  └──────────┘  └────────┬────────┘  └──────────┬───────────┘   │
-│                         │ /ws/orchestrator       │ /ws           │
-└─────────────────────────┼────────────────────────┼──────────────┘
-                          │                        │
-┌─────────────────────────▼────────────────────────▼──────────────┐
-│                       agenterm (Go binary)                        │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐ │
-│  │  HTTP/WS     │  │  REST API    │  │  Orchestrator          │ │
-│  │  Server      │  │  /api/*      │  │  (Claude tool-calling) │ │
-│  └──────────────┘  └──────┬───────┘  └──────────┬─────────────┘ │
-│                           │                      │               │
-│  ┌──────────────┐  ┌──────▼───────┐  ┌──────────▼─────────────┐ │
-│  │  Hub (WS)    │  │  Session     │  │  Automation            │ │
-│  │  broadcast   │  │  Lifecycle   │  │  (commit/review/merge) │ │
-│  └──────┬───────┘  └──────┬───────┘  └────────────────────────┘ │
-│         │                 │                                      │
-│  ┌──────▼───────┐  ┌──────▼───────┐  ┌────────────────────────┐ │
-│  │ Output Parser│  │ Tmux Manager │  │  SQLite (modernc)      │ │
-│  │ (classify)   │  │ (control mode│  │  projects/tasks/       │ │
-│  └──────────────┘  └──────┬───────┘  │  sessions/reviews      │ │
-│                           │          └────────────────────────┘ │
-└───────────────────────────┼──────────────────────────────────────┘
-                            │ tmux -C (control mode)
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                           tmux                                   │
-│  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Window @0    │  │  Window @1   │  │  Window @2   │  ...    │
-│  │  claude code  │  │  codex       │  │  gemini cli  │         │
-│  │  (implementer)│  │  (reviewer)  │  │  (researcher)│         │
-│  └───────────────┘  └──────────────┘  └──────────────┘         │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    Tauri Desktop Shell (Rust)                  │
+│  Spawns Go backend as sidecar, renders React webview          │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ http://localhost:8765
+┌───────────────────────────▼──────────────────────────────────┐
+│                     agenterm (Go binary)                       │
+│                                                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐ │
+│  │  HTTP/WS     │  │  REST API    │  │  Scaffold            │ │
+│  │  Server      │  │  /api/*      │  │  (CLAUDE.md, perms)  │ │
+│  └──────────────┘  └──────┬───────┘  └─────────────────────┘ │
+│                           │                                   │
+│  ┌──────────────┐  ┌──────▼───────┐  ┌─────────────────────┐ │
+│  │  Hub (WS)    │  │  Session     │  │  SQLite (modernc)   │ │
+│  │  broadcast   │  │  Lifecycle   │  │  projects/reqs/     │ │
+│  └──────┬───────┘  └──────┬───────┘  │  sessions/reviews   │ │
+│         │                 │          └─────────────────────┘ │
+│  ┌──────▼───────┐  ┌──────▼───────┐                          │
+│  │ Output Parser│  │ PTY Backend  │                          │
+│  │ (classify)   │  │ (spawn/read) │                          │
+│  └──────────────┘  └──────┬───────┘                          │
+│                           │                                   │
+└───────────────────────────┼──────────────────────────────────┘
+                            │ PTY (pseudo-terminal)
+          ┌─────────────────┼─────────────────┐
+          ▼                 ▼                  ▼
+   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+   │ Claude Code │  │ Codex CLI   │  │ Gemini CLI  │  ...
+   │ (worktree A)│  │ (worktree B)│  │ (worktree C)│
+   └─────────────┘  └─────────────┘  └─────────────┘
 ```
 
 ### Key Packages
@@ -142,120 +115,93 @@ Detailed orchestrator architecture is documented in `docs/orchestrator-architect
 | Package | Responsibility |
 |---------|---------------|
 | `cmd/agenterm` | Process bootstrap, flag parsing, component wiring, graceful shutdown |
-| `internal/config` | Flags → config file → env var loading, token generation |
-| `internal/server` | HTTP mux, `go:embed` SPA serving, WebSocket endpoint registration |
 | `internal/api` | REST handlers for all resources; auth/CORS/JSON middleware |
 | `internal/db` | SQLite repositories, schema migrations, all entity models |
-| `internal/tmux` | Control-mode protocol parser, gateway/manager for multi-session tmux |
-| `internal/session` | Session lifecycle, command policy, output ring buffers, idle detection |
-| `internal/parser` | ANSI stripping, output segmentation, message classification |
-| `internal/hub` | WebSocket client hub, subscriptions, rate-limited output broadcasting |
-| `internal/orchestrator` | Claude tool-calling loop, prompt building, scheduler enforcement |
-| `internal/automation` | Auto-commit, review coordinator, auto-merge, conflict escalation |
+| `internal/hub` | WebSocket client hub, subscriptions, output broadcasting |
+| `internal/parser` | ANSI stripping, output segmentation, signal detection |
+| `internal/pty` | PTY spawn/read backend for agent sessions |
 | `internal/registry` | YAML-backed agent registry |
-| `internal/playbook` | YAML-backed playbook registry, project matching |
+| `internal/scaffold` | Blueprint parsing, CLAUDE.md generation, permission config writing |
+| `internal/session` | Session lifecycle, command policy, idle detection |
+| `internal/config` | Flags → config file → env var loading |
+| `internal/server` | HTTP mux, `go:embed` SPA serving, WebSocket endpoints |
 | `internal/git` | Worktree operations, status/log helpers |
-| `frontend` | React 18 + TypeScript + Vite SPA |
+| `src-tauri` | Tauri desktop shell (Rust): sidecar management, window config |
+| `frontend` | React 18 + TypeScript + Vite + Tailwind CSS v4 + xterm.js |
 
 ---
 
 ## Requirements
 
-- **Go** 1.22 or later
-- **Node.js** 18+ and **npm** (for frontend development only; pre-built assets are embedded)
-- **tmux** 3.0+
+- **Go** 1.22+
+- **Node.js** 18+ and **npm**
 - **git** 2.5+ (for worktree support)
-- An **Anthropic API key** if using the orchestrator / PM Chat
+- **Rust** + **Cargo** (only if running the Tauri desktop app)
+- At least one AI coding agent installed (e.g. `claude`, `codex`, `gemini`)
 
 ---
 
-## Installation
+## Getting Started
 
-### From Source
+### Desktop App (Tauri)
+
+The recommended way to run agenterm. Tauri provides a native window and auto-manages the Go backend.
 
 ```bash
-git clone https://github.com/user/agenterm.git
+git clone https://github.com/houx15/agenterm.git
 cd agenterm
+
+# Install frontend dependencies
+npm --prefix frontend install
+
+# Run in development mode (hot-reload frontend + Go backend)
+cargo tauri dev
+```
+
+The app opens automatically. The Go backend starts as a sidecar on `localhost:8765` with a built-in token.
+
+To build a release binary:
+
+```bash
+cargo tauri build
+```
+
+### Server Only (no Tauri)
+
+Run just the Go backend + embedded SPA, accessible in any browser:
+
+```bash
+# Build frontend + Go binary
 make build
-```
 
-The binary will be at `bin/agenterm`. It embeds the pre-built React frontend — no separate deployment step needed.
-
-### Direct Run (no build step)
-
-```bash
-go run ./cmd/agenterm
-```
-
----
-
-## Quick Start
-
-### 1. Create a tmux session
-
-agenterm attaches to an existing tmux session (or creates one on first use).
-
-```bash
-tmux new-session -d -s ai-coding
-```
-
-### 2. Start agenterm
-
-```bash
+# Start the server
 ./bin/agenterm
 ```
 
-On first run a token is generated and saved to `~/.config/agenterm/config`. The URL is printed to stdout:
+Or without building:
+
+```bash
+# Build frontend first
+make frontend-build
+
+# Run directly
+go run ./cmd/agenterm
+```
+
+On first run a token is generated and printed:
 
 ```
 agenterm listening on http://localhost:8765
 Token: abc123...
 ```
 
+Open `http://localhost:8765?token=<your-token>` in a browser. The token is saved in `localStorage` after the first visit.
+
 Use `--print-token` to retrieve the token later:
 
 ```bash
 ./bin/agenterm --print-token
 ```
-
-### 3. Open in browser
-
-```
-http://localhost:8765?token=<your-token>
-```
-
-Pass the token in the URL once — it is persisted in `localStorage` for future visits.
-
-### 4. (Optional) Set your Anthropic API key for PM Chat
-
-```bash
-./bin/agenterm --llm-api-key sk-ant-...
-```
-
-Or export `ANTHROPIC_API_KEY` in your shell before starting agenterm.
-
----
-
-## Agentic Onboarding
-
-If you want an AI assistant to configure agenterm for you, use:
-
-1. `AGENTS.md` (assistant-facing feature/architecture/function guide)
-2. `docs/agentic-setup.md` (question-driven setup flow)
-3. `scripts/agentic-bootstrap.sh` (automated local bootstrap)
-
-Example:
-
-```bash
-bash scripts/agentic-bootstrap.sh \
-  --token "<TOKEN>" \
-  --repo-path "/absolute/path/to/repo" \
-  --project-name "My Project" \
-  --playbook "compound-engineering"
-```
-
-This will upsert agent/playbook configs from `configs/agentic/` and create a project.
-`configs/agentic/` is intended for assistant-generated files, not fixed templates.
 
 ---
 
@@ -266,329 +212,111 @@ This will upsert agent/playbook configs from `configs/agentic/` and create a pro
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port` | `8765` | HTTP server port |
-| `--session` | `ai-coding` | tmux session name to attach |
 | `--token` | auto-generated | Bearer token for authentication |
-| `--print-token` | `false` | Print the current token to stdout and exit |
-| `--dir` | `~/08Coding` | Default working directory for new projects |
+| `--print-token` | `false` | Print current token and exit |
+| `--dir` | `~/08Coding` | Default working directory |
 | `--db-path` | `~/.config/agenterm/agenterm.db` | SQLite database path |
-| `--agents-dir` | `~/.config/agenterm/agents` | Directory for agent YAML definitions |
-| `--playbooks-dir` | `~/.config/agenterm/playbooks` | Directory for playbook YAML definitions |
-| `--llm-api-key` | `$ANTHROPIC_API_KEY` | Anthropic API key for orchestrator |
-| `--llm-model` | `claude-sonnet-4-5` | LLM model for orchestrator |
-| `--llm-base-url` | Anthropic default | Override LLM API base URL |
-| `--orchestrator-global-max-parallel` | `32` | Global cap on concurrent agent sessions |
+| `--agents-dir` | `~/.config/agenterm/agents` | Agent YAML definitions directory |
 
 ### Config File
 
-Location: `~/.config/agenterm/config` (created automatically, `0600` permissions)
-
-```ini
-Port=8765
-TmuxSession=ai-coding
-Token=your-secret-token
-LLMApiKey=sk-ant-...
-AgentsDir=/home/user/.config/agenterm/agents
-PlaybooksDir=/home/user/.config/agenterm/playbooks
-```
+Location: `~/.config/agenterm/config` (auto-created, `0600` permissions)
 
 **Precedence**: CLI flags > config file > built-in defaults
 
 ---
 
-## Usage Guide
+## Usage
 
-### PM Chat — Talk to the Orchestrator
+### 1. First Run — Onboarding
 
-The **PM Chat** page (`/pm-chat`) is a chat interface backed by a Claude tool-calling loop. The orchestrator has access to the full API — it can read your projects and tasks, create new sessions, check worktree status, and drive work forward.
+On first launch (no agents configured), an onboarding wizard guides you through:
+1. **Agent Setup** — enable/configure AI agents (Claude Code, Codex, Gemini CLI, etc.)
+2. **Permission Templates** — set permission levels per agent type
+3. **Done** — workspace is ready
 
-**Example prompts:**
-- *"What tasks are currently in progress for the auth project?"*
-- *"Start a new implementation session for task-42 using the codex agent"*
-- *"The review on task-17 passed — merge the worktree"*
+### 2. Create a Project
 
-The orchestrator streams responses token-by-token over WebSocket (`/ws/orchestrator`). Tool calls and their results are shown inline. The full conversation history is persisted and replayed when you reconnect.
+Click **New Project** in the sidebar. Provide a folder path and project name.
 
-**Voice input**: click the microphone button to record speech. Audio is transcribed via the ASR backend and pasted into the input field. Configure ASR credentials in **Settings → ASR**.
+### 3. Add Requirements
 
-### Sessions — Live Agent Terminals
+Switch to the **Demands** tab. Type what you want to build and click **Add**. Requirements queue up with priority ordering.
 
-The **Sessions** page shows every active agent session. Click a session to open its live output view:
+### 4. Plan
 
-- Output streams in real time, classified into prompts, errors, code, and normal text
-- **Quick actions** appear automatically for common prompts (`[Y/n]`, `Ctrl+C`, `Continue`)
-- Type in the input bar and press `Enter` to send a command to the agent
-- Use `Shift+Enter` for multi-line input
+Select a requirement and open a planning session. A planner agent (in a TUI session) helps you brainstorm and produce a blueprint — a breakdown of tasks with worktree and agent assignments.
 
-Sessions are scoped to tasks. Each task can have one or more sessions, each mapped to a separate tmux window.
+### 5. Execute
 
-### Settings — Agents, Playbooks & ASR
+Review the blueprint, assign agents to tasks, and click **Launch All**. Each agent gets its own PTY session in an isolated git worktree with auto-generated context files.
 
-The **Settings** page has three tabs:
+### 6. Monitor & Transition
 
-#### Agent Registry
-
-Define the AI agents available to the orchestrator. Each agent is a YAML file in `--agents-dir` and editable via the UI.
-
-Example agent definition:
-
-```yaml
-id: claude-code
-name: Claude Code
-command: claude --dangerously-skip-permissions
-model: claude-sonnet-4-5
-cost_tier: medium
-speed_tier: medium
-capabilities:
-  - implement
-  - debug
-  - refactor
-languages:
-  - go
-  - typescript
-  - python
-supports_session_resume: true
-supports_headless: true
-```
-
-#### Playbooks
-
-Playbooks define stage-based workflows (`plan`, `build`, `test`) for your projects.
-
-Example playbook definition:
-
-```yaml
-id: pairing-coding
-name: Pairing Coding
-description: Pair-style flow with planner + codebase reader, then builder + reviewer.
-workflow:
-  plan:
-    enabled: true
-    roles:
-      - name: planner
-        responsibilities: Clarify scope and milestones.
-        allowed_agents: [claude-code, codex]
-      - name: codebase-reader
-        responsibilities: Explore repository and constraints.
-        allowed_agents: [claude-code, codex]
-  build:
-    enabled: true
-    roles:
-      - name: builder
-        responsibilities: Implement scoped changes.
-        allowed_agents: [codex]
-      - name: reviewer
-        responsibilities: Review and request fixes.
-        allowed_agents: [claude-code, codex]
-  test:
-    enabled: false
-    roles: []
-```
-
-#### ASR (Speech-to-Text)
-
-Configure Volcengine ASR credentials for voice input in PM Chat. Credentials are stored in `localStorage` and sent directly to the backend transcription endpoint — they are never stored server-side.
-
-### Human Takeover
-
-Any session can be taken over manually. Click **Take Over** in the session view to:
-
-1. Pause the automation loop for that session
-2. Enable direct keyboard input
-3. Receive full terminal output including ANSI sequences
-
-Click **Release** to hand control back to the agent.
-
-### Remote Access via Tailscale
-
-agenterm has no built-in TLS. The recommended pattern for remote access is [Tailscale](https://tailscale.com/):
-
-1. Install Tailscale on your dev machine and your phone/laptop
-2. Start agenterm on the dev machine
-3. Access from any device on your tailnet: `http://100.x.x.x:8765?token=...`
-
-All traffic is encrypted by WireGuard — no port forwarding or reverse proxy needed.
-
----
-
-## Agent System
-
-Agents are defined as YAML files in `--agents-dir` (default `~/.config/agenterm/agents/`). The registry is hot-reloaded at startup.
-
-### Agent Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique identifier (used in playbooks and sessions) |
-| `name` | string | Display name |
-| `command` | string | Shell command to launch the agent (e.g. `claude`, `codex`) |
-| `model` | string | LLM model identifier |
-| `cost_tier` | `low`/`medium`/`high` | Used for scheduling decisions |
-| `speed_tier` | `slow`/`medium`/`fast` | Used for scheduling decisions |
-| `capabilities` | string[] | e.g. `implement`, `review`, `debug`, `research` |
-| `languages` | string[] | Programming languages the agent handles well |
-| `max_parallel_agents` | int | Max concurrent instances of this agent |
-| `supports_session_resume` | bool | Whether the agent can resume interrupted sessions |
-| `supports_headless` | bool | Whether the agent runs without user interaction |
-| `notes` | string | Free-form notes for the orchestrator |
-
----
-
-## Skills Protocol
-
-agenterm now uses a filesystem-based skill protocol for orchestrator guidance, compatible with the Agent Skills style:
-
-- Skill location: `skills/<skill-id>/SKILL.md`
-- Format: YAML frontmatter + markdown body
-- Frontmatter keys: `name`, `description`
-- Progressive disclosure:
-  - orchestrator prompt includes only skill summaries
-  - orchestrator calls tools to fetch full details only when needed
-
-Built-in disclosure tools:
-
-- `list_skills` — returns discovered skill summaries
-- `get_skill_details(skill_id)` — returns full skill body for one selected skill
-- `install_online_skill(url, overwrite?)` — installs a skill from online GitHub/raw URL into local `skills/`
-
-Discovered roots (searched upward from current working directory):
-
-- `skills/`
-- `.agents/skills/`
-- `.claude/skills/`
-
-Reference:
-- https://agentskills.io/
-- https://github.com/anthropics/skills
-
----
-
-## Playbook System
-
-Playbooks are YAML files in `--playbooks-dir`. Each project selects its playbook explicitly.
-
-### Workflow Stages
-
-Each playbook uses fixed stages:
-
-- `plan`
-- `build`
-- `test`
-
-Each stage has:
-
-- `enabled`
-- `roles[]`
-
-Each role defines:
-
-- `name`
-- `responsibilities`
-- `allowed_agents` (agent IDs)
-- `suggested_prompt` (optional)
-
-Current shipped templates:
-
-- `pairing-coding`
-- `tdd`
-- `compound-engineering`
-
----
-
-## Review Cycles
-
-agenterm has a structured review model for tracking code review iterations:
-
-- A **review cycle** is created for a task when it reaches `ready_for_review` status
-- Each cycle has a commit hash, status (`open`/`passed`/`failed`), and a collection of **review issues**
-- Each issue has a severity (`critical`/`major`/`minor`/`suggestion`) and status (`open`/`resolved`/`wont_fix`)
-- The orchestrator and automation layer gate merges on `open` critical/major issues
-
-The automation review coordinator watches for `[READY_FOR_REVIEW]` in commit messages, creates the cycle, prompts a reviewer agent, and feeds results back to the implementing agent.
+Watch agents work in the **Workspace** tab. Switch between TUI, Markdown, and Split views per agent. When a stage is complete, click the next stage button (Build → Review → Merge → Test) to advance the pipeline.
 
 ---
 
 ## REST API
 
-All endpoints require a `Bearer` token in the `Authorization` header (or `?token=` query parameter).
+All endpoints require `Authorization: Bearer <token>` or `?token=<token>`.
 
 ### Projects
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/projects` | List all projects |
-| `POST` | `/api/projects` | Create a project |
+| `POST` | `/api/projects` | Create project |
+| `GET` | `/api/projects` | List projects |
 | `GET` | `/api/projects/{id}` | Get project |
 | `PATCH` | `/api/projects/{id}` | Update project |
 | `DELETE` | `/api/projects/{id}` | Delete project |
 
-### Tasks
+### Requirements
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/projects/{id}/tasks` | List tasks for project |
-| `POST` | `/api/projects/{id}/tasks` | Create task |
-| `GET` | `/api/tasks/{id}` | Get task |
-| `PATCH` | `/api/tasks/{id}` | Update task |
+| `POST` | `/api/projects/{id}/requirements` | Create requirement |
+| `GET` | `/api/projects/{id}/requirements` | List requirements |
+| `POST` | `/api/projects/{id}/requirements/reorder` | Reorder requirements |
+| `GET` | `/api/requirements/{id}` | Get requirement |
+| `PATCH` | `/api/requirements/{id}` | Update requirement |
+| `DELETE` | `/api/requirements/{id}` | Delete requirement |
+
+### Planning & Execution
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/requirements/{id}/planning` | Create planning session |
+| `GET` | `/api/requirements/{id}/planning` | Get planning session |
+| `PATCH` | `/api/planning-sessions/{id}` | Update planning session |
+| `POST` | `/api/planning-sessions/{id}/blueprint` | Save blueprint |
+| `POST` | `/api/requirements/{id}/launch` | Launch execution |
+| `POST` | `/api/requirements/{id}/transition` | Transition stage |
 
 ### Sessions
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/tasks/{id}/sessions` | Create session for task |
-| `GET` | `/api/sessions` | List sessions (filterable by status, task, project) |
+| `POST` | `/api/tasks/{id}/sessions` | Create session |
+| `GET` | `/api/sessions` | List sessions |
 | `GET` | `/api/sessions/{id}` | Get session |
-| `POST` | `/api/sessions/{id}/send` | Send command to session |
+| `POST` | `/api/sessions/{id}/send` | Send command |
 | `GET` | `/api/sessions/{id}/output` | Get buffered output |
-| `GET` | `/api/sessions/{id}/idle` | Check idle state |
-| `PATCH` | `/api/sessions/{id}/takeover` | Toggle human takeover |
 | `DELETE` | `/api/sessions/{id}` | Destroy session |
 
-### Worktrees
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/projects/{id}/worktrees` | Create worktree for project |
-| `GET` | `/api/worktrees/{id}/git-status` | Get git status |
-| `GET` | `/api/worktrees/{id}/git-log` | Get git log |
-| `DELETE` | `/api/worktrees/{id}` | Remove worktree |
-
-### Agents & Playbooks
+### Agents
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/agents` | List agents |
+| `GET` | `/api/agents/status` | Agent capacity status |
 | `POST` | `/api/agents` | Create agent |
 | `PUT` | `/api/agents/{id}` | Update agent |
 | `DELETE` | `/api/agents/{id}` | Delete agent |
-| `GET` | `/api/playbooks` | List playbooks |
-| `POST` | `/api/playbooks` | Create playbook |
-| `PUT` | `/api/playbooks/{id}` | Update playbook |
-| `DELETE` | `/api/playbooks/{id}` | Delete playbook |
 
-### Orchestrator
+### Permission Templates
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/orchestrator/chat` | Send a message to the orchestrator |
-| `GET` | `/api/orchestrator/history` | Get conversation history |
-| `GET` | `/api/orchestrator/report` | Get current orchestrator status report |
-| `GET` | `/api/projects/{id}/orchestrator` | Get per-project orchestrator config |
-| `PATCH` | `/api/projects/{id}/orchestrator` | Update per-project orchestrator config |
-
-### Review
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/tasks/{id}/review-cycles` | List review cycles |
-| `POST` | `/api/tasks/{id}/review-cycles` | Create review cycle |
-| `PATCH` | `/api/review-cycles/{id}` | Update review cycle |
-| `GET` | `/api/review-cycles/{id}/issues` | List issues |
-| `POST` | `/api/review-cycles/{id}/issues` | Create issue |
-| `PATCH` | `/api/review-issues/{id}` | Update issue |
-
-### Other
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/asr/transcribe` | Transcribe audio (multipart/form-data) |
-| `GET` | `/api/projects/{id}/knowledge` | List project knowledge entries |
-| `POST` | `/api/projects/{id}/knowledge` | Add knowledge entry |
-| `GET` | `/api/projects/{id}/role-bindings` | Get role→model bindings |
-| `PUT` | `/api/projects/{id}/role-bindings` | Replace role bindings |
-| `GET` | `/api/workflows` | List workflows |
-| `POST` | `/api/workflows` | Create workflow |
+| `GET` | `/api/permission-templates` | List all templates |
+| `GET` | `/api/permission-templates/{agent_type}` | List by agent type |
+| `POST` | `/api/permission-templates` | Create template |
+| `PUT` | `/api/permission-templates/{id}` | Update template |
+| `DELETE` | `/api/permission-templates/{id}` | Delete template |
 
 ---
 
@@ -596,82 +324,56 @@ All endpoints require a `Bearer` token in the `Authorization` header (or `?token
 
 ### `/ws` — Terminal Events
 
-Subscribe to live session output and status events. Authenticate via `?token=` query parameter.
+Subscribe to live session output and status events. Authenticate via `?token=`.
 
-**Incoming message types** (server → browser):
-
+**Server → Client:**
 ```jsonc
 { "type": "output",        "sessionID": "...", "lines": ["..."] }
 { "type": "status",        "sessionID": "...", "status": "running" }
-{ "type": "windows",       "windows": [...] }
-{ "type": "project_event", "projectID": "...", "event": "task_updated", "data": {...} }
+{ "type": "project_event", "projectID": "...", "event": "...", "data": {...} }
 ```
 
-**Outgoing message types** (browser → server):
-
+**Client → Server:**
 ```jsonc
 { "type": "subscribe",   "sessionID": "..." }
 { "type": "unsubscribe", "sessionID": "..." }
 { "type": "send",        "sessionID": "...", "text": "ls -la\n" }
 ```
 
-### `/ws/orchestrator` — PM Chat Streaming
-
-Streams the orchestrator's response token-by-token.
-
-```jsonc
-{ "type": "token",       "content": "Sure, let me check..." }
-{ "type": "tool_call",   "name": "list_tasks", "input": {...} }
-{ "type": "tool_result", "name": "list_tasks", "content": "..." }
-{ "type": "done" }
-{ "type": "error",       "message": "..." }
-```
-
 ---
 
 ## Development
 
-### Prerequisites
-
-```bash
-# Install Go 1.22+
-# Install Node.js 18+ and npm
-# Install tmux 3.0+
-```
-
 ### Build
 
 ```bash
-make build          # Build frontend + Go binary → bin/agenterm
-make frontend-build # Build React SPA only → web/frontend/dist/
-make run            # go run ./cmd/agenterm
-make clean          # Remove bin/
+make build            # Frontend + Go binary → bin/agenterm
+make frontend-build   # React SPA only → web/frontend/dist/
+make run              # go run ./cmd/agenterm
+make clean            # Remove bin/
 ```
 
 ### Test
 
 ```bash
-go test ./...       # All Go tests
-go vet ./...        # Vet
+go test ./...         # All Go tests
+go vet ./...          # Vet
 ```
 
 ### Frontend Development
 
-The React app lives in `frontend/`. During development, run the Vite dev server alongside the Go server:
-
 ```bash
 cd frontend
 npm install
-npm run dev         # Starts on http://localhost:5173
+npm run dev           # Vite dev server on http://localhost:5173
 ```
 
-Point your browser to the Vite dev server. API requests proxy to the Go backend via `vite.config.ts`.
+The Vite dev server proxies API requests to the Go backend.
 
-When ready to embed:
+### Desktop Development
 
 ```bash
-make frontend-build   # Outputs to web/frontend/dist/
-make build            # Go embeds dist/ into the binary
+cargo tauri dev       # Runs Vite + Go backend + Tauri window with hot-reload
 ```
 
 ---
@@ -680,77 +382,37 @@ make build            # Go embeds dist/ into the binary
 
 ```
 agenterm/
-├── cmd/agenterm/
-│   └── main.go                  # Entry point; wires all components
+├── cmd/agenterm/              # Go entry point
+│   └── main.go
 ├── internal/
-│   ├── api/                     # REST handlers + middleware
-│   │   ├── router.go            # Route registration
-│   │   ├── orchestrator.go      # /api/orchestrator/* handlers
-│   │   ├── asr.go               # /api/asr/transcribe handler
-│   │   └── asr_volc.go          # Volcengine ASR client
-│   ├── automation/              # Auto-commit, review loops, merge
-│   ├── config/                  # Flag + config-file loading
-│   ├── db/                      # SQLite repositories + migrations
-│   │   ├── models.go            # All entity types
-│   │   └── migrations/          # SQL migration files
-│   ├── git/                     # Worktree and git helpers
-│   ├── hub/                     # WebSocket hub + protocol
-│   ├── orchestrator/            # Claude tool-calling orchestrator
-│   ├── parser/                  # Output classifier + ANSI stripper
-│   ├── playbook/                # Playbook registry + project matching
-│   ├── registry/                # Agent registry (YAML)
-│   ├── server/                  # HTTP server + WS endpoint wiring
-│   ├── session/                 # Session lifecycle + command policy
-│   └── tmux/                    # tmux control-mode gateway/manager
-├── frontend/
-│   ├── src/
-│   │   ├── api/                 # API client + TypeScript types
-│   │   ├── components/          # Shared React components
-│   │   ├── hooks/               # Custom hooks (WS, STT, etc.)
-│   │   ├── pages/               # Route-level pages
-│   │   │   ├── PMChat.tsx       # PM Chat page
-│   │   │   ├── Sessions.tsx     # Session list + terminal view
-│   │   │   └── Settings.tsx     # Agents / Playbooks / ASR
-│   │   └── settings/            # ASR settings helpers
-│   ├── vite.config.ts
-│   └── package.json
+│   ├── api/                   # REST handlers + middleware
+│   ├── config/                # Flag + config loading
+│   ├── db/                    # SQLite repos + migrations
+│   ├── git/                   # Worktree and git helpers
+│   ├── hub/                   # WebSocket hub
+│   ├── parser/                # Output classifier + signal detection
+│   ├── pty/                   # PTY backend
+│   ├── registry/              # Agent registry (YAML)
+│   ├── scaffold/              # Blueprint, CLAUDE.md, permissions
+│   ├── server/                # HTTP server + SPA embedding
+│   └── session/               # Session lifecycle + idle detection
+├── frontend/                  # React 18 + TypeScript + Tailwind v4
+│   └── src/
+│       ├── api/               # API client
+│       ├── components/        # UI components
+│       └── styles/            # Tailwind theme
+├── src-tauri/                 # Tauri desktop shell (Rust)
+│   ├── src/lib.rs             # Sidecar management
+│   └── tauri.conf.json        # Window + build config
 ├── web/
-│   ├── embed.go                 # go:embed directive
-│   └── frontend/dist/           # Built React app (embedded in binary)
-├── docs/                        # Task specs, plans, architecture docs
+│   ├── embed.go               # go:embed directive
+│   └── frontend/dist/         # Built SPA (embedded in binary)
+├── configs/agents/            # Agent YAML definitions
+├── docs/                      # Design docs and plans
 ├── Makefile
 ├── go.mod
-└── SPEC.md                      # Product specification (Chinese)
+└── Cargo.toml
 ```
-
----
-
-## Security
-
-- **Token authentication** — every HTTP request and WebSocket connection requires a valid bearer token
-- **Token generated on first run** — stored in `~/.config/agenterm/config` with `0600` permissions; never printed to stdout unless `--print-token` is used
-- **Command policy** — the session manager blocks dangerous shell patterns (eval, subshell substitution, path traversal, out-of-scope paths) on commands sent via the API
-- **CORS** — default policy allows all origins; restrict in production if exposing beyond localhost
-- **ASR credentials** — stored in browser `localStorage` only; transmitted over the existing authenticated HTTP connection and never persisted server-side
-
-### Recommendations
-
-- Run behind [Tailscale](https://tailscale.com/) for remote access — no open ports needed
-- Do not expose agenterm directly to the public internet without a TLS reverse proxy
-- Rotate the token by deleting `~/.config/agenterm/config` and restarting
-
----
-
-## Contributing
-
-Contributions are welcome. Please:
-
-1. Fork the repository and create a feature branch
-2. Follow existing code conventions (Go: `gofmt`, `go vet`; TypeScript: Prettier/ESLint config in `frontend/`)
-3. Add or update tests for any changed behaviour in `internal/`
-4. Open a pull request with a clear description
-
-For significant features, open an issue first to discuss the approach.
 
 ---
 
@@ -760,12 +422,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## Acknowledgements
-
-Built with:
-- [nhooyr.io/websocket](https://nhooyr.io/websocket) — zero-dependency Go WebSocket
-- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — pure-Go SQLite (no CGO)
-- [gopkg.in/yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) — YAML parsing for agent/playbook registries
-- [React](https://react.dev/) + [Vite](https://vitejs.dev/) — frontend toolchain
-- [@xterm/xterm](https://xtermjs.org/) — terminal emulator in the browser
-- [tmux](https://github.com/tmux/tmux) — the runtime that makes it all possible
+Built with [Go](https://go.dev/), [React](https://react.dev/), [Tauri](https://tauri.app/), [xterm.js](https://xtermjs.org/), and [modernc.org/sqlite](https://gitlab.com/cznic/sqlite).
