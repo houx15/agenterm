@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { getToken } from './api/client'
+import { getToken, listAgents } from './api/client'
 import type { ClientMessage, ServerMessage, WindowInfo } from './api/types'
 import { useWebSocket } from './hooks/useWebSocket'
 import AppSidebar from './components/AppSidebar'
 import NewProjectModal from './components/NewProjectModal'
+import OnboardingWizard from './components/OnboardingWizard'
 import DemandPool from './components/DemandPool'
 import WorkspaceView from './components/WorkspaceView'
 
@@ -76,6 +77,27 @@ export default function App() {
 
   // ── Modal state ──
   const [newProjectOpen, setNewProjectOpen] = useState(false)
+
+  // ── Onboarding state ──
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [onboardingChecked, setOnboardingChecked] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    listAgents<unknown[]>()
+      .then((agents) => {
+        if (!cancelled) {
+          setShowOnboarding(agents.length === 0)
+          setOnboardingChecked(true)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOnboardingChecked(true)
+        }
+      })
+    return () => { cancelled = true }
+  }, [])
 
   // ── Handle WebSocket messages ──
   useEffect(() => {
@@ -212,6 +234,11 @@ export default function App() {
         onClose={() => setNewProjectOpen(false)}
         onCreated={() => setNewProjectOpen(false)}
       />
+
+      {/* Onboarding wizard shown on first launch */}
+      {onboardingChecked && showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
     </AppContext.Provider>
   )
 }
