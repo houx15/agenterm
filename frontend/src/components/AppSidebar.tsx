@@ -130,7 +130,7 @@ export default function AppSidebar({ onNewProject, onOpenSettings }: AppSidebarP
         )}
         <div className="flex flex-col gap-0.5 px-1 py-1">
           {agents.map((agent) => {
-            const utilization = agent.max_parallel > 0 ? agent.busy / agent.max_parallel : 0
+            const utilization = agent.capacity > 0 ? agent.busy / agent.capacity : 0
             const dotColor =
               utilization >= 1
                 ? 'bg-status-error'
@@ -140,16 +140,16 @@ export default function AppSidebar({ onNewProject, onOpenSettings }: AppSidebarP
 
             return (
               <div
-                key={agent.id}
+                key={agent.agent_id}
                 className="flex items-center gap-2 px-2 py-1.5 rounded text-sm text-text-secondary"
-                title={`${agent.name}: ${agent.busy}/${agent.max_parallel} busy`}
+                title={`${agent.agent_name}: ${agent.busy}/${agent.capacity} busy`}
               >
                 <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
                 {!folded && (
                   <>
-                    <span className="flex-1 truncate">{agent.name}</span>
+                    <span className="flex-1 truncate">{agent.agent_name}</span>
                     <span className="text-xs tabular-nums">
-                      {agent.busy}/{agent.max_parallel}
+                      {agent.busy}/{agent.capacity}
                     </span>
                   </>
                 )}

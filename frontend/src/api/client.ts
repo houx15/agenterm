@@ -530,13 +530,22 @@ export function deletePermissionTemplate(id: string) {
 // ─── Agent Status ───
 
 export interface AgentStatus {
-  id: string
-  name: string
-  max_parallel: number
+  agent_id: string
+  agent_name: string
+  capacity: number
   busy: number
   idle: number
 }
 
-export function getAgentStatuses() {
-  return apiFetch<AgentStatus[]>('/api/agents/status')
+interface AgentStatusResponse {
+  total_configured: number
+  total_capacity: number
+  total_busy: number
+  total_idle: number
+  items: AgentStatus[]
+}
+
+export async function getAgentStatuses(): Promise<AgentStatus[]> {
+  const resp = await apiFetch<AgentStatusResponse>('/api/agents/status')
+  return resp.items ?? []
 }

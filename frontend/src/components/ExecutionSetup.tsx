@@ -60,10 +60,10 @@ export default function ExecutionSetup({ requirementID, blueprint, onLaunch }: E
   }, [blueprint.tasks])
 
   const getCapacityLabel = (agentId: string): string => {
-    const status = agentStatuses.find((s) => s.id === agentId)
+    const status = agentStatuses.find((s) => s.agent_id === agentId)
     if (!status) return ''
-    const available = status.max_parallel - status.busy
-    return `(${available}/${status.max_parallel} available)`
+    const available = status.capacity - status.busy
+    return `(${available}/${status.capacity} available)`
   }
 
   const handleAssignment = (taskId: string, agentId: string) => {
@@ -157,8 +157,8 @@ export default function ExecutionSetup({ requirementID, blueprint, onLaunch }: E
                       <option value="">No agents available</option>
                     )}
                     {agentStatuses.map((agent) => (
-                      <option key={agent.id} value={agent.id}>
-                        {agent.name} {getCapacityLabel(agent.id)}
+                      <option key={agent.agent_id} value={agent.agent_id}>
+                        {agent.agent_name} {getCapacityLabel(agent.agent_id)}
                       </option>
                     ))}
                   </select>
