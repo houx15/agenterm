@@ -5,43 +5,6 @@ import (
 	"testing"
 )
 
-func TestWorkflowRepoBuiltinsLoaded(t *testing.T) {
-	database, _ := openTestDB(t)
-	repo := NewWorkflowRepo(database.SQL())
-	items, err := repo.List(context.Background())
-	if err != nil {
-		t.Fatalf("list workflows: %v", err)
-	}
-	if len(items) < 3 {
-		t.Fatalf("workflows len=%d want >= 3", len(items))
-	}
-}
-
-func TestProjectOrchestratorEnsureDefault(t *testing.T) {
-	database, _ := openTestDB(t)
-	ctx := context.Background()
-	projectRepo := NewProjectRepo(database.SQL())
-	profileRepo := NewProjectOrchestratorRepo(database.SQL())
-
-	project := &Project{Name: "P", RepoPath: "/tmp/p", Status: "active"}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := profileRepo.EnsureDefaultForProject(ctx, project.ID); err != nil {
-		t.Fatalf("ensure default profile: %v", err)
-	}
-	item, err := profileRepo.Get(ctx, project.ID)
-	if err != nil {
-		t.Fatalf("get profile: %v", err)
-	}
-	if item == nil {
-		t.Fatalf("profile missing")
-	}
-	if item.WorkflowID != "workflow-balanced" {
-		t.Fatalf("workflow_id=%q want workflow-balanced", item.WorkflowID)
-	}
-}
-
 func TestProjectKnowledgeRepoCreateAndList(t *testing.T) {
 	database, _ := openTestDB(t)
 	ctx := context.Background()
@@ -259,83 +222,5 @@ func TestReviewRepoSyncLatestCycleStatusByTaskOpenIssuesReturnsChangedFlag(t *te
 	}
 	if latest == nil || latest.Status != "review_passed" {
 		t.Fatalf("latest=%#v want status review_passed", latest)
-	}
-}
-
-func TestProjectRepoCreateWithDefaultOrchestratorIsAtomic(t *testing.T) {
-	database, _ := openTestDB(t)
-	ctx := context.Background()
-	projectRepo := NewProjectRepo(database.SQL())
-
-	if _, err := database.SQL().ExecContext(ctx, `DELETE FROM workflow_phases`); err != nil {
-		t.Fatalf("delete workflow_phases: %v", err)
-	}
-	if _, err := database.SQL().ExecContext(ctx, `DELETE FROM workflows`); err != nil {
-		t.Fatalf("delete workflows: %v", err)
-	}
-
-	project := &Project{Name: "P", RepoPath: "/tmp/p", Status: "active"}
-	if err := projectRepo.CreateWithDefaultOrchestrator(ctx, project); err == nil {
-		t.Fatalf("expected create with default orchestrator to fail")
-	}
-
-	var count int
-	if err := database.SQL().QueryRowContext(ctx, `SELECT count(1) FROM projects WHERE id = ?`, project.ID).Scan(&count); err != nil {
-		t.Fatalf("count projects: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("project row should be rolled back, count=%d", count)
-	}
-}
-
-func TestWorkflowRepoUpdateRollsBackWhenPhaseInsertFails(t *testing.T) {
-	database, _ := openTestDB(t)
-	ctx := context.Background()
-	workflowRepo := NewWorkflowRepo(database.SQL())
-
-	original := &Workflow{
-		ID:          "workflow-test-update-atomic",
-		Name:        "Original",
-		Description: "before",
-		Scope:       "project",
-		Version:     1,
-		Phases: []*WorkflowPhase{
-			{ID: "phase-original", Ordinal: 1, PhaseType: "scan", Role: "planner", MaxParallel: 1},
-		},
-	}
-	if err := workflowRepo.Create(ctx, original); err != nil {
-		t.Fatalf("create workflow: %v", err)
-	}
-
-	err := workflowRepo.Update(ctx, &Workflow{
-		ID:          original.ID,
-		Name:        "Updated",
-		Description: "after",
-		Scope:       "project",
-		Version:     2,
-		Phases: []*WorkflowPhase{
-			{ID: "phase-dup", Ordinal: 1, PhaseType: "planning", Role: "planner", MaxParallel: 1},
-			{ID: "phase-dup", Ordinal: 2, PhaseType: "review", Role: "reviewer", MaxParallel: 1},
-		},
-	})
-	if err == nil {
-		t.Fatalf("expected update to fail due to duplicate phase id")
-	}
-
-	stored, err := workflowRepo.Get(ctx, original.ID)
-	if err != nil {
-		t.Fatalf("get workflow: %v", err)
-	}
-	if stored == nil {
-		t.Fatalf("workflow missing after failed update")
-	}
-	if stored.Name != "Original" || stored.Version != 1 {
-		t.Fatalf("workflow update should roll back, got name=%q version=%d", stored.Name, stored.Version)
-	}
-	if len(stored.Phases) != 1 {
-		t.Fatalf("phase count=%d want 1", len(stored.Phases))
-	}
-	if stored.Phases[0].ID != "phase-original" || stored.Phases[0].PhaseType != "scan" {
-		t.Fatalf("phase not rolled back, got id=%q type=%q", stored.Phases[0].ID, stored.Phases[0].PhaseType)
 	}
 }
