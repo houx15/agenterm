@@ -117,6 +117,17 @@ export function createProject<T>(input: CreateProjectInput) {
   })
 }
 
+export function getProject<T>(projectID: string) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}`)
+}
+
+export function updateProject<T>(projectID: string, input: Record<string, unknown>) {
+  return apiFetch<T>(`/api/projects/${encodeURIComponent(projectID)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+}
+
 export function deleteProject(projectID: string) {
   return apiFetch<void>(`/api/projects/${encodeURIComponent(projectID)}`, {
     method: 'DELETE',

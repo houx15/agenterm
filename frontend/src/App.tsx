@@ -6,6 +6,7 @@ import AppSidebar from './components/AppSidebar'
 import NewProjectModal from './components/NewProjectModal'
 import OnboardingWizard from './components/OnboardingWizard'
 import DemandPool from './components/DemandPool'
+import ProjectSettings from './components/ProjectSettings'
 import WorkspaceView from './components/WorkspaceView'
 
 // ---------------------------------------------------------------------------
@@ -220,9 +221,13 @@ export default function App() {
             {mode === 'workspace' && <WorkspaceView />}
             {mode === 'demands' && <DemandPool />}
             {mode === 'settings' && (
-              <div className="flex items-center justify-center h-full text-text-secondary">
-                Settings (TODO)
-              </div>
+              selectedProjectID ? (
+                <ProjectSettings projectID={selectedProjectID} />
+              ) : (
+                <div className="flex items-center justify-center h-full text-text-secondary">
+                  Select a project to view settings
+                </div>
+              )
             )}
           </div>
         </main>
