@@ -63,6 +63,9 @@ func TestOpenCreatesDBFileAndRunsMigrations(t *testing.T) {
 	assertTableExists(t, database.SQL(), "role_agent_assignments")
 	assertTableExists(t, database.SQL(), "project_runs")
 	assertTableExists(t, database.SQL(), "stage_runs")
+	assertTableExists(t, database.SQL(), "requirements")
+	assertTableExists(t, database.SQL(), "planning_sessions")
+	assertTableExists(t, database.SQL(), "permission_templates")
 }
 
 func TestMigrationsAreIdempotent(t *testing.T) {
@@ -76,8 +79,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.SQL().QueryRow(`SELECT value FROM _meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatalf("read schema version error = %v", err)
 	}
-	if version != "9" {
-		t.Fatalf("schema version = %s, want 9", version)
+	if version != "10" {
+		t.Fatalf("schema version = %s, want 10", version)
 	}
 }
 
@@ -474,6 +477,56 @@ func TestAgentConfigRepoCRUDAndYAMLLoad(t *testing.T) {
 
 	if err := repo.Delete(ctx, "codex"); err != nil {
 		t.Fatalf("Delete() error = %v", err)
+	}
+}
+
+func TestMigrationV10TablesExistAndInsert(t *testing.T) {
+	database, _ := openTestDB(t)
+	conn := database.SQL()
+	ctx := context.Background()
+
+	// Create a project to satisfy FK
+	projID, _ := NewID()
+	now := formatTimestamp(nowUTC())
+	_, err := conn.ExecContext(ctx, `INSERT INTO projects (id, name, repo_path, status, playbook, created_at, updated_at) VALUES (?, 'TestProj', '/tmp/test', 'active', '', ?, ?)`, projID, now, now)
+	if err != nil {
+		t.Fatalf("insert project error = %v", err)
+	}
+
+	// Insert into requirements
+	reqID, _ := NewID()
+	_, err = conn.ExecContext(ctx, `INSERT INTO requirements (id, project_id, title, description, priority, status, created_at, updated_at) VALUES (?, ?, 'Req1', 'desc', 0, 'queued', ?, ?)`, reqID, projID, now, now)
+	if err != nil {
+		t.Fatalf("insert requirement error = %v", err)
+	}
+
+	// Insert into planning_sessions
+	psID, _ := NewID()
+	_, err = conn.ExecContext(ctx, `INSERT INTO planning_sessions (id, requirement_id, status, blueprint, created_at, updated_at) VALUES (?, ?, 'active', '', ?, ?)`, psID, reqID, now, now)
+	if err != nil {
+		t.Fatalf("insert planning_session error = %v", err)
+	}
+
+	// Insert into permission_templates
+	ptID, _ := NewID()
+	_, err = conn.ExecContext(ctx, `INSERT INTO permission_templates (id, agent_type, name, config, created_at, updated_at) VALUES (?, 'coder', 'Default Coder', '{}', ?, ?)`, ptID, now, now)
+	if err != nil {
+		t.Fatalf("insert permission_template error = %v", err)
+	}
+
+	// Verify ALTER TABLE columns exist — tasks.requirement_id
+	var reqIDVal string
+	err = conn.QueryRowContext(ctx, `SELECT requirement_id FROM tasks LIMIT 0`).Scan(&reqIDVal)
+	if err != nil && err != sql.ErrNoRows {
+		// ErrNoRows is fine (no rows), any other error means column doesn't exist
+		t.Fatalf("tasks.requirement_id column check error = %v", err)
+	}
+
+	// Verify ALTER TABLE columns exist — projects.context_template, projects.knowledge
+	var ctVal, knVal string
+	err = conn.QueryRowContext(ctx, `SELECT context_template, knowledge FROM projects WHERE id = ?`, projID).Scan(&ctVal, &knVal)
+	if err != nil {
+		t.Fatalf("projects.context_template/knowledge column check error = %v", err)
 	}
 }
 

@@ -360,6 +360,50 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_runs_run_stage ON stage_runs(run_id,
 CREATE INDEX IF NOT EXISTS idx_stage_runs_run_updated ON stage_runs(run_id, updated_at DESC);
 `,
 	},
+	{
+		version: 10,
+		name:    "create requirements, planning sessions, permission templates",
+		sql: `
+CREATE TABLE IF NOT EXISTS requirements (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	title       TEXT NOT NULL,
+	description TEXT DEFAULT '',
+	priority    INTEGER NOT NULL DEFAULT 0,
+	status      TEXT NOT NULL DEFAULT 'queued',
+	created_at  DATETIME NOT NULL,
+	updated_at  DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_requirements_project_id ON requirements(project_id);
+CREATE INDEX IF NOT EXISTS idx_requirements_status ON requirements(status);
+CREATE INDEX IF NOT EXISTS idx_requirements_priority ON requirements(project_id, priority DESC);
+
+CREATE TABLE IF NOT EXISTS planning_sessions (
+	id                TEXT PRIMARY KEY,
+	requirement_id    TEXT NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+	agent_session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+	status            TEXT NOT NULL DEFAULT 'active',
+	blueprint         TEXT DEFAULT '',
+	created_at        DATETIME NOT NULL,
+	updated_at        DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_planning_sessions_requirement ON planning_sessions(requirement_id);
+
+CREATE TABLE IF NOT EXISTS permission_templates (
+	id          TEXT PRIMARY KEY,
+	agent_type  TEXT NOT NULL,
+	name        TEXT NOT NULL,
+	config      TEXT NOT NULL DEFAULT '{}',
+	created_at  DATETIME NOT NULL,
+	updated_at  DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_permission_templates_agent ON permission_templates(agent_type);
+
+ALTER TABLE tasks ADD COLUMN requirement_id TEXT DEFAULT '';
+ALTER TABLE projects ADD COLUMN context_template TEXT DEFAULT '';
+ALTER TABLE projects ADD COLUMN knowledge TEXT DEFAULT '';
+`,
+	},
 }
 
 func RunMigrations(ctx context.Context, conn *sql.DB) error {
