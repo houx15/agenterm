@@ -25,8 +25,9 @@ type handler struct {
 	runRepo            *db.RunRepo
 	demandPoolRepo     *db.DemandPoolRepo
 	requirementRepo      *db.RequirementRepo
-	planningSessionRepo  *db.PlanningSessionRepo
-	registry             *registry.Registry
+	planningSessionRepo    *db.PlanningSessionRepo
+	permissionTemplateRepo *db.PermissionTemplateRepo
+	registry               *registry.Registry
 	lifecycle          *session.Manager
 	hub                *hub.Hub
 
@@ -46,8 +47,9 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 		runRepo:            db.NewRunRepo(conn),
 		demandPoolRepo:     db.NewDemandPoolRepo(conn),
 		requirementRepo:      db.NewRequirementRepo(conn),
-		planningSessionRepo:  db.NewPlanningSessionRepo(conn),
-		registry:             agentRegistry,
+		planningSessionRepo:    db.NewPlanningSessionRepo(conn),
+		permissionTemplateRepo: db.NewPermissionTemplateRepo(conn),
+		registry:               agentRegistry,
 		lifecycle:          lifecycle,
 		hub:                hubInst,
 		outputState:        make(map[string]*windowOutputState),
@@ -129,6 +131,12 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 
 	mux.HandleFunc("POST /api/requirements/{id}/launch", handler.launchExecution)
 	mux.HandleFunc("POST /api/requirements/{id}/transition", handler.transitionStage)
+
+	mux.HandleFunc("GET /api/permission-templates", handler.listPermissionTemplates)
+	mux.HandleFunc("GET /api/permission-templates/{agent_type}", handler.listPermissionTemplatesByAgent)
+	mux.HandleFunc("POST /api/permission-templates", handler.createPermissionTemplate)
+	mux.HandleFunc("PUT /api/permission-templates/{id}", handler.updatePermissionTemplate)
+	mux.HandleFunc("DELETE /api/permission-templates/{id}", handler.deletePermissionTemplate)
 
 	mux.HandleFunc("GET /api/settings", handler.getSettings)
 	mux.HandleFunc("PUT /api/settings", handler.updateSettings)
