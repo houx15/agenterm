@@ -127,6 +127,9 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token
 	mux.HandleFunc("PATCH /api/planning-sessions/{id}", handler.updatePlanningSession)
 	mux.HandleFunc("POST /api/planning-sessions/{id}/blueprint", handler.saveBlueprint)
 
+	mux.HandleFunc("POST /api/requirements/{id}/launch", handler.launchExecution)
+	mux.HandleFunc("POST /api/requirements/{id}/transition", handler.transitionStage)
+
 	mux.HandleFunc("GET /api/settings", handler.getSettings)
 	mux.HandleFunc("PUT /api/settings", handler.updateSettings)
 
