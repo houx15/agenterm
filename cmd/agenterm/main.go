@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/user/agenterm/internal/api"
-	"github.com/user/agenterm/internal/automation"
 	"github.com/user/agenterm/internal/config"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
@@ -302,76 +301,7 @@ func main() {
 		}
 	}
 
-	// --- Repos ---
-
-	projectRepo := db.NewProjectRepo(appDB.SQL())
-	taskRepo := db.NewTaskRepo(appDB.SQL())
-	worktreeRepo := db.NewWorktreeRepo(appDB.SQL())
-	sessionRepo := db.NewSessionRepo(appDB.SQL())
-	// --- Automation ---
-
-	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
-		Interval:     30 * time.Second,
-		WorktreeRepo: worktreeRepo,
-	})
-	coordinator := automation.NewCoordinator(automation.CoordinatorConfig{
-		SessionRepo:   sessionRepo,
-		TaskRepo:      taskRepo,
-		WorktreeRepo:  worktreeRepo,
-		ProjectRepo:   projectRepo,
-		PollInterval:  2 * time.Second,
-		MaxIterations: 3,
-		SendCommand: func(callCtx context.Context, sessionID string, text string) error {
-			if lifecycleManager == nil {
-				return fmt.Errorf("session manager unavailable")
-			}
-			return lifecycleManager.SendCommand(callCtx, sessionID, text)
-		},
-		GetOutputSince: func(callCtx context.Context, sessionID string, since time.Time) ([]automation.OutputEntry, error) {
-			if lifecycleManager == nil {
-				return nil, fmt.Errorf("session manager unavailable")
-			}
-			out, err := lifecycleManager.GetOutput(callCtx, sessionID, since)
-			if err != nil {
-				return nil, err
-			}
-			result := make([]automation.OutputEntry, 0, len(out))
-			for _, entry := range out {
-				result = append(result, automation.OutputEntry{Text: entry.Text, Timestamp: entry.Timestamp})
-			}
-			return result, nil
-		},
-	})
-	mergeController := automation.NewMergeController(automation.MergeControllerConfig{
-		Interval:     10 * time.Second,
-		TaskRepo:     taskRepo,
-		WorktreeRepo: worktreeRepo,
-		ProjectRepo:  projectRepo,
-		SessionRepo:  sessionRepo,
-		SendCommand: func(callCtx context.Context, sessionID string, text string) error {
-			if lifecycleManager == nil {
-				return fmt.Errorf("session manager unavailable")
-			}
-			return lifecycleManager.SendCommand(callCtx, sessionID, text)
-		},
-	})
-
-	resolveSessionWorktree := func(callCtx context.Context, sessionID string) string {
-		if sessionID == "" {
-			return ""
-		}
-		sess, err := sessionRepo.Get(callCtx, sessionID)
-		if err != nil || sess == nil || sess.TaskID == "" {
-			return ""
-		}
-		task, err := taskRepo.Get(callCtx, sess.TaskID)
-		if err != nil || task == nil {
-			return ""
-		}
-		return strings.TrimSpace(task.WorktreeID)
-	}
-
-	// --- Attach/Detach callbacks (must come after coordinator & autoCommitter are declared) ---
+	// --- Attach/Detach callbacks ---
 
 	h.SetOnTerminalAttach(func(sessionID string) {
 		if strings.TrimSpace(sessionID) == "" {
@@ -383,10 +313,6 @@ func main() {
 			if err := lifecycleManager.SetTakeover(callCtx, sessionID, true); err != nil {
 				slog.Debug("failed to set human takeover", "session", sessionID, "error", err)
 			}
-		}
-		coordinator.SetSessionPaused(sessionID, true)
-		if worktreeID := resolveSessionWorktree(callCtx, sessionID); worktreeID != "" {
-			autoCommitter.SetWorktreePaused(worktreeID, true)
 		}
 	})
 
@@ -401,48 +327,7 @@ func main() {
 				slog.Debug("failed to clear human takeover", "session", sessionID, "error", err)
 			}
 		}
-		coordinator.SetSessionPaused(sessionID, false)
-		if worktreeID := resolveSessionWorktree(callCtx, sessionID); worktreeID != "" {
-			autoCommitter.SetWorktreePaused(worktreeID, false)
-		}
 	})
-
-	// --- Event callbacks and automation runners ---
-
-	autoCommitter.SetOnReadyForReview(func(worktreeID string, commitHash string) {
-		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer callCancel()
-		wt, err := worktreeRepo.Get(callCtx, worktreeID)
-		if err != nil || wt == nil {
-			return
-		}
-		h.BroadcastProjectEvent(wt.ProjectID, "worktree_auto_commit", map[string]any{
-			"worktree_id": worktreeID,
-			"commit_hash": commitHash,
-		})
-	})
-	mergeController.SetOnMerged(func(projectID, taskID, worktreeID, sourceBranch, targetBranch, commitHash string) {
-		h.BroadcastProjectEvent(projectID, "worktree_merge_succeeded", map[string]any{
-			"task_id":       taskID,
-			"worktree_id":   worktreeID,
-			"source_branch": sourceBranch,
-			"target_branch": targetBranch,
-			"commit_hash":   commitHash,
-		})
-	})
-	mergeController.SetOnConflict(func(projectID, taskID, worktreeID, sourceBranch, targetBranch, commitHash string, files []string) {
-		h.BroadcastProjectEvent(projectID, "worktree_merge_conflict", map[string]any{
-			"task_id":          taskID,
-			"worktree_id":      worktreeID,
-			"source_branch":    sourceBranch,
-			"target_branch":    targetBranch,
-			"commit_hash":      commitHash,
-			"conflicted_files": files,
-		})
-	})
-	go autoCommitter.Run(ctx)
-	go coordinator.Run(ctx)
-	go mergeController.Run(ctx)
 
 	// --- Server ---
 
