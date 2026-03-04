@@ -160,26 +160,20 @@ fn desktop_runtime_info() -> DesktopRuntimeInfo {
 }
 
 pub fn run() {
-    let context = tauri::generate_context!();
-    let builder = tauri::Builder::default()
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(|_| {
             if let Err(err) = spawn_backend_sidecar() {
                 eprintln!("[agenTerm] backend sidecar startup warning: {err}");
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![desktop_runtime_info]);
-
-    let app = builder
-        .build(context)
-        .expect("error while running agenTerm desktop shell");
-
-    app.run(|_, event| {
-        if matches!(
-            event,
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-        ) {
-            stop_backend_sidecar();
-        }
-    });
+        .invoke_handler(tauri::generate_handler![desktop_runtime_info])
+        .build(tauri::generate_context!())
+        .expect("error while building agenTerm desktop shell")
+        .run(|_, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                stop_backend_sidecar();
+            }
+        });
 }

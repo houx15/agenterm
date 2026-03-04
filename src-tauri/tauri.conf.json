@@ -1,33 +1,15 @@
 {
-  "$schema": "https://schema.tauri.app/config/1",
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "agenTerm",
+  "version": "0.1.0",
+  "identifier": "io.agenterm.desktop",
   "build": {
-    "beforeBuildCommand": "npm --prefix frontend run build",
-    "beforeDevCommand": "npm --prefix frontend run dev -- --host",
-    "devPath": "http://localhost:5173",
-    "distDir": "../web/frontend/dist"
+    "beforeBuildCommand": "npm --prefix ../frontend run build",
+    "beforeDevCommand": "npm --prefix ../frontend run dev -- --host",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../web/frontend/dist"
   },
-  "package": {
-    "productName": "agenTerm",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": false,
-      "shell": {
-        "open": true
-      }
-    },
-    "bundle": {
-      "active": false,
-      "category": "DeveloperTool",
-      "identifier": "io.agenterm.desktop",
-      "icon": [
-        "icons/icon.png"
-      ]
-    },
-    "security": {
-      "csp": null
-    },
+  "app": {
     "windows": [
       {
         "title": "agenTerm",
@@ -37,6 +19,16 @@
         "minHeight": 720,
         "resizable": true
       }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "category": "DeveloperTool",
+    "icon": [
+      "icons/icon.png"
     ]
   }
 }
