@@ -48,16 +48,9 @@ func (h *handler) createProject(w http.ResponseWriter, r *http.Request) {
 		Status:   status,
 		Playbook: req.Playbook,
 	}
-	if h.projectOrchestratorRepo != nil {
-		if err := h.projectRepo.CreateWithDefaultOrchestrator(r.Context(), project); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else {
-		if err := h.projectRepo.Create(r.Context(), project); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	if err := h.projectRepo.Create(r.Context(), project); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	jsonResponse(w, http.StatusCreated, project)

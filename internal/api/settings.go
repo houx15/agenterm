@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
 )
 
 type settingsResponse struct {
@@ -14,14 +13,8 @@ type settingsUpdateRequest struct {
 }
 
 func (h *handler) getSettings(w http.ResponseWriter, _ *http.Request) {
-	lang := "en"
-	if h.orchestrator != nil {
-		if l := h.orchestrator.UserLanguage(); l != "" {
-			lang = l
-		}
-	}
 	jsonResponse(w, http.StatusOK, settingsResponse{
-		OrchestratorLanguage: lang,
+		OrchestratorLanguage: "en",
 	})
 }
 
@@ -31,20 +24,6 @@ func (h *handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	if req.OrchestratorLanguage != nil {
-		lang := strings.TrimSpace(*req.OrchestratorLanguage)
-		if lang == "" {
-			lang = "en"
-		}
-		if h.orchestrator != nil {
-			h.orchestrator.SetUserLanguage(lang)
-		}
-		if h.demandOrchestrator != nil {
-			h.demandOrchestrator.SetUserLanguage(lang)
-		}
-	}
-
-	// Return updated settings
+	// Orchestrator language setting removed; return current settings.
 	h.getSettings(w, r)
 }

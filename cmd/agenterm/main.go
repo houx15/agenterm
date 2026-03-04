@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/user/agenterm/internal/config"
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
-	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/parser"
 	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/pty"
@@ -310,16 +308,6 @@ func main() {
 	taskRepo := db.NewTaskRepo(appDB.SQL())
 	worktreeRepo := db.NewWorktreeRepo(appDB.SQL())
 	sessionRepo := db.NewSessionRepo(appDB.SQL())
-	historyRepo := db.NewOrchestratorHistoryRepo(appDB.SQL())
-	runRepo := db.NewRunRepo(appDB.SQL())
-	projectOrchestratorRepo := db.NewProjectOrchestratorRepo(appDB.SQL())
-	workflowRepo := db.NewWorkflowRepo(appDB.SQL())
-	reviewRepo := db.NewReviewRepo(appDB.SQL())
-	knowledgeRepo := db.NewProjectKnowledgeRepo(appDB.SQL())
-	roleBindingRepo := db.NewRoleBindingRepo(appDB.SQL())
-	roleAgentAssignRepo := db.NewRoleAgentAssignmentRepo(appDB.SQL())
-	roleLoopAttemptRepo := db.NewRoleLoopAttemptRepo(appDB.SQL())
-
 	// --- Automation ---
 
 	autoCommitter := automation.NewAutoCommitter(automation.AutoCommitterConfig{
@@ -419,105 +407,8 @@ func main() {
 		}
 	})
 
-	// --- Ensure default orchestrator settings ---
+	// --- Event callbacks and automation runners ---
 
-	if projects, err := projectRepo.List(ctx, db.ProjectFilter{}); err == nil {
-		for _, p := range projects {
-			if p == nil {
-				continue
-			}
-			_ = projectOrchestratorRepo.EnsureDefaultForProject(ctx, p.ID)
-		}
-	}
-
-	// --- Orchestrator ---
-
-	toolClient := &orchestrator.RESTToolClient{
-		BaseURL:    fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
-		Token:      cfg.Token,
-		HTTPClient: &http.Client{Timeout: 60 * time.Second},
-	}
-
-	orchestratorInst := orchestrator.New(orchestrator.Options{
-		APIKey:                  cfg.LLMAPIKey,
-		Model:                   cfg.LLMModel,
-		AnthropicBaseURL:        cfg.LLMBaseURL,
-		APIToolBaseURL:          fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
-		APIToken:                cfg.Token,
-		Toolset:                 orchestrator.NewExecutionToolset(toolClient),
-		ProjectRepo:             projectRepo,
-		TaskRepo:                taskRepo,
-		WorktreeRepo:            worktreeRepo,
-		SessionRepo:             sessionRepo,
-		HistoryRepo:             historyRepo,
-		RunRepo:                 runRepo,
-		ProjectOrchestratorRepo: projectOrchestratorRepo,
-		WorkflowRepo:            workflowRepo,
-		ReviewRepo:              reviewRepo,
-		KnowledgeRepo:           knowledgeRepo,
-		RoleBindingRepo:         roleBindingRepo,
-		RoleAgentAssignRepo:     roleAgentAssignRepo,
-		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
-		Registry:                agentRegistry,
-		PlaybookRegistry:        playbookRegistry,
-		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
-		UserLanguage:            cfg.OrchestratorUserLanguage,
-	})
-	demandOrchestratorInst := orchestrator.New(orchestrator.Options{
-		APIKey:                  cfg.LLMAPIKey,
-		Model:                   cfg.LLMModel,
-		AnthropicBaseURL:        cfg.LLMBaseURL,
-		APIToolBaseURL:          fmt.Sprintf("http://127.0.0.1:%d", cfg.Port),
-		APIToken:                cfg.Token,
-		Toolset:                 orchestrator.NewDemandToolset(toolClient),
-		ProjectRepo:             projectRepo,
-		TaskRepo:                taskRepo,
-		WorktreeRepo:            worktreeRepo,
-		SessionRepo:             sessionRepo,
-		HistoryRepo:             historyRepo,
-		RunRepo:                 runRepo,
-		ProjectOrchestratorRepo: projectOrchestratorRepo,
-		WorkflowRepo:            workflowRepo,
-		ReviewRepo:              reviewRepo,
-		KnowledgeRepo:           knowledgeRepo,
-		RoleBindingRepo:         roleBindingRepo,
-		RoleAgentAssignRepo:     roleAgentAssignRepo,
-		RoleLoopAttemptRepo:     roleLoopAttemptRepo,
-		Registry:                agentRegistry,
-		PlaybookRegistry:        playbookRegistry,
-		GlobalMaxParallel:       cfg.OrchestratorGlobalMaxParallel,
-		UserLanguage:            cfg.OrchestratorUserLanguage,
-		Lane:                    "demand",
-	})
-
-	h.SetOnOrchestratorChat(func(ctx context.Context, projectID string, message string) (<-chan hub.OrchestratorServerMessage, error) {
-		stream, err := orchestratorInst.Chat(ctx, projectID, message)
-		if err != nil {
-			return nil, err
-		}
-		out := make(chan hub.OrchestratorServerMessage, 32)
-		go func() {
-			defer close(out)
-			for evt := range stream {
-				out <- hub.OrchestratorServerMessage{
-					Type:   evt.Type,
-					Text:   evt.Text,
-					Name:   evt.Name,
-					Args:   evt.Args,
-					Result: evt.Result,
-					Error:  evt.Error,
-				}
-			}
-		}()
-		return out, nil
-	})
-
-	// --- Event triggers and automation runners ---
-
-	eventTrigger := orchestrator.NewEventTrigger(orchestratorInst, sessionRepo, taskRepo, projectRepo, worktreeRepo)
-	eventTrigger.SetOnEvent(func(projectID string, event string, data map[string]any) {
-		h.BroadcastProjectEvent(projectID, event, data)
-	})
 	autoCommitter.SetOnReadyForReview(func(worktreeID string, commitHash string) {
 		callCtx, callCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer callCancel()
@@ -549,32 +440,13 @@ func main() {
 			"conflicted_files": files,
 		})
 	})
-	go eventTrigger.Start(ctx, 15*time.Second)
 	go autoCommitter.Run(ctx)
 	go coordinator.Run(ctx)
 	go mergeController.Run(ctx)
-	go func() {
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				projects, err := projectRepo.List(ctx, db.ProjectFilter{Status: "active"})
-				if err != nil {
-					continue
-				}
-				for _, project := range projects {
-					eventTrigger.OnTimer(project.ID)
-				}
-			}
-		}
-	}()
 
 	// --- Server ---
 
-	apiRouter := api.NewRouter(appDB.SQL(), lifecycleManager, h, orchestratorInst, demandOrchestratorInst, cfg.Token, agentRegistry, playbookRegistry)
+	apiRouter := api.NewRouter(appDB.SQL(), lifecycleManager, h, cfg.Token, agentRegistry, playbookRegistry)
 	srv, err := server.New(cfg, h, appDB.SQL(), apiRouter)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)

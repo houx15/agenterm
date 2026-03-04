@@ -10,67 +10,48 @@ import (
 
 	"github.com/user/agenterm/internal/db"
 	"github.com/user/agenterm/internal/hub"
-	"github.com/user/agenterm/internal/orchestrator"
 	"github.com/user/agenterm/internal/playbook"
 	"github.com/user/agenterm/internal/registry"
 	"github.com/user/agenterm/internal/session"
 )
 
 type handler struct {
-	projectRepo             *db.ProjectRepo
-	taskRepo                *db.TaskRepo
-	worktreeRepo            *db.WorktreeRepo
-	sessionRepo             *db.SessionRepo
-	sessionCommandRepo      *db.SessionCommandRepo
-	historyRepo             *db.OrchestratorHistoryRepo
-	projectOrchestratorRepo *db.ProjectOrchestratorRepo
-	workflowRepo            *db.WorkflowRepo
-	roleBindingRepo         *db.RoleBindingRepo
-	roleAgentAssignRepo     *db.RoleAgentAssignmentRepo
-	knowledgeRepo           *db.ProjectKnowledgeRepo
-	reviewRepo              *db.ReviewRepo
-	runRepo                 *db.RunRepo
-	demandPoolRepo          *db.DemandPoolRepo
-	registry                *registry.Registry
-	playbookRegistry        *playbook.Registry
-	lifecycle               *session.Manager
-	hub                     *hub.Hub
-	orchestrator            *orchestrator.Orchestrator
-	demandOrchestrator      *orchestrator.Orchestrator
-	asrTranscriber          asrTranscriber
+	projectRepo        *db.ProjectRepo
+	taskRepo           *db.TaskRepo
+	worktreeRepo       *db.WorktreeRepo
+	sessionRepo        *db.SessionRepo
+	sessionCommandRepo *db.SessionCommandRepo
+	knowledgeRepo      *db.ProjectKnowledgeRepo
+	reviewRepo         *db.ReviewRepo
+	runRepo            *db.RunRepo
+	demandPoolRepo     *db.DemandPoolRepo
+	registry           *registry.Registry
+	playbookRegistry   *playbook.Registry
+	lifecycle          *session.Manager
+	hub                *hub.Hub
+	asrTranscriber     asrTranscriber
 
 	outputMu    sync.Mutex
 	outputState map[string]*windowOutputState
-
-	exceptionMu       sync.Mutex
-	resolvedException map[string]map[string]bool
 }
 
-func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, orchestratorInst *orchestrator.Orchestrator, demandOrchestratorInst *orchestrator.Orchestrator, token string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
+func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, token string, agentRegistry *registry.Registry, playbookRegistry *playbook.Registry) http.Handler {
 	handler := &handler{
-		projectRepo:             db.NewProjectRepo(conn),
-		taskRepo:                db.NewTaskRepo(conn),
-		worktreeRepo:            db.NewWorktreeRepo(conn),
-		sessionRepo:             db.NewSessionRepo(conn),
-		sessionCommandRepo:      db.NewSessionCommandRepo(conn),
-		historyRepo:             db.NewOrchestratorHistoryRepo(conn),
-		projectOrchestratorRepo: db.NewProjectOrchestratorRepo(conn),
-		workflowRepo:            db.NewWorkflowRepo(conn),
-		roleBindingRepo:         db.NewRoleBindingRepo(conn),
-		roleAgentAssignRepo:     db.NewRoleAgentAssignmentRepo(conn),
-		knowledgeRepo:           db.NewProjectKnowledgeRepo(conn),
-		reviewRepo:              db.NewReviewRepo(conn),
-		runRepo:                 db.NewRunRepo(conn),
-		demandPoolRepo:          db.NewDemandPoolRepo(conn),
-		registry:                agentRegistry,
-		playbookRegistry:        playbookRegistry,
-		lifecycle:               lifecycle,
-		hub:                     hubInst,
-		orchestrator:            orchestratorInst,
-		demandOrchestrator:      demandOrchestratorInst,
-		asrTranscriber:          newVolcASRTranscriber(),
-		outputState:             make(map[string]*windowOutputState),
-		resolvedException:       make(map[string]map[string]bool),
+		projectRepo:        db.NewProjectRepo(conn),
+		taskRepo:           db.NewTaskRepo(conn),
+		worktreeRepo:       db.NewWorktreeRepo(conn),
+		sessionRepo:        db.NewSessionRepo(conn),
+		sessionCommandRepo: db.NewSessionCommandRepo(conn),
+		knowledgeRepo:      db.NewProjectKnowledgeRepo(conn),
+		reviewRepo:         db.NewReviewRepo(conn),
+		runRepo:            db.NewRunRepo(conn),
+		demandPoolRepo:     db.NewDemandPoolRepo(conn),
+		registry:           agentRegistry,
+		playbookRegistry:   playbookRegistry,
+		lifecycle:          lifecycle,
+		hub:                hubInst,
+		asrTranscriber:     newVolcASRTranscriber(),
+		outputState:        make(map[string]*windowOutputState),
 	}
 
 	mux := http.NewServeMux()
@@ -119,21 +100,8 @@ func NewRouter(conn *sql.DB, lifecycle *session.Manager, hubInst *hub.Hub, orche
 	mux.HandleFunc("PUT /api/playbooks/{id}", handler.updatePlaybook)
 	mux.HandleFunc("DELETE /api/playbooks/{id}", handler.deletePlaybook)
 	mux.HandleFunc("GET /api/fs/directories", handler.listDirectories)
-
-	mux.HandleFunc("POST /api/orchestrator/chat", handler.chatOrchestrator)
-	mux.HandleFunc("GET /api/orchestrator/history", handler.listOrchestratorHistory)
-	mux.HandleFunc("GET /api/orchestrator/report", handler.getOrchestratorReport)
-	mux.HandleFunc("POST /api/demand-orchestrator/chat", handler.chatDemandOrchestrator)
-	mux.HandleFunc("GET /api/demand-orchestrator/history", handler.listDemandOrchestratorHistory)
-	mux.HandleFunc("GET /api/demand-orchestrator/report", handler.getDemandOrchestratorReport)
 	mux.HandleFunc("POST /api/asr/transcribe", handler.transcribeASR)
-	mux.HandleFunc("GET /api/projects/{id}/orchestrator", handler.getProjectOrchestrator)
-	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator", handler.updateProjectOrchestrator)
-	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/preview", handler.previewProjectAssignments)
-	mux.HandleFunc("POST /api/projects/{id}/orchestrator/assignments/confirm", handler.confirmProjectAssignments)
-	mux.HandleFunc("GET /api/projects/{id}/orchestrator/assignments", handler.listProjectAssignments)
-	mux.HandleFunc("GET /api/projects/{id}/orchestrator/exceptions", handler.listProjectOrchestratorExceptions)
-	mux.HandleFunc("PATCH /api/projects/{id}/orchestrator/exceptions/{exception_id}", handler.resolveProjectOrchestratorException)
+
 	mux.HandleFunc("GET /api/projects/{id}/runs/current", handler.getCurrentProjectRun)
 	mux.HandleFunc("POST /api/projects/{id}/runs/{run_id}/transition", handler.transitionProjectRun)
 	mux.HandleFunc("GET /api/workflows", handler.listWorkflows)
