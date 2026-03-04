@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createAgent, deleteAgent, listAgents, updateAgent, getSettings, updateSettings } from '../api/client'
-import type { AgentConfig } from '../api/types'
-import { loadASRSettings, saveASRSettings } from '../settings/asr'
 import {
-  loadAppearanceSettings,
-  saveAppearanceSettings,
-  applyAppearanceToDOM,
-  type AppearanceSettings,
-} from '../settings/appearance'
+  createAgent,
+  deleteAgent,
+  listAgents,
+  updateAgent,
+  listPermissionTemplates,
+  createPermissionTemplate,
+  updatePermissionTemplate,
+  deletePermissionTemplate,
+  getToken,
+} from '../api/client'
+import type { AgentConfig } from '../api/types'
+import type { PermissionTemplate } from '../api/client'
 import Modal from './Modal'
 import { Plus, Trash2 } from './Lucide'
+
+// ---------------------------------------------------------------------------
+// Props & helpers
+// ---------------------------------------------------------------------------
 
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
-  onAppearanceChange?: (settings: AppearanceSettings) => void
 }
 
 type NoticeKind = 'success' | 'error'
@@ -39,61 +46,20 @@ const DEFAULT_AGENT: AgentConfig = {
 }
 
 function clampParallelAgents(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 1
-  }
+  if (!Number.isFinite(value)) return 1
   return Math.min(64, Math.max(1, Math.trunc(value)))
 }
 
-type SettingsTab = 'agents' | 'speech' | 'appearance'
+type SettingsTab = 'agents' | 'permissions' | 'general'
 
-const THEME_OPTIONS = [
-  { value: 'system', label: 'System' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'light', label: 'Light' },
-  { value: 'monokai', label: 'Monokai' },
-  { value: 'one-dark-pro', label: 'One Dark Pro' },
-]
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
-const LANGUAGE_OPTIONS = [
-  { value: 'en', label: 'English' },
-  { value: 'zh', label: 'Chinese (\u4e2d\u6587)' },
-  { value: 'ja', label: 'Japanese (\u65e5\u672c\u8a9e)' },
-  { value: 'ko', label: 'Korean (\ud55c\uad6d\uc5b4)' },
-  { value: 'es', label: 'Spanish (Espa\u00f1ol)' },
-  { value: 'fr', label: 'French (Fran\u00e7ais)' },
-  { value: 'de', label: 'German (Deutsch)' },
-  { value: 'ru', label: 'Russian (\u0420\u0443\u0441\u0441\u043a\u0438\u0439)' },
-]
-
-const FONT_LATIN_OPTIONS = [
-  { value: '', label: 'System Default' },
-  { value: 'Inter', label: 'Inter' },
-  { value: 'SF Pro Text', label: 'SF Pro Text' },
-  { value: 'Segoe UI', label: 'Segoe UI' },
-]
-
-const FONT_CJK_OPTIONS = [
-  { value: '', label: 'System Default' },
-  { value: 'PingFang SC', label: 'PingFang SC' },
-  { value: 'Noto Sans CJK SC', label: 'Noto Sans CJK SC' },
-  { value: 'Microsoft YaHei', label: 'Microsoft YaHei' },
-  { value: 'Hiragino Sans', label: 'Hiragino Sans' },
-]
-
-const FONT_TERMINAL_OPTIONS = [
-  { value: '', label: 'System Default' },
-  { value: 'SF Mono', label: 'SF Mono' },
-  { value: 'Fira Code', label: 'Fira Code' },
-  { value: 'JetBrains Mono', label: 'JetBrains Mono' },
-  { value: 'Cascadia Code', label: 'Cascadia Code' },
-  { value: 'Source Code Pro', label: 'Source Code Pro' },
-]
-
-export default function SettingsModal({ open, onClose, onAppearanceChange }: SettingsModalProps) {
+export default function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('agents')
 
-  // Agent registry state
+  // ── Agent Registry state ──
   const [agents, setAgents] = useState<AgentConfig[]>([])
   const [selectedID, setSelectedID] = useState('')
   const [draft, setDraft] = useState<AgentConfig>(DEFAULT_AGENT)
@@ -102,33 +68,31 @@ export default function SettingsModal({ open, onClose, onAppearanceChange }: Set
   const [notice, setNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
 
-  // ASR settings state
-  const [asrAppID, setAsrAppID] = useState('')
-  const [asrAccessKey, setAsrAccessKey] = useState('')
-  const [asrNotice, setAsrNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
-
-  // Appearance settings state
-  const [appearance, setAppearance] = useState<AppearanceSettings>(loadAppearanceSettings)
-  const [appearanceNotice, setAppearanceNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
+  // ── Permission Templates state ──
+  const [templates, setTemplates] = useState<PermissionTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [selectedTemplateID, setSelectedTemplateID] = useState('')
+  const [templateDraft, setTemplateDraft] = useState({ agent_type: '', name: '', config: '' })
+  const [templateNotice, setTemplateNotice] = useState<{ kind: NoticeKind; text: string } | null>(null)
+  const [templateBusy, setTemplateBusy] = useState(false)
+  const [templateDeleteConfirm, setTemplateDeleteConfirm] = useState(false)
 
   const isNew = selectedID === ''
+  const isNewTemplate = selectedTemplateID === ''
   const selectedAgent = useMemo(
     () => agents.find((item) => item.id === selectedID) ?? null,
     [agents, selectedID],
   )
 
+  // ── Load agents ──
   useEffect(() => {
-    if (!open) {
-      return
-    }
+    if (!open) return
     let cancelled = false
     const load = async () => {
       setLoading(true)
       try {
         const items = await listAgents<AgentConfig[]>()
-        if (cancelled) {
-          return
-        }
+        if (cancelled) return
         setAgents(items)
         if (items.length > 0) {
           setSelectedID(items[0].id)
@@ -142,62 +106,44 @@ export default function SettingsModal({ open, onClose, onAppearanceChange }: Set
           setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'Failed to load agents' })
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+        if (!cancelled) setLoading(false)
       }
     }
     void load()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [open])
 
-  // Load ASR settings when modal opens
+  // ── Load permission templates ──
   useEffect(() => {
     if (!open) return
-    const settings = loadASRSettings()
-    setAsrAppID(settings.appID)
-    setAsrAccessKey(settings.accessKey)
-    setAsrNotice(null)
-  }, [open])
-
-  // Load appearance settings when modal opens
-  useEffect(() => {
-    if (!open) return
-    setAppearance(loadAppearanceSettings())
-    setAppearanceNotice(null)
-    // Load server-side language setting
-    getSettings().then((s) => {
-      setAppearance((prev) => ({ ...prev, language: s.orchestrator_language || prev.language }))
-    }).catch(() => { /* ignore */ })
-  }, [open])
-
-  const saveASR = () => {
-    saveASRSettings({ appID: asrAppID.trim(), accessKey: asrAccessKey.trim() })
-    setAsrNotice({ kind: 'success', text: 'ASR settings saved.' })
-  }
-
-  const saveAppearance = async () => {
-    saveAppearanceSettings(appearance)
-    applyAppearanceToDOM(appearance)
-    onAppearanceChange?.(appearance)
-
-    // Sync language to server
-    try {
-      await updateSettings({ orchestrator_language: appearance.language })
-    } catch {
-      // Settings saved locally even if server sync fails
+    let cancelled = false
+    const load = async () => {
+      setTemplatesLoading(true)
+      try {
+        const items = await listPermissionTemplates()
+        if (cancelled) return
+        setTemplates(items)
+        if (items.length > 0) {
+          setSelectedTemplateID(items[0].id)
+          setTemplateDraft({ agent_type: items[0].agent_type, name: items[0].name, config: items[0].config })
+        } else {
+          setSelectedTemplateID('')
+          setTemplateDraft({ agent_type: '', name: '', config: '' })
+        }
+      } catch {
+        // non-critical
+      } finally {
+        if (!cancelled) setTemplatesLoading(false)
+      }
     }
+    void load()
+    return () => { cancelled = true }
+  }, [open])
 
-    setAppearanceNotice({ kind: 'success', text: 'Appearance settings saved.' })
-  }
-
+  // ── Agent handlers ──
   const selectAgent = (id: string) => {
     const found = agents.find((item) => item.id === id)
-    if (!found) {
-      return
-    }
+    if (!found) return
     setSelectedID(id)
     setDraft(found)
     setNotice(null)
@@ -212,18 +158,9 @@ export default function SettingsModal({ open, onClose, onAppearanceChange }: Set
   }
 
   const saveAgent = async () => {
-    if (!draft.id.trim()) {
-      setNotice({ kind: 'error', text: 'Agent ID is required.' })
-      return
-    }
-    if (!draft.name.trim()) {
-      setNotice({ kind: 'error', text: 'Agent name is required.' })
-      return
-    }
-    if (!draft.command.trim()) {
-      setNotice({ kind: 'error', text: 'Agent command is required.' })
-      return
-    }
+    if (!draft.id.trim()) { setNotice({ kind: 'error', text: 'Agent ID is required.' }); return }
+    if (!draft.name.trim()) { setNotice({ kind: 'error', text: 'Agent name is required.' }); return }
+    if (!draft.command.trim()) { setNotice({ kind: 'error', text: 'Agent command is required.' }); return }
 
     setBusy(true)
     setNotice(null)
@@ -250,9 +187,7 @@ export default function SettingsModal({ open, onClose, onAppearanceChange }: Set
   }
 
   const removeAgent = async () => {
-    if (!selectedID) {
-      return
-    }
+    if (!selectedID) return
     setBusy(true)
     setNotice(null)
     try {
@@ -275,406 +210,349 @@ export default function SettingsModal({ open, onClose, onAppearanceChange }: Set
     }
   }
 
+  // ── Permission template handlers ──
+  const selectTemplate = (id: string) => {
+    const found = templates.find((t) => t.id === id)
+    if (!found) return
+    setSelectedTemplateID(id)
+    setTemplateDraft({ agent_type: found.agent_type, name: found.name, config: found.config })
+    setTemplateNotice(null)
+    setTemplateDeleteConfirm(false)
+  }
+
+  const startNewTemplate = () => {
+    setSelectedTemplateID('')
+    setTemplateDraft({ agent_type: '', name: '', config: '{"allow": [], "deny": []}' })
+    setTemplateNotice(null)
+    setTemplateDeleteConfirm(false)
+  }
+
+  const saveTemplate = async () => {
+    if (!templateDraft.agent_type.trim()) { setTemplateNotice({ kind: 'error', text: 'Agent type is required.' }); return }
+    if (!templateDraft.name.trim()) { setTemplateNotice({ kind: 'error', text: 'Template name is required.' }); return }
+
+    setTemplateBusy(true)
+    setTemplateNotice(null)
+    try {
+      if (isNewTemplate) {
+        const created = await createPermissionTemplate({
+          agent_type: templateDraft.agent_type.trim(),
+          name: templateDraft.name.trim(),
+          config: templateDraft.config,
+        })
+        setTemplates((prev) => [...prev, created])
+        setSelectedTemplateID(created.id)
+      } else {
+        const updated = await updatePermissionTemplate(selectedTemplateID, {
+          agent_type: templateDraft.agent_type.trim(),
+          name: templateDraft.name.trim(),
+          config: templateDraft.config,
+        })
+        setTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      }
+      setTemplateNotice({ kind: 'success', text: 'Template saved.' })
+    } catch (err) {
+      setTemplateNotice({ kind: 'error', text: err instanceof Error ? err.message : 'Failed to save template' })
+    } finally {
+      setTemplateBusy(false)
+    }
+  }
+
+  const removeTemplate = async () => {
+    if (!selectedTemplateID) return
+    setTemplateBusy(true)
+    setTemplateNotice(null)
+    try {
+      await deletePermissionTemplate(selectedTemplateID)
+      const next = templates.filter((t) => t.id !== selectedTemplateID)
+      setTemplates(next)
+      if (next.length > 0) {
+        setSelectedTemplateID(next[0].id)
+        setTemplateDraft({ agent_type: next[0].agent_type, name: next[0].name, config: next[0].config })
+      } else {
+        setSelectedTemplateID('')
+        setTemplateDraft({ agent_type: '', name: '', config: '' })
+      }
+      setTemplateNotice({ kind: 'success', text: 'Template deleted.' })
+      setTemplateDeleteConfirm(false)
+    } catch (err) {
+      setTemplateNotice({ kind: 'error', text: err instanceof Error ? err.message : 'Failed to delete template' })
+    } finally {
+      setTemplateBusy(false)
+    }
+  }
+
+  // ── Render helpers ──
+  const renderNotice = (n: { kind: NoticeKind; text: string } | null) => {
+    if (!n) return null
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          padding: '0.45rem 0.7rem',
+          borderRadius: '8px',
+          fontSize: '0.85rem',
+          background: n.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
+          color: n.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
+        }}
+      >
+        {n.text}
+      </div>
+    )
+  }
+
   return (
     <Modal open={open} title="Settings" onClose={onClose}>
       <div className="modal-form">
         {/* Tab bar */}
         <div className="settings-tabs">
-          <button
-            className={`settings-tab ${activeTab === 'agents' ? 'active' : ''}`.trim()}
-            onClick={() => setActiveTab('agents')}
-            type="button"
-          >
-            Agent Registry
-          </button>
-          <button
-            className={`settings-tab ${activeTab === 'speech' ? 'active' : ''}`.trim()}
-            onClick={() => setActiveTab('speech')}
-            type="button"
-          >
-            Speech Recognition
-          </button>
-          <button
-            className={`settings-tab ${activeTab === 'appearance' ? 'active' : ''}`.trim()}
-            onClick={() => setActiveTab('appearance')}
-            type="button"
-          >
-            Appearance
-          </button>
+          {(['agents', 'permissions', 'general'] as SettingsTab[]).map((tab) => (
+            <button
+              key={tab}
+              className={`settings-tab ${activeTab === tab ? 'active' : ''}`.trim()}
+              onClick={() => setActiveTab(tab)}
+              type="button"
+            >
+              {tab === 'agents' ? 'Agent Registry' : tab === 'permissions' ? 'Permission Templates' : 'General'}
+            </button>
+          ))}
         </div>
 
-        {/* Appearance tab */}
-        {activeTab === 'appearance' && (
-          <div className="settings-editor" style={{ maxWidth: '480px' }}>
-            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              Customize theme, fonts, and orchestrator language.
-            </p>
-            {appearanceNotice && (
-              <div
-                role="status"
-                aria-live="polite"
-                style={{
-                  padding: '0.45rem 0.7rem',
-                  borderRadius: '8px',
-                  fontSize: '0.85rem',
-                  marginBottom: '8px',
-                  background: appearanceNotice.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
-                  color: appearanceNotice.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
-                }}
-              >
-                {appearanceNotice.text}
-              </div>
-            )}
-            <label>
-              Theme
-              <select
-                value={appearance.theme}
-                onChange={(e) => setAppearance((prev) => ({ ...prev, theme: e.target.value }))}
-              >
-                {THEME_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Orchestrator Language
-              <select
-                value={appearance.language}
-                onChange={(e) => setAppearance((prev) => ({ ...prev, language: e.target.value }))}
-              >
-                {LANGUAGE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              UI Font (Latin)
-              <select
-                value={appearance.fontLatin}
-                onChange={(e) => setAppearance((prev) => ({ ...prev, fontLatin: e.target.value }))}
-              >
-                {FONT_LATIN_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              UI Font (CJK)
-              <select
-                value={appearance.fontCJK}
-                onChange={(e) => setAppearance((prev) => ({ ...prev, fontCJK: e.target.value }))}
-              >
-                {FONT_CJK_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Terminal Font
-              <select
-                value={appearance.fontTerminal}
-                onChange={(e) => setAppearance((prev) => ({ ...prev, fontTerminal: e.target.value }))}
-              >
-                {FONT_TERMINAL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Terminal Font Size
-              <input
-                type="number"
-                min={12}
-                max={20}
-                value={appearance.terminalFontSize}
-                onChange={(e) =>
-                  setAppearance((prev) => ({
-                    ...prev,
-                    terminalFontSize: Math.min(20, Math.max(12, Number(e.target.value) || 13)),
-                  }))
-                }
-              />
-            </label>
-            <div className="settings-actions">
-              <button className="btn btn-primary" onClick={() => void saveAppearance()} type="button">
-                Save
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Speech Recognition tab */}
-        {activeTab === 'speech' && (
-          <div className="settings-editor" style={{ maxWidth: '480px' }}>
-            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              Configure Volcengine ASR credentials for speech-to-text input.
-            </p>
-            {asrNotice && (
-              <div
-                role="status"
-                aria-live="polite"
-                style={{
-                  padding: '0.45rem 0.7rem',
-                  borderRadius: '8px',
-                  fontSize: '0.85rem',
-                  marginBottom: '8px',
-                  background: asrNotice.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
-                  color: asrNotice.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
-                }}
-              >
-                {asrNotice.text}
-              </div>
-            )}
-            <label>
-              App ID
-              <input
-                value={asrAppID}
-                onChange={(e) => setAsrAppID(e.target.value)}
-                placeholder="Your Volcengine ASR App ID"
-              />
-            </label>
-            <label>
-              Access Key
-              <input
-                type="password"
-                value={asrAccessKey}
-                onChange={(e) => setAsrAccessKey(e.target.value)}
-                placeholder="Your Volcengine ASR Access Key"
-              />
-            </label>
-            <div className="settings-actions">
-              <button className="btn btn-primary" onClick={saveASR} type="button">
-                Save
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Agent Registry tab */}
+        {/* ── Agent Registry Tab ── */}
         {activeTab === 'agents' && (
           <>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-            Register local TUIs with one-line specs. Orchestrator picks workers from this list.
-          </p>
-          <button className="btn btn-primary" onClick={startNewAgent} type="button">
-            <Plus size={14} />
-            <span>New Agent</span>
-          </button>
-        </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                Register CLI agents. The orchestrator picks workers from this list.
+              </p>
+              <button className="btn btn-primary" onClick={startNewAgent} type="button">
+                <Plus size={14} />
+                <span>New Agent</span>
+              </button>
+            </div>
 
-        {notice ? (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              padding: '0.45rem 0.7rem',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              background: notice.kind === 'success' ? 'var(--success-bg, #e8f5e9)' : 'var(--error-bg, #fdecea)',
-              color: notice.kind === 'success' ? 'var(--success, #2e7d32)' : 'var(--error, #c62828)',
-            }}
-          >
-            {notice.text}
-          </div>
-        ) : null}
+            {renderNotice(notice)}
 
-        {loading ? (
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading agents...</p>
-        ) : (
-          <div className="settings-grid">
-            <aside className="settings-list">
-              {isNew ? (
-                <button type="button" className="session-row active">
-                  <strong>{draft.name.trim() || 'New Agent (Draft)'}</strong>
-                  <small>{draft.id.trim() || 'unsaved'}</small>
-                </button>
-              ) : null}
-              {agents.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`session-row ${item.id === selectedID ? 'active' : ''}`.trim()}
-                  onClick={() => selectAgent(item.id)}
-                >
-                  <strong>{item.name}</strong>
-                  <small>{item.id}</small>
-                </button>
-              ))}
-            </aside>
+            {loading ? (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading agents...</p>
+            ) : (
+              <div className="settings-grid">
+                <aside className="settings-list">
+                  {isNew && (
+                    <button type="button" className="session-row active">
+                      <strong>{draft.name.trim() || 'New Agent (Draft)'}</strong>
+                      <small>{draft.id.trim() || 'unsaved'}</small>
+                    </button>
+                  )}
+                  {agents.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`session-row ${item.id === selectedID ? 'active' : ''}`.trim()}
+                      onClick={() => selectAgent(item.id)}
+                    >
+                      <strong>{item.name}</strong>
+                      <small>{item.id}</small>
+                    </button>
+                  ))}
+                </aside>
 
-            <div className="settings-editor">
-              <label>
-                Agent ID
-                <input
-                  value={draft.id}
-                  disabled={!isNew}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, id: event.target.value.trim().toLowerCase() }))
-                  }
-                  placeholder="codex-worker"
-                />
-              </label>
-
-              <label>
-                Display Name
-                <input
-                  value={draft.name}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Codex Worker"
-                />
-              </label>
-
-              <label>
-                One-line Spec
-                <input
-                  value={draft.notes ?? ''}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                  placeholder="TypeScript full-stack, strong reviewer, prefers repo-wide refactors."
-                />
-              </label>
-
-              <label>
-                Start Command
-                <textarea
-                  rows={3}
-                  value={draft.command}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, command: event.target.value }))}
-                  placeholder={`cd {worktree_path}\nclaude --dangerously-skip-permissions`}
-                />
-              </label>
-
-              <label>
-                Session Model (optional)
-                <input
-                  value={draft.model ?? ''}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, model: event.target.value }))}
-                  placeholder="claude-sonnet-4-5 / gpt-5-codex"
-                />
-              </label>
-
-              <label>
-                Max Parallel Instances
-                <input
-                  type="number"
-                  min={1}
-                  max={64}
-                  value={draft.max_parallel_agents ?? 1}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      max_parallel_agents: clampParallelAgents(Number(event.target.value || 1)),
-                    }))
-                  }
-                />
-              </label>
-
-              <label className="settings-field-checkbox">
-                <span>Can be used as orchestrator model</span>
-                <input
-                  type="checkbox"
-                  checked={!!draft.supports_orchestrator}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      supports_orchestrator: event.target.checked,
-                      orchestrator_provider: prev.orchestrator_provider || 'anthropic',
-                    }))
-                  }
-                />
-              </label>
-
-              {draft.supports_orchestrator ? (
-                <>
+                <div className="settings-editor">
                   <label>
-                    Orchestrator Provider
-                    <select
-                      value={draft.orchestrator_provider ?? 'anthropic'}
-                      onChange={(event) =>
+                    Agent ID
+                    <input
+                      value={draft.id}
+                      disabled={!isNew}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, id: e.target.value.trim().toLowerCase() }))}
+                      placeholder="codex-worker"
+                    />
+                  </label>
+                  <label>
+                    Display Name
+                    <input
+                      value={draft.name}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="Codex Worker"
+                    />
+                  </label>
+                  <label>
+                    One-line Spec
+                    <input
+                      value={draft.notes ?? ''}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, notes: e.target.value }))}
+                      placeholder="TypeScript full-stack, strong reviewer."
+                    />
+                  </label>
+                  <label>
+                    Start Command
+                    <textarea
+                      rows={3}
+                      value={draft.command}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, command: e.target.value }))}
+                      placeholder={'cd {worktree_path}\nclaude --dangerously-skip-permissions'}
+                    />
+                  </label>
+                  <label>
+                    Max Parallel Instances
+                    <input
+                      type="number"
+                      min={1}
+                      max={64}
+                      value={draft.max_parallel_agents ?? 1}
+                      onChange={(e) =>
                         setDraft((prev) => ({
                           ...prev,
-                          orchestrator_provider: event.target.value as 'anthropic' | 'openai',
+                          max_parallel_agents: clampParallelAgents(Number(e.target.value || 1)),
                         }))
                       }
-                    >
-                      <option value="anthropic">anthropic</option>
-                      <option value="openai">openai</option>
-                    </select>
-                  </label>
-                  <label>
-                    Orchestrator API Endpoint
-                    <input
-                      value={draft.orchestrator_api_base ?? ''}
-                      onChange={(event) =>
-                        setDraft((prev) => ({ ...prev, orchestrator_api_base: event.target.value }))
-                      }
-                      placeholder="https://api.anthropic.com/v1/messages"
                     />
                   </label>
-                  <label>
-                    Orchestrator API Key
-                    <input
-                      type="password"
-                      value={draft.orchestrator_api_key ?? ''}
-                      onChange={(event) =>
-                        setDraft((prev) => ({ ...prev, orchestrator_api_key: event.target.value }))
-                      }
-                      placeholder="sk-..."
-                    />
-                  </label>
-                </>
-              ) : null}
 
-              <div className="settings-actions">
-                <button
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={() => void saveAgent()}
-                  type="button"
-                >
-                  Save Agent
-                </button>
-                {!isNew ? (
-                  deleteConfirm ? (
-                    <>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        Delete <strong>{selectedAgent?.name}</strong>?
-                      </span>
-                      <button
-                        className="btn btn-danger"
-                        disabled={busy}
-                        onClick={() => void removeAgent()}
-                        type="button"
-                      >
-                        <Trash2 size={14} />
-                        <span>Confirm</span>
-                      </button>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={busy}
-                        onClick={() => setDeleteConfirm(false)}
-                        type="button"
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btn btn-ghost"
-                      disabled={busy}
-                      onClick={() => setDeleteConfirm(true)}
-                      type="button"
-                    >
-                      <Trash2 size={14} />
-                      <span>Delete</span>
+                  <div className="settings-actions">
+                    <button className="btn btn-primary" disabled={busy} onClick={() => void saveAgent()} type="button">
+                      Save Agent
                     </button>
-                  )
-                ) : null}
+                    {!isNew && (
+                      deleteConfirm ? (
+                        <>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Delete <strong>{selectedAgent?.name}</strong>?
+                          </span>
+                          <button className="btn btn-danger" disabled={busy} onClick={() => void removeAgent()} type="button">
+                            <Trash2 size={14} /> <span>Confirm</span>
+                          </button>
+                          <button className="btn btn-ghost" disabled={busy} onClick={() => setDeleteConfirm(false)} type="button">
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-ghost" disabled={busy} onClick={() => setDeleteConfirm(true)} type="button">
+                          <Trash2 size={14} /> <span>Delete</span>
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
           </>
+        )}
+
+        {/* ── Permission Templates Tab ── */}
+        {activeTab === 'permissions' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                Define allowed and denied commands per agent type.
+              </p>
+              <button className="btn btn-primary" onClick={startNewTemplate} type="button">
+                <Plus size={14} />
+                <span>New Template</span>
+              </button>
+            </div>
+
+            {renderNotice(templateNotice)}
+
+            {templatesLoading ? (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading templates...</p>
+            ) : (
+              <div className="settings-grid">
+                <aside className="settings-list">
+                  {isNewTemplate && (
+                    <button type="button" className="session-row active">
+                      <strong>{templateDraft.name.trim() || 'New Template (Draft)'}</strong>
+                      <small>{templateDraft.agent_type.trim() || 'unsaved'}</small>
+                    </button>
+                  )}
+                  {templates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`session-row ${t.id === selectedTemplateID ? 'active' : ''}`.trim()}
+                      onClick={() => selectTemplate(t.id)}
+                    >
+                      <strong>{t.name}</strong>
+                      <small>{t.agent_type}</small>
+                    </button>
+                  ))}
+                </aside>
+
+                <div className="settings-editor">
+                  <label>
+                    Agent Type
+                    <input
+                      value={templateDraft.agent_type}
+                      onChange={(e) => setTemplateDraft((prev) => ({ ...prev, agent_type: e.target.value }))}
+                      placeholder="claude-code"
+                    />
+                  </label>
+                  <label>
+                    Template Name
+                    <input
+                      value={templateDraft.name}
+                      onChange={(e) => setTemplateDraft((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="Standard permissions"
+                    />
+                  </label>
+                  <label>
+                    Config (JSON)
+                    <textarea
+                      rows={8}
+                      value={templateDraft.config}
+                      onChange={(e) => setTemplateDraft((prev) => ({ ...prev, config: e.target.value }))}
+                      placeholder='{"allow": ["git *", "npm *"], "deny": ["rm -rf *", "sudo *"]}'
+                      style={{ fontFamily: 'monospace' }}
+                    />
+                  </label>
+
+                  <div className="settings-actions">
+                    <button className="btn btn-primary" disabled={templateBusy} onClick={() => void saveTemplate()} type="button">
+                      Save Template
+                    </button>
+                    {!isNewTemplate && (
+                      templateDeleteConfirm ? (
+                        <>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Delete this template?</span>
+                          <button className="btn btn-danger" disabled={templateBusy} onClick={() => void removeTemplate()} type="button">
+                            <Trash2 size={14} /> <span>Confirm</span>
+                          </button>
+                          <button className="btn btn-ghost" disabled={templateBusy} onClick={() => setTemplateDeleteConfirm(false)} type="button">
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-ghost" disabled={templateBusy} onClick={() => setTemplateDeleteConfirm(true)} type="button">
+                          <Trash2 size={14} /> <span>Delete</span>
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── General Tab ── */}
+        {activeTab === 'general' && (
+          <div className="settings-editor" style={{ maxWidth: '480px' }}>
+            <p style={{ margin: '0 0 12px', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              General application settings.
+            </p>
+            <label>
+              Auth Token
+              <input
+                value={getToken()}
+                readOnly
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                style={{ fontFamily: 'monospace', cursor: 'pointer' }}
+              />
+            </label>
+            <p style={{ margin: '4px 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+              Click to select. This token authenticates the frontend with the backend.
+            </p>
+          </div>
         )}
       </div>
     </Modal>
